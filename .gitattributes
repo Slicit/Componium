@@ -1,0 +1,9 @@
+# Normalise everything to LF in the repository.
+# Windows checkouts otherwise reintroduce CRLF, which breaks shell scripts and
+# firmware build steps on the Debian box.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.wav binary
+*.bin binary

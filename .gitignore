@@ -1,0 +1,21 @@
+# Go
+/bin/
+*.test
+*.out
+
+# Node / studio
+node_modules/
+dist/
+.vite/
+
+# Firmware
+.pio/
+build/
+
+# Local rig configuration and captured media - never commit
+/rig.local.toml
+/scores/local/
+*.mkv
+*.mp4
+
+.DS_Store
