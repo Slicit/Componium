@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { TimeView, ticks } from '../core/view';
-import { layout, type Layout } from '../core/layout';
+import { canCollapse, layout, summaryLabel, type Layout } from '../core/layout';
 import { timecode } from '../core/time';
 import { channelsOf, type Rig, type Score } from '../core/score';
 import { DrawList, paint } from '../render/drawlist';
@@ -37,17 +37,26 @@ export interface TimelineProps {
   /** Called whenever the view is panned or zoomed, so React can re-render. */
   onView: () => void;
   edit: Editing;
+  /**
+   * Bumped whenever the document changes structurally.
+   *
+   * The score object is mutated in place by commands, so its identity never
+   * changes and a memo keyed on it alone never recomputes. Value edits still
+   * drew, because the canvas re-reads the data every frame; adding or removing
+   * a track or a point changes the *rows*, and those were silently stale.
+   */
+  revision: number;
 }
 
 export function Timeline(props: TimelineProps) {
-  const { score, rig, view, time, collapsed, order, onView, edit } = props;
+  const { score, rig, view, time, collapsed, order, onView, edit, revision } = props;
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const size = useRef({ w: 0, h: 0 });
 
   const lay: Layout = useMemo(
     () => layout(score.tracks ?? [], { collapsed, rig, order }),
-    [score, collapsed, rig, order],
+    [score, collapsed, rig, order, revision],
   );
   const fps = score.fps ?? 24;
 
@@ -224,11 +233,14 @@ export function TrackHeads(props: {
   order: string[];
   onToggleCollapse: (instrument: string) => void;
   onMove: (instrument: string, by: number) => void;
+  /** Null when the rig has nothing left to add. */
+  onAddTrack: ((e: React.MouseEvent) => void) | null;
+  revision: number;
 }) {
-  const { score, rig, collapsed, order, onToggleCollapse, onMove } = props;
+  const { score, rig, collapsed, order, onToggleCollapse, onMove, onAddTrack, revision } = props;
   const lay = useMemo(
     () => layout(score.tracks ?? [], { collapsed, rig, order }),
-    [score, collapsed, rig, order],
+    [score, collapsed, rig, order, revision],
   );
 
   return (
@@ -241,21 +253,32 @@ export function TrackHeads(props: {
         >
           {row.head ? (
             <>
-              <button
-                className="tl-chev"
-                onClick={() => onToggleCollapse(row.instrument)}
-                title={collapsed.has(row.instrument) ? 'Expand' : 'Collapse'}
-                aria-label={collapsed.has(row.instrument) ? 'Expand' : 'Collapse'}
-              >
-                {score.tracks[row.track].type === 'curve'
-                  ? (collapsed.has(row.instrument) ? '▸' : '▾')
-                  : '·'}
-              </button>
+              {/* A chevron only where folding means something. A single
+                  channel track has nothing to fold into, and a control that
+                  only changes a row's height is a control that lies about
+                  having an effect. */}
+              {canCollapse(score.tracks[row.track], rig) ? (
+                <button
+                  className="tl-chev"
+                  onClick={() => onToggleCollapse(row.instrument)}
+                  title={collapsed.has(row.instrument) ? 'Expand channels' : 'Collapse channels'}
+                  aria-label={collapsed.has(row.instrument) ? 'Expand channels' : 'Collapse channels'}
+                  aria-expanded={!collapsed.has(row.instrument)}
+                >
+                  {collapsed.has(row.instrument) ? '▶' : '▼'}
+                </button>
+              ) : <span className="tl-chev-gap" />}
+
               <span className="tl-name" title={row.instrument}>{row.instrument}</span>
-              {/* The head row of an expanded curve is also a channel lane, so
-                  it needs its channel named too. Without this the first lane —
-                  red, always — is the one lane with no label on it. */}
-              {row.channel && <span className={'tl-chan inline ch-' + row.channel}>{row.channel}</span>}
+
+              {/* What the compound row is showing, when there is one. */}
+              {!row.editable && (
+                <span className="tl-summary">{summaryLabel(score.tracks[row.track], rig)}</span>
+              )}
+              {row.channel && row.editable && (
+                <span className={'tl-chan inline ch-' + row.channel}>{row.channel}</span>
+              )}
+
               <span className="tl-move">
                 <button onClick={() => onMove(row.instrument, -1)} title="Move up" aria-label="Move up">↑</button>
                 <button onClick={() => onMove(row.instrument, 1)} title="Move down" aria-label="Move down">↓</button>
@@ -266,6 +289,19 @@ export function TrackHeads(props: {
           )}
         </div>
       ))}
+
+      {/* Always present rather than hidden behind a right click on empty
+          space: the canvas is exactly as tall as its rows, so there is no
+          empty space to click and the action would be unreachable. */}
+      {onAddTrack && (
+        <button
+          className="tl-add"
+          onClick={onAddTrack}
+          title="Add a track for an instrument the rig has and the score does not"
+        >
+          + Add track
+        </button>
+      )}
     </div>
   );
 }

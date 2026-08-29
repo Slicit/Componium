@@ -14,8 +14,9 @@ import { Overview } from './ui/Overview';
 import { useEditing } from './ui/useEditing';
 import { History } from './core/history';
 import { Menu } from './ui/Menu';
+import { canCollapse } from './core/layout';
 import { menuFor } from './ui/menuItems';
-import { copy, nudge, paste, splitCue, duplicateCues, type Clip } from './core/edits';
+import { addTrack, copy, missingInstruments, nudge, paste, splitCue, duplicateCues, type Clip } from './core/edits';
 import type { Cue, Point } from './core/score';
 
 interface Film { name: string; size: number; preview?: boolean }
@@ -41,6 +42,7 @@ export function App() {
   /* Shuttle speed, in the J/K/L sense: negative is backwards, and repeated
    * presses multiply rather than step, which is what makes it a shuttle. */
   const [shuttle, setShuttle] = useState(0);
+  const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
   /* useEditing needs to seek, seek needs the view, and the view is built
    * below. A ref breaks the cycle without either of them knowing about the
    * other's lifetime. */
@@ -395,6 +397,10 @@ export function App() {
             order={order}
             onToggleCollapse={toggleCollapse}
             onMove={move}
+            revision={history.version}
+            onAddTrack={missingInstruments(score, rig).length
+              ? (e) => setAddMenu({ x: e.clientX, y: e.clientY })
+              : null}
           />
           <Timeline
             score={score}
@@ -406,6 +412,7 @@ export function App() {
             onSeek={seek}
             onView={onView}
             edit={edit}
+            revision={history.version}
           />
         </div>
         {/* Indented to sit under the lanes rather than under the whole panel,
@@ -413,6 +420,26 @@ export function App() {
         <div className="tl-under">
           <Overview score={score} rig={rig} view={view} time={time} onView={onView} />
         </div>
+        {addMenu && (
+          <Menu
+            x={addMenu.x}
+            y={addMenu.y}
+            onClose={() => setAddMenu(null)}
+            items={[
+              { label: 'Add a track', why: 'instruments the rig has that this score does not' },
+              { separator: true },
+              ...missingInstruments(score, rig).map((inst) => ({
+                label: inst.id,
+                key: inst.kind,
+                run: () => {
+                  history.run(addTrack(score, inst));
+                  history.seal();
+                  onView();
+                },
+              })),
+            ]}
+          />
+        )}
         {edit.menu && (
           <Menu
             x={edit.menu.x}
@@ -429,6 +456,7 @@ export function App() {
               seek,
               zoomTo: (a, b) => { view.zoomTo(a, b); onView(); },
               toggleCollapse,
+              canCollapse: (t) => canCollapse(t, rig),
             })}
           />
         )}

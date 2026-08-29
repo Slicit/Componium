@@ -20,12 +20,22 @@ export interface Row {
   /** Index into score.tracks. */
   track: number;
   instrument: string;
-  /** A channel lane names its channel; a group row does not. */
+  /** A channel lane names its channel; a summary row does not. */
   channel?: string;
   /** True for the row that carries the instrument's name and controls. */
   head: boolean;
   /** How this row should be drawn. */
   draw: 'cues' | 'curve' | 'ribbon' | 'envelope';
+  /**
+   * False for the compound row of a multi-channel track.
+   *
+   * That row shows what the channels add up to — the colour a light actually
+   * makes — which is a reading of three values rather than a value in its own
+   * right. There is nothing there to drag: moving "the colour" up has no
+   * single meaning. So it is drawn and never edited, and the channels beneath
+   * it are where the editing happens.
+   */
+  editable: boolean;
   y: number;
   h: number;
 }
@@ -77,38 +87,70 @@ export function layout(tracks: Track[], opts: LayoutOptions): Layout {
     if (track.type !== 'curve') {
       rows.push({
         track: ti, instrument: track.instrument, head: true,
-        draw: 'cues', y, h: ROW_CUE,
+        draw: 'cues', editable: true, y, h: ROW_CUE,
       });
       y += ROW_CUE;
       continue;
     }
 
     const channels = channelsOf(track, opts.rig);
-    const isColour = channels.length > 1 && channels.every((c) => 'rgb'.includes(c));
 
-    if (opts.collapsed.has(track.instrument)) {
+    /* A single-channel curve has nothing to collapse *into*: its one lane is
+     * already the whole story, and offering to fold it would be a control that
+     * changes the row height and nothing else. */
+    if (channels.length < 2) {
       rows.push({
-        track: ti, instrument: track.instrument, head: true,
-        /* A colour track collapses to the colour it actually makes, which
-         * says more about a look than three value graphs do. Everything else
-         * collapses to its amplitude envelope. */
-        draw: isColour ? 'ribbon' : 'envelope',
-        y, h: ROW_COLLAPSED,
+        track: ti, instrument: track.instrument, channel: channels[0],
+        head: true, draw: 'curve', editable: true, y, h: ROW_CHANNEL,
       });
-      y += ROW_COLLAPSED;
+      y += ROW_CHANNEL;
       continue;
     }
 
-    channels.forEach((channel, i) => {
+    /* A colour track's compound view is the colour it actually makes, which
+     * says more about a look than three value graphs do. Everything else
+     * compounds to its amplitude envelope. */
+    const summary = channels.every((c) => 'rgb'.includes(c)) ? 'ribbon' as const : 'envelope' as const;
+
+    rows.push({
+      track: ti, instrument: track.instrument, head: true,
+      draw: summary, editable: false, y, h: ROW_COLLAPSED,
+    });
+    y += ROW_COLLAPSED;
+
+    /* Expanded keeps that compound row and adds the channels beneath it, so
+     * the first lane is never secretly red: the row carrying the instrument's
+     * name shows the instrument, and every channel gets a row of its own with
+     * its own label. */
+    if (opts.collapsed.has(track.instrument)) continue;
+
+    for (const channel of channels) {
       rows.push({
         track: ti, instrument: track.instrument, channel,
-        head: i === 0, draw: 'curve', y, h: ROW_CHANNEL,
+        head: false, draw: 'curve', editable: true, y, h: ROW_CHANNEL,
       });
       y += ROW_CHANNEL;
-    });
+    }
   }
 
   return { rows, height: y };
+}
+
+/**
+ * Whether folding this track means anything.
+ *
+ * Only multi-channel curves. Everything else already shows all it has, and a
+ * chevron on it would be a control that does nothing but change a height.
+ */
+export function canCollapse(track: Track, rig?: Rig | null): boolean {
+  return track.type === 'curve' && channelsOf(track, rig).length > 1;
+}
+
+/** What the compound row of a track is called. */
+export function summaryLabel(track: Track, rig?: Rig | null): string {
+  const channels = channelsOf(track, rig);
+  if (channels.every((c) => 'rgb'.includes(c))) return 'colour';
+  return 'all';
 }
 
 /** Which row a y coordinate is in, or null above or below everything. */

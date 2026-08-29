@@ -39,6 +39,9 @@ export function hitTest(ctx: HitContext, x: number, y: number): Hit {
   const track = ctx.score.tracks[row.track];
   const localY = y - rulerH - row.y;
 
+  /* A compound row is a reading, not a value: nothing on it can be grabbed. */
+  if (!row.editable) return { k: 'lane', row, t: view.fromX(x, width) };
+
   if (row.draw === 'cues') {
     const hit = hitCue(track.cues ?? [], view, width, x);
     if (hit) return { k: 'cue', row, ...hit };

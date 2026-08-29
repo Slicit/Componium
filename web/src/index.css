@@ -269,3 +269,68 @@ button:hover { border-color: #3a4553; }
 .menu-sep { height: 1px; background: var(--line); margin: 3px 6px; }
 
 .shuttle { color: var(--accent); font-family: var(--mono); }
+
+/* --- bigger track controls ---------------------------------------------
+ *
+ * These are the controls reached for most often, and a 14px glyph is a dare
+ * rather than a button. Appended so they win over the earlier rules by order
+ * at the same specificity.
+ */
+.tl-chev {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  padding: 0;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  font-size: 10px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tl-chev:hover { color: var(--ink); border-color: #3a4553; background: var(--surface-2); }
+/* Keeps the names aligned when a track has no chevron to show. */
+.tl-chev-gap { width: 22px; flex: 0 0 22px; }
+
+/* What the compound row is a compound of. */
+.tl-summary {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-left: auto;
+  padding-right: 4px;
+}
+
+.tl-move { gap: 3px; opacity: 0.5; }
+.tl-move button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--muted);
+}
+.tl-move button:hover { color: var(--ink); border-color: #3a4553; }
+
+.tl-add {
+  display: block;
+  width: calc(100% - 12px);
+  margin: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  text-align: left;
+  color: var(--muted);
+  background: transparent;
+  border: 1px dashed var(--line);
+}
+.tl-add:hover { color: var(--accent); border-color: #4a3a1c; border-style: solid; }

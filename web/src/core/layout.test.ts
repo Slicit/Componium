@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { layout, orderTracks, rowAt, ROW_CUE, ROW_CHANNEL, ROW_COLLAPSED } from './layout';
+import {
+  layout, orderTracks, rowAt, canCollapse, summaryLabel,
+  ROW_CUE, ROW_CHANNEL, ROW_COLLAPSED,
+} from './layout';
 import type { Track } from './score';
 
 const tracks: Track[] = [
@@ -17,11 +20,31 @@ const tracks: Track[] = [
 const open = () => layout(tracks, { collapsed: new Set() });
 
 describe('rows', () => {
-  it('gives a cue track one row and a colour curve one per channel', () => {
+  /* A multi-channel curve is a compound row *plus* its channels, not a first
+   * channel wearing the instrument's name. The old layout made red the head
+   * row, so the timeline's first light lane was secretly r and was the one
+   * lane with no label. */
+  it('gives a colour curve a compound row and one per channel', () => {
     const l = open();
-    expect(l.rows.filter((r) => r.instrument === 'wind.main').length).toBe(1);
-    expect(l.rows.filter((r) => r.instrument === 'light.ambient').length).toBe(3);
-    expect(l.rows.filter((r) => r.instrument === 'shake.seat').length).toBe(1);
+    const rows = l.rows.filter((r) => r.instrument === 'light.ambient');
+    expect(rows.length).toBe(4);
+    expect(rows[0].head).toBe(true);
+    expect(rows[0].channel).toBeUndefined();
+    expect(rows[0].draw).toBe('ribbon');
+    expect(rows.slice(1).map((r) => r.channel)).toEqual(['r', 'g', 'b']);
+  });
+
+  it('gives a cue track one row', () => {
+    expect(open().rows.filter((r) => r.instrument === 'wind.main').length).toBe(1);
+  });
+
+  /* One channel has nothing to compound, so it gets one row and no ceremony. */
+  it('gives a single-channel curve exactly one row, which is editable', () => {
+    const rows = open().rows.filter((r) => r.instrument === 'shake.seat');
+    expect(rows.length).toBe(1);
+    expect(rows[0].head).toBe(true);
+    expect(rows[0].channel).toBe('intensity');
+    expect(rows[0].editable).toBe(true);
   });
 
   it('stacks rows without gaps or overlaps', () => {
@@ -35,37 +58,68 @@ describe('rows', () => {
   });
 
   it('names the instrument once per group, on its first row', () => {
-    const l = open();
-    const heads = l.rows.filter((r) => r.head).map((r) => r.instrument);
+    const heads = open().rows.filter((r) => r.head).map((r) => r.instrument);
     expect(heads).toEqual(['wind.main', 'light.ambient', 'shake.seat']);
   });
+});
 
-  it('puts red first so lanes never reorder between films', () => {
+describe('what can be edited', () => {
+  /* The compound row shows what the channels add up to. There is nothing on it
+   * to drag — moving "the colour" up has no single meaning — so it is drawn
+   * and never edited. */
+  it('marks the compound row as not editable', () => {
     const l = open();
-    const chans = l.rows.filter((r) => r.instrument === 'light.ambient').map((r) => r.channel);
-    expect(chans).toEqual(['r', 'g', 'b']);
+    const compound = l.rows.find((r) => r.instrument === 'light.ambient' && !r.channel)!;
+    expect(compound.editable).toBe(false);
+  });
+
+  it('marks every channel lane editable', () => {
+    const l = open();
+    for (const r of l.rows.filter((x) => x.channel)) expect(r.editable).toBe(true);
   });
 });
 
 describe('collapsing', () => {
-  it('turns a colour curve into one ribbon row', () => {
+  it('is offered only where folding means something', () => {
+    expect(canCollapse(tracks[1])).toBe(true);
+    expect(canCollapse(tracks[2])).toBe(false);
+    expect(canCollapse(tracks[0])).toBe(false);
+  });
+
+  it('leaves the compound row and drops the channels', () => {
     const l = layout(tracks, { collapsed: new Set(['light.ambient']) });
     const rows = l.rows.filter((r) => r.instrument === 'light.ambient');
     expect(rows.length).toBe(1);
     expect(rows[0].draw).toBe('ribbon');
+    expect(rows[0].editable).toBe(false);
     expect(rows[0].h).toBe(ROW_COLLAPSED);
   });
 
-  it('collapses a non-colour curve to an envelope, not a ribbon', () => {
-    const l = layout(tracks, { collapsed: new Set(['shake.seat']) });
-    expect(l.rows.find((r) => r.instrument === 'shake.seat')!.draw).toBe('envelope');
-  });
-
-  it('shortens the whole timeline, which is the point of collapsing', () => {
+  it('shortens the timeline by exactly the channels it hid', () => {
     const before = open().height;
     const after = layout(tracks, { collapsed: new Set(['light.ambient']) }).height;
-    expect(after).toBe(before - ROW_CHANNEL * 3 + ROW_COLLAPSED);
-    expect(after).toBeLessThan(before);
+    expect(after).toBe(before - ROW_CHANNEL * 3);
+  });
+
+  /* Collapsing something that cannot be collapsed must not silently remove
+   * its only lane. */
+  it('ignores a collapse asked for on a single-channel track', () => {
+    const l = layout(tracks, { collapsed: new Set(['shake.seat']) });
+    expect(l.rows.filter((r) => r.instrument === 'shake.seat').length).toBe(1);
+  });
+
+  it('compounds a non-colour multi-channel curve to an envelope', () => {
+    const motion: Track = {
+      instrument: 'motion.platform', type: 'curve',
+      points: [
+        { t: 0, value: { heave: 0, roll: 0 } },
+        { t: 5, value: { heave: 1, roll: 0.5 } },
+      ],
+    };
+    const l = layout([motion], { collapsed: new Set() });
+    expect(l.rows[0].draw).toBe('envelope');
+    expect(summaryLabel(motion)).toBe('all');
+    expect(summaryLabel(tracks[1])).toBe('colour');
   });
 });
 

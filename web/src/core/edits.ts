@@ -8,7 +8,7 @@
 
 import { batch, insertCues, insertPoints, movePoints, moveCues, removeCues, resizeCues, type Command } from './history';
 import { clamp, clamp01, round3, type Seconds } from './time';
-import { cueEnd, isSpan, valueAt, channelsOf, type Cue, type Point, type Rig, type Score, type Track } from './score';
+import { cueEnd, isSpan, valueAt, channelsOf, type Cue, type Instrument, type Point, type Rig, type Score, type Track } from './score';
 
 /** The shortest a split can leave either half. Below this it is not a span. */
 const MIN_PIECE = 0.04;
@@ -147,6 +147,44 @@ export function toggleSpan(track: Track, cue: Cue, defaultLength = 1): Command {
     : batch('Make a span', [resizeCues([{ track, cue, from: 0, to: defaultLength }])]);
 }
 
+/* --- adding a track ----------------------------------------------------- */
+
+/**
+ * Instruments the rig has that the score says nothing about.
+ *
+ * The composer only writes tracks for effects it found something to drive, so
+ * a film with no smoke in it produces a score with no smoke track — and there
+ * was then no way to add one by hand, which meant a rig capability the
+ * analysis had not used was simply unreachable.
+ */
+export function missingInstruments(score: Score, rig: Rig | null): Instrument[] {
+  const have = new Set((score.tracks ?? []).map((t) => t.instrument));
+  return (rig?.instruments ?? []).filter((i) => !have.has(i.id));
+}
+
+/**
+ * Add an empty track for an instrument.
+ *
+ * A curve, always, and empty rather than seeded. Empty is a legal curve — it
+ * is how the format says "this instrument does nothing" — so the track can be
+ * added and then shaped by double clicking, instead of arriving with invented
+ * points somebody has to delete first. A cue track would need an action name
+ * per event that only its author can supply.
+ */
+export function addTrack(score: Score, instrument: Instrument): Command {
+  const track: Track = {
+    instrument: instrument.id,
+    type: 'curve',
+    points: [],
+  };
+  return {
+    k: 'addTrack',
+    label: 'Add ' + instrument.id,
+    score,
+    track,
+  };
+}
+
 /* --- the clipboard ------------------------------------------------------ */
 
 export interface Clip {
@@ -226,4 +264,15 @@ export function paste(
     ...c.cue, params: { ...c.cue.params }, t: cap(c.t),
   }));
   return batch(`Paste ${cues.length} events`, [insertCues(track, cues)]);
+}
+
+/** Remove a track and everything on it. */
+export function removeTrack(score: Score, track: Track): Command {
+  return {
+    k: 'removeTrack',
+    label: 'Remove ' + track.instrument,
+    score,
+    track,
+    at: (score.tracks ?? []).indexOf(track),
+  };
 }

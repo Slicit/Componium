@@ -14,7 +14,7 @@
  */
 
 import { round3, type Seconds } from './time';
-import type { Cue, Point, Track } from './score';
+import type { Cue, Point, Score, Track } from './score';
 
 export interface MoveCue { track: Track; cue: Cue; from: Seconds; to: Seconds }
 export interface ResizeCue { track: Track; cue: Cue; from: Seconds; to: Seconds }
@@ -34,7 +34,9 @@ export type Command =
   | { k: 'insertPoints'; label: string; track: Track; points: Point[] }
   | { k: 'removePoints'; label: string; track: Track; points: Point[] }
   | { k: 'insertCues'; label: string; track: Track; cues: Cue[] }
-  | { k: 'removeCues'; label: string; track: Track; cues: Cue[] };
+  | { k: 'removeCues'; label: string; track: Track; cues: Cue[] }
+  | { k: 'addTrack'; label: string; score: Score; track: Track }
+  | { k: 'removeTrack'; label: string; score: Score; track: Track; at: number };
 
 /** Keep a track's events in time order, which the score format requires. */
 export function normalise(track: Track): void {
@@ -98,6 +100,12 @@ export function apply(cmd: Command): void {
       cmd.track.cues = (cmd.track.cues ?? []).filter((c) => !going.has(c));
       break;
     }
+    case 'addTrack':
+      cmd.score.tracks = [...(cmd.score.tracks ?? []), cmd.track];
+      break;
+    case 'removeTrack':
+      cmd.score.tracks = (cmd.score.tracks ?? []).filter((t) => t !== cmd.track);
+      break;
   }
 }
 
@@ -136,6 +144,16 @@ export function revert(cmd: Command): void {
       break;
     case 'removeCues':
       apply({ ...cmd, k: 'insertCues' });
+      break;
+    case 'addTrack':
+      apply({ ...cmd, k: 'removeTrack', at: 0 });
+      break;
+    case 'removeTrack':
+      /* Back where it was, not on the end: a track reappearing somewhere else
+       * after an undo is disorienting, and the order is what a person
+       * arranged. */
+      cmd.score.tracks = [...(cmd.score.tracks ?? [])];
+      cmd.score.tracks.splice(cmd.at, 0, cmd.track);
       break;
   }
 }

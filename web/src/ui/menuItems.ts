@@ -9,10 +9,10 @@ import type { MenuEntry } from './Menu';
 import type { Hit } from '../core/hit';
 import { History, removeCues, removePoints } from '../core/history';
 import {
-  copy, duplicateCues, paste, scaleAmplitude, smoothPoints, splitCue, toggleSpan,
-  type Clip,
+  addTrack, copy, duplicateCues, missingInstruments, paste, removeTrack,
+  scaleAmplitude, smoothPoints, splitCue, toggleSpan, type Clip,
 } from '../core/edits';
-import { cueEnd, isSpan, type Cue, type Point, type Rig, type Score } from '../core/score';
+import { cueEnd, isSpan, type Cue, type Point, type Rig, type Score, type Track } from '../core/score';
 import { durationLabel, timecode } from '../core/time';
 
 export interface MenuContext {
@@ -30,6 +30,7 @@ export interface MenuContext {
   seek: (t: number) => void;
   zoomTo: (a: number, b: number) => void;
   toggleCollapse: (instrument: string) => void;
+  canCollapse: (track: Track) => boolean;
 }
 
 export function menuFor(ctx: MenuContext): MenuEntry[] {
@@ -39,6 +40,7 @@ export function menuFor(ctx: MenuContext): MenuEntry[] {
     case 'point': return pointMenu(ctx, hit);
     case 'lane': return laneMenu(ctx, hit);
     case 'ruler': return rulerMenu(ctx, hit);
+    case 'empty': return emptyMenu(ctx);
     default: return [];
   }
 }
@@ -201,12 +203,23 @@ function laneMenu(ctx: MenuContext, hit: Extract<Hit, { k: 'lane' }>): MenuEntry
         ctx.setSelected(all);
       },
     },
-    {
-      label: ctx.score.tracks[hit.row.track].type === 'curve' ? 'Collapse or expand' : 'Collapse',
+    ...(ctx.canCollapse(track) ? [{
+      label: 'Collapse or expand its channels',
       run: () => ctx.toggleCollapse(track.instrument),
-    },
+    } as MenuEntry] : []),
     { separator: true },
     { label: 'Move playhead here', run: () => ctx.seek(hit.t) },
+    { separator: true },
+    {
+      label: 'Remove this track',
+      danger: true,
+      run: () => {
+        ctx.history.run(removeTrack(ctx.score, track));
+        ctx.history.seal();
+        ctx.setSelected(new Set());
+        ctx.changed();
+      },
+    },
   ];
 }
 
@@ -216,5 +229,36 @@ function rulerMenu(ctx: MenuContext, hit: Extract<Hit, { k: 'ruler' }>): MenuEnt
     { separator: true },
     { label: 'Move playhead here', run: () => ctx.seek(hit.t) },
     { label: 'Zoom to fit', key: 'F', run: () => ctx.zoomTo(0, ctx.score.duration) },
+  ];
+}
+
+/**
+ * Below the last track, and the only place a track can be created.
+ *
+ * The composer writes a track only for effects it found something to drive, so
+ * a film with no smoke in it comes back with no smoke track — and until now a
+ * rig capability the analysis had not used was simply unreachable from the
+ * editor. This is the way in.
+ */
+function emptyMenu(ctx: MenuContext): MenuEntry[] {
+  const missing = missingInstruments(ctx.score, ctx.rig);
+  if (!missing.length) {
+    return [{
+      label: 'Every instrument in the rig already has a track',
+      why: ctx.rig ? undefined : 'no rig loaded, so there is nothing to add',
+    }];
+  }
+  return [
+    { label: 'Add a track', why: 'for an instrument the rig has and the score does not' },
+    { separator: true },
+    ...missing.map((inst): MenuEntry => ({
+      label: inst.id,
+      key: inst.kind,
+      run: () => {
+        ctx.history.run(addTrack(ctx.score, inst));
+        ctx.history.seal();
+        ctx.changed();
+      },
+    })),
   ];
 }
