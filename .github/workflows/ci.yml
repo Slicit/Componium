@@ -45,7 +45,9 @@ jobs:
           node-version: '20'
       - name: studio tests
         working-directory: internal/studio/assets
-        run: node state.test.js
+        run: |
+          node state.test.js
+          node load.test.js
 
   line-endings:
     runs-on: ubuntu-latest

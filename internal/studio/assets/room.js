@@ -31,7 +31,7 @@ const KIND_GLYPH = {
   scent: '⚘',
 };
 
-function el(tag, className, parent) {
+function mk(tag, className, parent) {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (parent) parent.appendChild(node);
@@ -50,8 +50,8 @@ class Room {
 
   build() {
     this.host.textContent = '';
-    const stage = el('div', 'stage', this.host);
-    const room = el('div', 'room', stage);
+    const stage = mk('div', 'stage', this.host);
+    const room = mk('div', 'room', stage);
     room.style.transform =
       `rotateX(${TILT}deg) translateZ(${-ROOM_D * PX_PER_M * 0.45}px)`;
     this.room = room;
@@ -60,12 +60,12 @@ class Room {
     const h = ROOM_H * PX_PER_M;
     const d = ROOM_D * PX_PER_M;
 
-    const floor = el('div', 'surface floor', room);
+    const floor = mk('div', 'surface floor', room);
     floor.style.width = w + 'px';
     floor.style.height = d + 'px';
     floor.style.transform = `translate3d(${-w / 2}px, 0px, 0px) rotateX(90deg)`;
 
-    const back = el('div', 'surface wall', room);
+    const back = mk('div', 'surface wall', room);
     back.style.width = w + 'px';
     back.style.height = h + 'px';
     back.style.transform = `translate3d(${-w / 2}px, ${-h}px, 0px)`;
@@ -73,13 +73,13 @@ class Room {
     /* The screen doubles as the ambient light preview: it takes the colour the
      * soft layer is driving, which is exactly what an Ambilight looks like
      * from a seat. */
-    this.screen = el('div', 'screen', room);
+    this.screen = mk('div', 'screen', room);
     this.screen.style.width = (w * 0.62) + 'px';
     this.screen.style.height = (h * 0.5) + 'px';
     this.screen.style.transform =
       `translate3d(${-w * 0.31}px, ${-h * 0.78}px, 6px)`;
 
-    this.seat = el('div', 'seat', room);
+    this.seat = mk('div', 'seat', room);
     this.seat.style.transform = this.seatTransform(0);
   }
 
@@ -98,14 +98,14 @@ class Room {
 
     for (const inst of instruments) {
       const [x, y, z] = inst.position;
-      const node = el('div', 'device kind-' + inst.kind, this.room);
+      const node = mk('div', 'device kind-' + inst.kind, this.room);
       node.style.transform =
         `translate3d(${x * PX_PER_M}px, ${-y * PX_PER_M}px, ${z * PX_PER_M}px) ` +
         `rotateX(${-TILT}deg)`;
 
-      const dot = el('div', 'dot', node);
+      const dot = mk('div', 'dot', node);
       dot.textContent = KIND_GLYPH[inst.kind] || '○';
-      const label = el('div', 'label', node);
+      const label = mk('div', 'label', node);
       label.textContent = inst.id;
 
       this.devices.set(inst.id, { node: node, dot: dot, label: label, kind: inst.kind });
