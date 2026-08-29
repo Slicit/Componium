@@ -435,10 +435,17 @@ func indexByte(s string, b byte) int {
 // format on purpose: the editor cares about tracks and points, not about how
 // TOML nests them.
 type wireScore struct {
-	Title    string      `json:"title"`
-	Duration float64     `json:"duration"`
-	Path     string      `json:"path"`
-	Tracks   []wireTrack `json:"tracks"`
+	Title    string  `json:"title"`
+	Duration float64 `json:"duration"`
+	// FPS is what the editor counts frames in. Sent because an editor
+	// addresses a film in frames, not decimal seconds, and the browser has no
+	// way to discover a video's frame rate on its own.
+	//
+	// Read only: the analysis records it from the film and nothing in the
+	// editor may change it, so it is deliberately not read back in fromWire.
+	FPS    float64     `json:"fps,omitempty"`
+	Path   string      `json:"path"`
+	Tracks []wireTrack `json:"tracks"`
 }
 
 type wireTrack struct {
@@ -529,6 +536,7 @@ func toWire(sc *score.Score, path string) wireScore {
 	out := wireScore{
 		Title:    sc.Meta.Title,
 		Duration: sc.Meta.Media.Duration.Duration().Seconds(),
+		FPS:      sc.Meta.Media.FPS,
 		Path:     path,
 	}
 	for _, t := range sc.Tracks {
