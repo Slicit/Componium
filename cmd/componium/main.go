@@ -27,6 +27,8 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "validate":
+		err = validateCmd(os.Args[2:])
 	case "play":
 		err = playCmd(os.Args[2:])
 	case "rehearse":
@@ -54,6 +56,7 @@ func usage() {
 
 usage:
   componium play [flags]        play a score against a rig
+  componium validate [flags]    check a score, optionally against a rig
   componium rehearse [flags]    dry run against a player, with virtual instruments
   componium tune [flags]        measure this machine and player, and cache a profile
   componium doctor [flags]      print the cached profile and what it means
