@@ -55,13 +55,34 @@ const (
 	Step Interpolation = "step"
 )
 
+// Space is how a track's colour parameters are written down.
+type Space string
+
+const (
+	// RGB is red, green and blue, each 0 to 1. What a fixture takes.
+	RGB Space = "rgb"
+	// HSI is hue, saturation and intensity, each 0 to 1, with hue in turns:
+	// 0 is red, 1/3 green, 2/3 blue.
+	//
+	// The authoring form. Dimming is one number rather than three that have to
+	// move together, and intensity is the same axis every other instrument in
+	// the rig already has — which is what lets the duty cycle, the maximum
+	// continuous run and the rest budget treat a light like anything else,
+	// instead of guessing its level from whichever channel happens to be
+	// largest.
+	HSI Space = "hsi"
+)
+
 // Track is one instrument's timeline.
 type Track struct {
 	Instrument    string        `toml:"instrument"`
 	Type          TrackType     `toml:"type"`
 	Interpolation Interpolation `toml:"interpolation"`
-	Cues          []CueSpec     `toml:"cues"`
-	Points        []Point       `toml:"points"`
+	// Space defaults to rgb, so every score written before this existed keeps
+	// its meaning exactly.
+	Space  Space     `toml:"space"`
+	Cues   []CueSpec `toml:"cues"`
+	Points []Point   `toml:"points"`
 }
 
 // CueSpec is one discrete event in a cue track.
@@ -167,6 +188,13 @@ func (s *Score) normalise() error {
 			if t.Interpolation != Linear && t.Interpolation != Step {
 				return fmt.Errorf("score: track %q has unknown interpolation %q", t.Instrument, t.Interpolation)
 			}
+			if t.Space == "" {
+				t.Space = RGB
+			}
+			if t.Space != RGB && t.Space != HSI {
+				return fmt.Errorf("score: track %q has unknown colour space %q, want %q or %q",
+					t.Instrument, t.Space, RGB, HSI)
+			}
 			sort.SliceStable(t.Points, func(a, b int) bool { return t.Points[a].T < t.Points[b].T })
 		default:
 			return fmt.Errorf("score: track %q has unknown type %q", t.Instrument, t.Type)
@@ -184,10 +212,14 @@ func (s *Score) Cues() []instrument.Cue {
 		}
 		for _, c := range t.Cues {
 			out = append(out, instrument.Cue{
-				At:                c.T.Duration(),
-				Instrument:        t.Instrument,
-				Action:            c.Action,
-				Params:            c.Params,
+				At:         c.T.Duration(),
+				Instrument: t.Instrument,
+				Action:     c.Action,
+				// Resolved here rather than in each instrument: a fixture
+				// takes red, green and blue whatever the score was written in,
+				// and this is the one place every cue passes through on its
+				// way out. An RGB track is untouched.
+				Params:            resolve(t, c.Params),
 				Hold:              c.Duration.Duration(),
 				RequiredPrecision: c.RequiredPrecision.Duration(),
 			})

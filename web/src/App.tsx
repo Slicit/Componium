@@ -132,12 +132,23 @@ export function App() {
     }
   }, [score, history, onView]);
 
-  useEffect(() => {
-    const v = video.current;
-    if (!v) return;
-    const on = () => { setTime(v.currentTime); view.reveal(v.currentTime); };
-    v.addEventListener('timeupdate', on);
-    return () => v.removeEventListener('timeupdate', on);
+  /**
+   * The playhead follows the picture.
+   *
+   * Deliberately a prop on the element rather than an effect that reaches for
+   * `video.current` and calls addEventListener. That effect was keyed on the
+   * view, and the video element does not exist until a film is picked — which
+   * happens later — so `video.current` was null when it ran, it returned
+   * early, and the listener was never attached at all. The playhead simply
+   * stopped following the film, silently, and only for the case where there
+   * was a film to follow.
+   *
+   * React attaches this to whatever element is actually mounted, whenever that
+   * happens, which makes the whole failure unrepresentable.
+   */
+  const follow = useCallback((t: number) => {
+    setTime(t);
+    view.reveal(t);
   }, [view]);
 
   /* --- keyboard ---
@@ -380,6 +391,10 @@ export function App() {
             src={'/media?file=' + encodeURIComponent(film)}
             controls
             preload="metadata"
+            data-testid="film"
+            onTimeUpdate={(e) => follow(e.currentTarget.currentTime)}
+            onSeeked={(e) => follow(e.currentTarget.currentTime)}
+            onLoadedMetadata={(e) => follow(e.currentTarget.currentTime)}
           />
         ) : (
           <p className="dim small hint">

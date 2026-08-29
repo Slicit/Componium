@@ -1,6 +1,10 @@
 package score
 
-import "time"
+import (
+	"time"
+
+	"github.com/Slicit/componium/internal/colour"
+)
 
 // ValueAt returns the interpolated value of a curve track at a media time.
 //
@@ -13,11 +17,11 @@ func (t Track) ValueAt(at time.Duration) map[string]float64 {
 	}
 	tc := Timecode(at)
 	if tc <= t.Points[0].T {
-		return copyValues(t.Points[0].Value)
+		return resolve(t, copyValues(t.Points[0].Value))
 	}
 	last := t.Points[len(t.Points)-1]
 	if tc >= last.T {
-		return copyValues(last.Value)
+		return resolve(t, copyValues(last.Value))
 	}
 
 	// The points are sorted, so find the segment containing at.
@@ -32,14 +36,27 @@ func (t Track) ValueAt(at time.Duration) map[string]float64 {
 	a, b := t.Points[lo], t.Points[hi]
 
 	if t.Interpolation == Step {
-		return copyValues(a.Value)
+		return resolve(t, copyValues(a.Value))
 	}
 
 	span := float64(b.T - a.T)
 	if span <= 0 {
-		return copyValues(b.Value)
+		return resolve(t, copyValues(b.Value))
 	}
 	f := float64(tc-a.T) / span
+
+	// Hue is not a number you can average.
+	//
+	// It wraps, so 0.97 to 0.03 is a sixth of a turn through red and not five
+	// sixths backwards through green; and it does not exist at all when there
+	// is no saturation to have it, so fading white to red must grow into red
+	// rather than sweep through whatever number sits beside that white. Both
+	// of those are wrong under the channel-by-channel interpolation below, and
+	// both of them are wrong at exactly the moments a lighting score cares
+	// about.
+	if t.Space == HSI {
+		return resolve(t, lerpHSI(a.Value, b.Value, f))
+	}
 
 	out := make(map[string]float64, len(a.Value)+len(b.Value))
 	for k, av := range a.Value {
@@ -56,7 +73,7 @@ func (t Track) ValueAt(at time.Duration) map[string]float64 {
 			out[k] = bv
 		}
 	}
-	return out
+	return resolve(t, out)
 }
 
 func copyValues(m map[string]float64) map[string]float64 {
@@ -65,4 +82,36 @@ func copyValues(m map[string]float64) map[string]float64 {
 		out[k] = v
 	}
 	return out
+}
+
+// lerpHSI interpolates a colour the way a colour has to be interpolated.
+func lerpHSI(a, b map[string]float64, f float64) map[string]float64 {
+	c := colour.Lerp(
+		colour.HSI{H: a["h"], S: a["s"], I: a["i"]},
+		colour.HSI{H: b["h"], S: b["s"], I: b["i"]},
+		f,
+	)
+	out := map[string]float64{"h": c.H, "s": c.S, "i": c.I}
+	// Anything else on the track — a white channel, say — is an ordinary
+	// number and interpolates like one.
+	for k, av := range a {
+		if k == "h" || k == "s" || k == "i" {
+			continue
+		}
+		if bv, ok := b[k]; ok {
+			out[k] = av + (bv-av)*f
+		} else {
+			out[k] = av
+		}
+	}
+	return out
+}
+
+// resolve adds the red, green and blue a fixture needs, for a track authored
+// as hue and saturation. An RGB track is returned untouched.
+func resolve(t Track, v map[string]float64) map[string]float64 {
+	if t.Space != HSI {
+		return v
+	}
+	return colour.Resolve(v)
 }

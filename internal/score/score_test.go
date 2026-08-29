@@ -306,3 +306,128 @@ points = []
 		t.Errorf("round trip changed the track: %+v", again.Tracks)
 	}
 }
+
+// A light authored the way a person thinks about light.
+func TestHSITrack(t *testing.T) {
+	const src = `
+[score]
+componium = "0.1"
+title = "hsi"
+
+[score.media]
+duration = "1m"
+
+[[track]]
+instrument = "light.ambient"
+type = "curve"
+space = "hsi"
+interpolation = "linear"
+points = [
+  { t = "00:00:00.000", value = { h = 0.0, s = 1.0, i = 0.0 } },
+  { t = "00:00:10.000", value = { h = 0.0, s = 1.0, i = 1.0 } },
+]
+`
+	s, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("parsing an hsi track: %v", err)
+	}
+
+	// A fixture is sent red, green and blue whatever the score was written in.
+	full := s.Tracks[0].ValueAt(10 * time.Second)
+	if full["r"] != 1 || full["g"] != 0 || full["b"] != 0 {
+		t.Errorf("full red resolved to r=%v g=%v b=%v", full["r"], full["g"], full["b"])
+	}
+
+	// And the authored values survive, so an editor can still show what was
+	// meant rather than what was computed.
+	if full["h"] != 0 || full["s"] != 1 || full["i"] != 1 {
+		t.Errorf("the authored colour did not survive: %v", full)
+	}
+
+	// Intensity is the dimmer, and it is also the number the duty cycle and
+	// the rest budget read. Half way up the ramp is half a red.
+	half := s.Tracks[0].ValueAt(5 * time.Second)
+	if half["intensity"] != 0.5 {
+		t.Errorf("intensity at the midpoint = %v, want 0.5", half["intensity"])
+	}
+	if half["r"] != 0.5 {
+		t.Errorf("red at the midpoint = %v, want 0.5", half["r"])
+	}
+}
+
+// The seam is red, which is not an obscure corner of a lighting score: linear
+// interpolation between two hues either side of it sweeps the long way round
+// through cyan.
+func TestHSIHueTakesTheShortWay(t *testing.T) {
+	const src = `
+[score]
+componium = "0.1"
+title = "seam"
+
+[score.media]
+duration = "1m"
+
+[[track]]
+instrument = "light.ambient"
+type = "curve"
+space = "hsi"
+points = [
+  { t = "00:00:00.000", value = { h = 0.97, s = 1.0, i = 1.0 } },
+  { t = "00:00:10.000", value = { h = 0.03, s = 1.0, i = 1.0 } },
+]
+`
+	s, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mid := s.Tracks[0].ValueAt(5 * time.Second)
+	if mid["r"] < 0.99 {
+		t.Errorf("the midpoint should be red, got r=%v g=%v b=%v", mid["r"], mid["g"], mid["b"])
+	}
+}
+
+// Every score written before colour spaces existed keeps its meaning.
+func TestRGBRemainsTheDefault(t *testing.T) {
+	s, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tr := range s.Tracks {
+		if tr.Type == TrackCurve && tr.Space != RGB {
+			t.Errorf("track %q defaulted to space %q", tr.Instrument, tr.Space)
+		}
+	}
+	// And an rgb curve is passed through with nothing added to it.
+	for _, tr := range s.Tracks {
+		if tr.Type != TrackCurve {
+			continue
+		}
+		v := tr.ValueAt(20 * time.Second)
+		if _, ok := v["intensity"]; ok {
+			t.Errorf("an rgb track grew an intensity channel: %v", v)
+		}
+	}
+}
+
+func TestUnknownSpaceIsRefused(t *testing.T) {
+	const src = `
+[score]
+componium = "0.1"
+title = "bad"
+
+[score.media]
+duration = "1m"
+
+[[track]]
+instrument = "light.a"
+type = "curve"
+space = "cmyk"
+points = [
+  { t = "00:00:00.000", value = { c = 0.0 } },
+  { t = "00:00:10.000", value = { c = 1.0 } },
+]
+`
+	if _, err := Parse([]byte(src)); err == nil {
+		t.Fatal("an unknown colour space was accepted")
+	}
+}
