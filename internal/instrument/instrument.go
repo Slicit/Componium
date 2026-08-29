@@ -37,6 +37,18 @@ type Manifest struct {
 	// Ramp is declared but not yet used by the scheduler. Latency
 	// compensation lands first; peak alignment needs the score format.
 	Ramp Ramp
+	// SafeState is what this instrument must be set to when anything goes
+	// wrong: the conductor dies, the network drops, a limit is exceeded, or
+	// someone hits all-stop. Fans to zero, foggers closed, a platform to
+	// neutral.
+	SafeState map[string]float64
+	// DutyCycle is the fraction of any window this instrument may spend
+	// active, 0 meaning no limit. A fogger that runs continuously empties
+	// itself and sets off smoke alarms.
+	DutyCycle float64
+	// DutyWindow is the period DutyCycle is measured over. Zero means one
+	// minute.
+	DutyWindow time.Duration
 	// MaxContinuous is how long this instrument may be driven without a rest.
 	// Declared here, enforced by the instrument itself, never by the
 	// conductor.

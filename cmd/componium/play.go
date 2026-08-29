@@ -12,6 +12,7 @@ import (
 	"github.com/Slicit/Componium/internal/conductor"
 	"github.com/Slicit/Componium/internal/instrument"
 	"github.com/Slicit/Componium/internal/rig"
+	"github.com/Slicit/Componium/internal/safety"
 	"github.com/Slicit/Componium/internal/score"
 	"github.com/Slicit/Componium/internal/show"
 	"github.com/Slicit/Componium/internal/source"
@@ -88,10 +89,11 @@ func playCmd(args []string) error {
 		}
 	}
 
+	sup := safety.New(safety.DefaultTimeout)
 	cond := conductor.New()
 	curves := conductor.NewCurveDriver(*curveRate)
 	for id, inst := range built.Instruments {
-		var use instrument.Instrument = inst
+		var use instrument.Instrument = sup.Guard(inst)
 		if !*quiet {
 			use = logging{inner: inst}
 		}
@@ -125,11 +127,17 @@ func playCmd(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	// The watchdog runs on its own goroutine deliberately. Checked from
+	// inside the show loop it could never notice the show loop stopping,
+	// which is the one failure it exists to catch.
+	go safety.Watch(ctx, sup, 0)
+
 	var lastPrint time.Time
 	err = show.Run(ctx, show.Config{
 		Source: src, Clock: clk, Conductor: cond, PollInterval: *poll,
 		OnReading: func(r clock.Reading) {
 			now := time.Now()
+			sup.Heartbeat(now)
 			curves.Tick(now, r)
 			if now.Sub(lastPrint) < time.Second {
 				return
@@ -140,7 +148,16 @@ func playCmd(args []string) error {
 				cond.Dispatched(), curves.Sent())
 		},
 	})
+	// Leave the rig safe whatever happened: a clean exit should not
+	// leave a fan running or a valve open.
+	sup.AllStop(time.Now(), safety.StopManual, "show ended")
 	summarise(cond, clk)
+	if ev := sup.Events(); len(ev) > 0 {
+		fmt.Printf("safety events %d:\n", len(ev))
+		for _, e := range ev {
+			fmt.Printf("  %-24s %s %s\n", e.Reason, e.Instrument, e.Detail)
+		}
+	}
 	fmt.Printf("curve updates %d\n", curves.Sent())
 	if err == context.Canceled {
 		return nil
