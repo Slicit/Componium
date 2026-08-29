@@ -1,0 +1,192 @@
+"""Camera movement, speed, and plunges, estimated from frame projections.
+
+The method is projection matching, which is old and cheap and works. A camera
+pan shifts every column of the image by the same amount, so the sum of each
+column shifts too, and finding that shift is a search over 64 numbers instead
+of 2304 pixels.
+
+What this can and cannot tell you is worth being clear about. It measures
+apparent movement of the image, which is camera movement plus whatever large
+thing is moving in front of the camera. It cannot distinguish a camera tilting
+down from a camera falling, because those look identical through a lens. A
+sustained vertical movement is therefore reported as a *plunge candidate*, not
+as a fact, and it is the sort of thing a vision model should confirm.
+"""
+
+from __future__ import annotations
+
+import math
+
+
+def centre(projection):
+    """Subtract the mean, so matching is not dominated by brightness changes.
+
+    A cut to a brighter shot raises every column equally. Without this, that
+    looks like an enormous mismatch at every shift and the estimate is noise.
+    """
+    if not projection:
+        return []
+    mean = sum(projection) / float(len(projection))
+    return [v - mean for v in projection]
+
+
+def best_shift(a, b, max_shift: int) -> tuple[int, float]:
+    """Find the shift of b relative to a that matches best.
+
+    Returns the shift in samples and a confidence between 0 and 1. Confidence
+    is how much better the best shift is than the average shift: a flat search
+    surface means the frame had nothing to match on, which happens on a plain
+    sky or a hard cut, and the caller should not believe the answer.
+    """
+    a = centre(a)
+    b = centre(b)
+    n = len(a)
+    if n == 0 or len(b) != n:
+        return 0, 0.0
+
+    scores = {}
+    for s in range(-max_shift, max_shift + 1):
+        lo = max(0, -s)
+        hi = min(n, n - s)
+        if hi - lo < n // 2:
+            continue  # too little overlap to mean anything
+        total = 0.0
+        for i in range(lo, hi):
+            total += abs(a[i] - b[i + s])
+        scores[s] = total / float(hi - lo)
+
+    if not scores:
+        return 0, 0.0
+
+    # Tie break toward no movement. On a featureless frame, a blank sky or
+    # a fade to black, every shift scores identically and picking the first
+    # one reports the maximum shift as fact. That is how a static dark shot
+    # came to be measured as the fastest movement in the film.
+    best = min(scores, key=lambda s: (scores[s], abs(s)))
+    best_score = scores[best]
+    average = sum(scores.values()) / float(len(scores))
+    if average <= 0:
+        return 0, 0.0
+    confidence = max(0.0, min(1.0, 1.0 - (best_score / average)))
+    if confidence <= 0.0:
+        return 0, 0.0
+    return best, confidence
+
+
+class Movement:
+    """Apparent movement between two sampled frames."""
+
+    __slots__ = ("dx", "dy", "speed", "confidence")
+
+    def __init__(self, dx: int, dy: int, confidence: float, width: int):
+        self.dx = dx
+        self.dy = dy
+        self.confidence = confidence
+        # Normalised by frame width so the number means the same thing whatever
+        # resolution the analysis ran at.
+        self.speed = math.hypot(dx, dy) / float(width)
+
+
+def track(frames, max_shift: int = 8, width: int = 64,
+          min_confidence: float = 0.05):
+    """Estimate movement between consecutive frames.
+
+    dy is how far the image content moved *down*. A camera descending makes the
+    world rise in frame, so a fall shows as sustained negative dy.
+    """
+    out = []
+    for i in range(1, len(frames)):
+        prev, cur = frames[i - 1], frames[i]
+        dx, cx = best_shift(prev.cols, cur.cols, max_shift)
+        dy, cy = best_shift(prev.rows, cur.rows, max_shift)
+        confidence = min(cx, cy)
+        if confidence < min_confidence:
+            # No evidence of movement is reported as no movement, not as
+            # whatever the search happened to land on. Missing a pan across
+            # a featureless sky is better than inventing one.
+            dx = dy = 0
+        out.append(Movement(dx, dy, confidence, width))
+    return out
+
+
+def smooth(values, window: int):
+    """Moving average. Camera movement is continuous; single frame spikes are
+    matching errors, and a cut produces exactly one."""
+    if window < 2 or len(values) < window:
+        return list(values)
+    out = []
+    half = window // 2
+    for i in range(len(values)):
+        lo = max(0, i - half)
+        hi = min(len(values), i + half + 1)
+        out.append(sum(values[lo:hi]) / float(hi - lo))
+    return out
+
+
+def find_plunges(movements, fps: float, min_seconds: float = 1.0,
+                 threshold: float = 3.0, min_confidence: float = 0.15,
+                 min_magnitude: float = 0.06, merge_gap: float = 2.0):
+    """Find sustained downward camera movement.
+
+    Returns (start, end, magnitude) triples in seconds. Magnitude is the mean
+    normalised speed over the run, so a caller can scale an effect by how
+    violent the fall was rather than treating every one the same.
+
+    Two gates, and both are needed. threshold is the per sample vertical
+    movement in pixels of a 36 pixel tall frame, so 3.0 is a little over
+    eight percent of the height per sample: at 4 Hz that is a third of the
+    frame per second, which is a fall rather than a drift. min_magnitude
+    then requires the *overall* movement to be substantial, which rejects a
+    slow vertical pan that happens to be steady.
+
+    The first version of this had a 1.2 pixel threshold and no magnitude
+    gate, and found thirty plunges in a two minute test pattern that was
+    merely scrolling.
+
+    Deliberately conservative. A false plunge drops somebody's seat during a
+    dialogue scene, which is worse than missing a real one.
+    """
+    if not movements:
+        return []
+    dys = smooth([m.dy for m in movements], 3)
+    speeds = [m.speed for m in movements]
+    min_frames = max(2, int(min_seconds * fps))
+
+    runs = []
+    start = None
+    for i, dy in enumerate(dys):
+        falling = dy <= -threshold and movements[i].confidence >= min_confidence
+        if falling and start is None:
+            start = i
+        elif not falling and start is not None:
+            if i - start >= min_frames:
+                runs.append((start, i))
+            start = None
+    if start is not None and len(dys) - start >= min_frames:
+        runs.append((start, len(dys)))
+
+    # A continuous fall dips below threshold for a frame or two whenever the
+    # matcher loses confidence, which fragments one plunge into several.
+    # Firing five seat drops during one fall is worse than firing one.
+    merged = []
+    gap = int(merge_gap * fps)
+    for run in runs:
+        if merged and run[0] - merged[-1][1] <= gap:
+            merged[-1][1] = run[1]
+        else:
+            merged.append([run[0], run[1]])
+    runs = merged
+
+    out = []
+    for lo, hi in runs:
+        magnitude = sum(speeds[lo:hi]) / float(hi - lo)
+        if magnitude < min_magnitude:
+            continue
+        # +1 because movements[i] describes the step ending at frame i+1.
+        out.append(((lo + 1) / fps, (hi + 1) / fps, magnitude))
+    return out
+
+
+def speed_series(movements, fps: float, window: float = 0.5):
+    """Smoothed normalised speed, one value per movement sample."""
+    return smooth([m.speed for m in movements], max(2, int(window * fps)))

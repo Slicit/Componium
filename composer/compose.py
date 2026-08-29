@@ -29,9 +29,14 @@ import shutil
 import subprocess
 import sys
 
+import analysis
+import dynamics
+import light
+import motion_est
 import scenes
 import subtitles
 import vision
+import water
 
 SCORE_VERSION = "0.1"
 
@@ -229,7 +234,10 @@ def render(meta, tracks) -> str:
                     row += f', duration = "{cue["duration"]:.1f}s"'
                 row += " },"
                 if cue.get("source"):
-                    lines.append(f'  # from the subtitle: {cue["source"]}')
+                    # The source is whatever nominated this cue: a subtitle, a
+                    # luminance rise, a camera movement. It goes in the file so
+                    # a reviewer can judge the cue without rerunning anything.
+                    lines.append(f'  # {cue["source"]}')
                 lines.append(row)
             lines.append("]")
         else:
@@ -241,81 +249,151 @@ def render(meta, tracks) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _cue_track(instrument, cues):
+    return {"instrument": instrument, "type": "cue", "cues": cues}
+
+
+def _curve_track(instrument, points):
+    return {"instrument": instrument, "type": "curve", "points": points}
+
+
 def build(args) -> str:
+    report = sys.stderr.write
     duration = ffprobe_duration(args.input)
 
-    cuts = []
-    if not args.no_scenes:
-        cuts = scenes.detect(args.input, args.scene_threshold)
+    # One grayscale pass and one colour pass. Everything below is derived from
+    # those two, rather than decoding the film once per feature.
+    frames = analysis.analyse(args.input, args.fps)
+    colour_raw = list(analysis.colour_frames(args.input, args.fps))
+    colours = [analysis.mean_colour(f) for f in colour_raw]
+    report(f"{len(frames)} frames analysed at {args.fps} Hz\n")
 
-    colours = average_colours(args.input, args.fps)
-    light = [(i / args.fps,
-              (r * args.light_gain, g * args.light_gain, b * args.light_gain))
-             for i, (r, g, b) in enumerate(colours)]
-    light = compress(light, args.threshold)
-    # Snapping happens after compression, so a cut is never removed as
-    # redundant by the very step that is meant to preserve it.
-    light = scenes.snap(light, cuts)
-    light_points = [(t, {"r": v[0], "g": v[1], "b": v[2]}) for t, v in light]
-
+    cuts = [] if args.no_scenes else scenes.detect(args.input, args.scene_threshold)
+    movements = motion_est.track(frames, width=analysis.GRAY_W)
+    speed = motion_est.speed_series(movements, args.fps)
     env = lfe_envelope(args.input, args.fps)
-    shake = [(i / args.fps, (v * args.shake_gain,)) for i, v in enumerate(env)]
-    shake = compress(shake, args.threshold)
-    shake = scenes.snap(shake, cuts)
-    shake_points = [(t, {"intensity": v[0]}) for t, v in shake]
+
+    # --- what the film is doing, before deciding what to play ----------------
+    levels = dynamics.activity(audio=env, speed=speed, cuts=cuts, fps=args.fps,
+                               duration=duration)
+    calm = [] if args.no_dynamics else dynamics.calm_regions(
+        levels, args.fps, args.calm_threshold, args.calm_min)
+    quiet_seconds = sum(hi - lo for lo, hi in calm)
+    report(f"{len(calm)} calm regions, {quiet_seconds:.0f}s of the film left alone\n")
 
     tracks = []
-    if len(light_points) >= 2:
-        tracks.append({"instrument": args.light_id, "type": "curve", "points": light_points})
-    if len(shake_points) >= 2:
-        tracks.append({"instrument": args.shake_id, "type": "curve", "points": shake_points})
+    cue_groups = {}
 
-    subtitle_cues = []
+    def add_cues(instrument, cues):
+        if instrument and cues:
+            cue_groups.setdefault(instrument, []).extend(cues)
+
+    # --- light, in two layers ------------------------------------------------
+    soft = light.soft_curve(colours, gain=args.light_gain)
+    soft = compress([(i / args.fps, rgb) for i, rgb in enumerate(soft)], args.threshold)
+    soft = scenes.snap(soft, cuts)
+    if len(soft) >= 2:
+        tracks.append(_curve_track(args.light_id,
+                                   [(t, {"r": v[0], "g": v[1], "b": v[2]}) for t, v in soft]))
+
+    # Flashes get their own fast pass. At the analysis rate most of them
+    # fall between samples: a lightning strike lasts about 150ms, and 4 Hz
+    # misses four out of five. One byte per frame makes 24 Hz free.
+    flash_fps = args.flash_fps or (args.media_fps or 24.0)
+    lumas = [analysis.Luma(v) for v in analysis.luma_series(args.input, flash_fps)]
+    flash_colours = [analysis.mean_colour(f)
+                     for f in analysis.colour_frames(args.input, flash_fps)]
+    add_cues(args.light_event_id, light.flashes(lumas, flash_colours, flash_fps))
+
+    # --- shake ---------------------------------------------------------------
+    shake = compress([(i / args.fps, (v * args.shake_gain,)) for i, v in enumerate(env)],
+                     args.threshold)
+    shake = scenes.snap(shake, cuts)
+    if len(shake) >= 2:
+        tracks.append(_curve_track(args.shake_id,
+                                   [(t, {"intensity": v[0]}) for t, v in shake]))
+
+    # --- plunges -------------------------------------------------------------
+    plunges = motion_est.find_plunges(movements, args.fps, merge_gap=3.0)
+    if plunges:
+        report(f"{len(plunges)} plunge candidates\n")
+    if args.motion_id:
+        add_cues(args.motion_id, [{
+            "t": start,
+            "action": "drop",
+            # Heave is negative because the seat should follow the camera down.
+            "params": {"heave": -min(1.0, magnitude * args.motion_gain)},
+            "duration": max(0.5, end - start),
+            "source": f"sustained downward camera, magnitude {magnitude:.3f}",
+        } for start, end, magnitude in plunges])
+
+    # --- subtitles and the vision model --------------------------------------
+    confirmations = []
+    semantic = []
     if not args.no_subtitles:
         srt = subtitles.extract(args.input, args.subtitle_stream)
         if srt:
-            mapping = subtitles.load_mapping(args.mapping)
-            # Align subtitle cues with the instrument ids the curve tracks
-            # already use, so a generated score does not name both
-            # light.ambient and light.main for the same fixture.
+            entries = subtitles.parse(srt)
+            confirmations += subtitles.descriptions(entries)
             kinds = {"light": args.light_id, "shake": args.shake_id}
-            subtitle_cues = subtitles.cues(subtitles.parse(srt), mapping, kinds)
+            semantic += subtitles.cues_from_descriptions(
+                entries and subtitles.descriptions(entries),
+                subtitles.load_mapping(args.mapping), kinds)
 
     if args.vlm_command:
-        # The expensive pass runs only on windows the cheap detectors already
-        # flagged. Sending every frame of a feature to a model would cost a
-        # fortune to learn what the audio already said.
         times = vision.candidates(env, args.fps, cuts, args.vlm_frames)
         labels = vision.describe(args.input, times, args.vlm_command)
+        confirmations += labels
         kinds = {"light": args.light_id, "shake": args.shake_id}
-        vlm = subtitles.cues_from_descriptions(
+        semantic += subtitles.cues_from_descriptions(
             labels, subtitles.load_mapping(args.mapping), kinds)
-        sys.stderr.write(
-            f'{len(times)} keyframes labelled, {len(vlm)} cues from the model\n')
-        subtitle_cues = subtitles.dedupe(sorted(
-            subtitle_cues + vlm, key=lambda c: (c["t"], c["instrument"])))
+        report(f"{len(times)} keyframes labelled, {len(semantic)} semantic cues\n")
 
-    by_instrument = {}
-    for cue in subtitle_cues:
-        by_instrument.setdefault(cue["instrument"], []).append(cue)
-    for instrument, cue_list in sorted(by_instrument.items()):
-        tracks.append({"instrument": instrument, "type": "cue", "cues": cue_list})
+    # --- water, nominated then confirmed -------------------------------------
+    nominated = water.candidates(colour_raw, args.fps)
+    wet = water.confirmed(nominated, confirmations)
+    report(f"{len(nominated)} water nominations, {len(wet)} confirmed\n")
+    if args.mist_id:
+        add_cues(args.mist_id, [{
+            "t": lo,
+            "action": "spray",
+            "params": {"output": round(min(0.8, 0.3 + score), 3)},
+            "duration": min(8.0, hi - lo),
+            "source": f"blue scene confirmed by: {label}",
+        } for lo, hi, score, label in wet])
+
+    for cue in semantic:
+        add_cues(cue["instrument"], [cue])
+
+    # --- dynamics: decide what not to play -----------------------------------
+    dropped_calm = dropped_budget = 0
+    for instrument, cues in list(cue_groups.items()):
+        if not args.no_dynamics:
+            cues, dropped = dynamics.protect_calm(cues, calm)
+            dropped_calm += len(dropped)
+            cues, dropped = dynamics.enforce_budget(
+                cues, args.budget_window, args.budget_max)
+            dropped_budget += len(dropped)
+        cue_groups[instrument] = sorted(cues, key=lambda c: c["t"])
+
+    if not args.no_dynamics:
+        report(f"{dropped_calm} cues dropped to protect calm, "
+               f"{dropped_budget} to stay inside the rest budget\n")
+
+    for instrument in sorted(cue_groups):
+        if cue_groups[instrument]:
+            tracks.append(_cue_track(instrument, cue_groups[instrument]))
 
     if not tracks:
         sys.exit("nothing extracted; is the input a playable file?")
 
     meta = {
         "title": args.title or os.path.splitext(os.path.basename(args.input))[0],
-        "duration": duration or (len(colours) / args.fps),
+        "duration": duration or (len(frames) / args.fps),
         "fps": args.media_fps,
         "hash": "" if args.no_hash else file_hash(args.input, args.hash_mb),
     }
-    report = (f"{len(cuts)} scene cuts, {len(light_points)} light points, "
-              f"{len(shake_points)} shake points, {len(subtitle_cues)} subtitle cues")
-    sys.stderr.write(report + "\n")
     return render(meta, tracks)
-
-
 def main(argv=None):
     p = argparse.ArgumentParser(description="Generate a Componium score from a film.")
     p.add_argument("input", help="video file")
@@ -344,6 +422,25 @@ def main(argv=None):
     p.add_argument("--vlm-command",
                    help="program that takes an image path and prints labels, "
                         "one per line; Componium ships no model")
+    p.add_argument("--flash-fps", type=float, default=0.0,
+                   help="rate for flash detection; 0 uses the film's own")
+    p.add_argument("--light-event-id", default="light.event",
+                   help="instrument for bright spikes, separate from the soft wash")
+    p.add_argument("--motion-id", default="",
+                   help="instrument for plunges; empty means do not emit them")
+    p.add_argument("--mist-id", default="mist.main",
+                   help="instrument for confirmed water scenes")
+    p.add_argument("--motion-gain", type=float, default=6.0)
+    p.add_argument("--no-dynamics", action="store_true",
+                   help="do not protect calm scenes or enforce a rest budget")
+    p.add_argument("--calm-threshold", type=float, default=0.18,
+                   help="activity level below which a stretch counts as calm")
+    p.add_argument("--calm-min", type=float, default=12.0,
+                   help="shortest calm stretch worth protecting, in seconds")
+    p.add_argument("--budget-window", type=float, default=120.0,
+                   help="window the rest budget is measured over, in seconds")
+    p.add_argument("--budget-max", type=float, default=0.25,
+                   help="fraction of any window that may be spent doing something")
     p.add_argument("--vlm-frames", type=int, default=40,
                    help="how many keyframes to label at most (default 40)")
     p.add_argument("--scene-threshold", type=float, default=0.35,

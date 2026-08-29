@@ -170,7 +170,7 @@ def cues_from_descriptions(descs, mapping=None, kinds=None):
                     "action": effect["action"],
                     "params": dict(effect.get("params", {})),
                     "duration": effect.get("duration", 1.0),
-                    "source": phrase,
+                    "source": f"subtitle: {phrase}",
                 })
     out.sort(key=lambda c: (c["t"], c["instrument"]))
     return dedupe(out)
