@@ -45,6 +45,7 @@ class Room {
     /* Shared with the timeline: muting a track there takes its device out
      * of the room too, which is what makes reviewing one effect possible. */
     this.muted = new Set();
+    this.forced = new Map();
     this.build();
   }
 
@@ -119,7 +120,7 @@ class Room {
     for (const [id, device] of this.devices) {
       const off = this.muted.has(id);
       device.node.classList.toggle("muted", off);
-      const { level, params } = deviceState(state, id, this.muted);
+      const { level, params } = deviceState(state, id, this.muted, this.forced);
       device.node.classList.toggle('on', level > 0.02);
 
       if (device.kind === 'light') {
@@ -144,7 +145,9 @@ class Room {
       }
     }
 
-    this.seat.style.transform = this.seatTransform(seatPose(state).heave * 0.5);
+    const now = (typeof performance !== 'undefined') ? performance.now() : 0;
+    this.seat.style.transform =
+      this.seatTransform(seatPose(state, this.forced, now).heave * 0.5);
 
     if (ambient) {
       this.screen.style.background =
@@ -170,13 +173,34 @@ function findKind(state, kind) {
  * today and drift apart in a month. A muted device is level 0, not hidden: it
  * still occupies its place in the room, it is just silent.
  */
-function deviceState(state, id, muted) {
+function deviceState(state, id, muted, forced) {
   const s = state[id];
   const off = muted ? muted.has(id) : false;
+
+  /* A forced level overrides the score outright. This is the preview control:
+   * it answers "what does 40% of this fan actually look like" without needing
+   * a cue at the playhead, or indeed a score at all. Mute still wins, because
+   * mute is how you take something out of the picture and it would be
+   * confusing for one control to defeat the other. */
+  const override = forced && forced.has(id) ? forced.get(id) : null;
+  if (override !== null && override !== undefined) {
+    return {
+      level: off ? 0 : override,
+      /* Borrow the live cue's parameters when there is one, so forcing a light
+       * during a red scene previews red rather than white. With no cue there
+       * is nothing to borrow, and plain white at the forced level is the
+       * honest default. */
+      params: (s && s.active && s.params) ? s.params : { intensity: 1 },
+      muted: off,
+      forced: true,
+    };
+  }
+
   return {
     level: (!off && s && s.active) ? s.level : 0,
     params: (s && s.params) || {},
     muted: off,
+    forced: false,
   };
 }
 
@@ -187,14 +211,46 @@ function deviceState(state, id, muted) {
  * would be invisible at room scale, and the point of the view is to read the
  * motion, not to measure it. This is a preview, and it says so.
  */
-function seatPose(state) {
+function seatPose(state, forced, nowMs) {
+  const n = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
+
+  /* A forced platform has no pose to read, because there is no cue driving
+   * one. A static displacement would be the easy answer and a poor one: a
+   * chair sitting still one centimetre higher tells you nothing about what
+   * 40% of a motion rig feels like. So force generates a slow wallow instead,
+   * on two axes at incommensurate periods so it never settles into a loop.
+   *
+   * This is a preview of the *device*, not of any cue, and it is the one place
+   * in the room where movement is invented rather than reported. */
+  const id = forcedMotionID(state, forced);
+  if (id !== null) {
+    const level = forced.get(id);
+    const t = n(nowMs) / 1000;
+    return {
+      surge: 0, sway: 0,
+      heave: level * 0.34 * Math.sin(t * 2.3),
+      roll: level * 0.20 * Math.sin(t * 1.7),
+      pitch: level * 0.14 * Math.sin(t * 3.1),
+      yaw: 0,
+    };
+  }
+
   const motion = state['motion.platform'] || findKind(state, 'motion');
   const p = (motion && motion.params) || {};
-  const n = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
   return {
     surge: n(p.surge), sway: n(p.sway), heave: n(p.heave),
     roll: n(p.roll), pitch: n(p.pitch), yaw: n(p.yaw),
   };
+}
+
+/* Which forced instrument, if any, should drive the seat. Motion and shake
+ * both move the audience rather than the air, so both steer the couch. */
+function forcedMotionID(state, forced) {
+  if (!forced || !forced.size) return null;
+  for (const [id, level] of forced) {
+    if (level > 0 && (id.indexOf('motion.') === 0 || id.indexOf('shake.') === 0)) return id;
+  }
+  return null;
 }
 
 function cssColour(params) {
@@ -212,4 +268,8 @@ if (typeof module !== 'undefined' && module.exports) {
 
 Room.prototype.setMuted = function (muted) {
   this.muted = muted;
+};
+
+Room.prototype.setForced = function (forced) {
+  this.forced = forced || new Map();
 };

@@ -54,6 +54,7 @@ export class Color {
   }
   copy(o) { this.r = o.r; this.g = o.g; this.b = o.b; return this; }
   multiplyScalar(s) { this.r *= s; this.g *= s; this.b *= s; return this; }
+  addScalar(s) { this.r += s; this.g += s; this.b += s; return this; }
   setScalar(s) { this.r = this.g = this.b = s; return this; }
 }
 
@@ -120,6 +121,10 @@ export class Mesh extends Object3D {
   constructor(g, m) { super(); this.geometry = g; this.material = m; }
 }
 export class Points extends Mesh {}
+export class SpriteMaterial extends Material {}
+export class Sprite extends Object3D {
+  constructor(m) { super(); this.material = m; }
+}
 
 export class CanvasTexture { constructor(c) { this.image = c; this.disposed = 0; } dispose() { this.disposed++; } }
 export class Fog { constructor(c, n, f) { this.near = n; this.far = f; } }
@@ -130,6 +135,16 @@ class Light extends Object3D {
 export class PointLight extends Light {}
 export class AmbientLight extends Light {}
 export class HemisphereLight extends Light {}
+
+export class PMREMGenerator {
+  constructor(renderer) { this.renderer = renderer; this.disposed = 0; }
+  fromScene() { return { texture: { dispose() {} } }; }
+  dispose() { this.disposed++; }
+}
+`;
+
+const ENVIRONMENT = `
+export class RoomEnvironment {}
 `;
 
 const CONTROLS = `
@@ -184,17 +199,56 @@ globalThis.cssColour = room.cssColour;
 
 /* --- load room3d.js with its imports pointed at the stub --------------- */
 
+/* Every bare specifier the page will actually ask for must be in the import
+ * map, and every entry must point at a file that exists.
+ *
+ * This is here because the suite below cannot catch it: it rewrites the
+ * imports to reach the stub, which is exactly the step that hides a missing
+ * map entry. Adding the RoomEnvironment import without adding its mapping
+ * passed every test and shipped a page where the whole module failed to
+ * resolve, so the room silently fell back to the flat view and blamed the
+ * browser for having no GPU.
+ *
+ * The vendored files are scanned too, because their own `from 'three'` is
+ * resolved by the same map and is just as capable of being missing from it.
+ */
+function checkImportMap() {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const block = html.match(/<script type="importmap">([\s\S]*?)<\/script>/);
+  assert.ok(block, 'index.html has no import map');
+  const imports = JSON.parse(block[1]).imports;
+
+  for (const [spec, url] of Object.entries(imports)) {
+    const file = url.split('?')[0].replace(/^\.\//, '');
+    assert.ok(fs.existsSync(path.join(__dirname, file)),
+      `import map sends '${spec}' to ${file}, which does not exist`);
+  }
+
+  const sources = ['room3d.js', 'vendor/OrbitControls.js', 'vendor/RoomEnvironment.js'];
+  for (const name of sources) {
+    const src = fs.readFileSync(path.join(__dirname, name), 'utf8');
+    for (const m of src.matchAll(/^\s*import\s[\s\S]*?from\s+'([^']+)';/gm)) {
+      const spec = m[1];
+      if (spec.startsWith('.') || spec.startsWith('/')) continue;
+      assert.ok(imports[spec],
+        `${name} imports '${spec}' but the import map in index.html has no entry for it`);
+    }
+  }
+}
+
 async function loadRoom3D() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'componium-room3d-'));
   fs.writeFileSync(path.join(dir, 'three.mjs'), STUB);
   fs.writeFileSync(path.join(dir, 'controls.mjs'), CONTROLS);
+  fs.writeFileSync(path.join(dir, 'env.mjs'), ENVIRONMENT);
 
   /* Anchored to the start of a line, because the prose above the imports
    * mentions the specifiers too and a plain string replace rewrites the
    * comment and leaves the real import alone. It did exactly that once. */
   const source = fs.readFileSync(path.join(__dirname, 'room3d.js'), 'utf8')
     .replace(/^import \* as THREE from 'three';$/m, "import * as THREE from './three.mjs';")
-    .replace(/^import \{ OrbitControls \} from '[^']*';$/m, "import { OrbitControls } from './controls.mjs';");
+    .replace(/^import \{ OrbitControls \} from '[^']*';$/m, "import { OrbitControls } from './controls.mjs';")
+    .replace(/^import \{ RoomEnvironment \} from '[^']*';$/m, "import { RoomEnvironment } from './env.mjs';");
   assert.ok(!/from 'three/.test(source.replace(/^\s*\*.*$/gm, '')),
     'import rewriting missed a specifier');
   const file = path.join(dir, 'room3d.mjs');
@@ -232,7 +286,7 @@ function run(Room3D) {
 
   /* And aimed at the seat rather than left pointing down the y axis. */
   assert.ok(wind.group.lookedAt, 'wind emitter was never aimed');
-  assert.strictEqual(wind.group.lookedAt.z, 3.0, 'wind emitter is not aimed at the seat');
+  assert.strictEqual(wind.group.lookedAt.z, 3.4, 'wind emitter is not aimed at the seat');
 
   /* Off means off. */
   view.update({});
@@ -249,8 +303,13 @@ function run(Room3D) {
   /* A light takes the cue's colour, not a fixed one. */
   view.update({ 'light.left': { active: true, level: 1, params: { r: 1, g: 0, b: 0 } } });
   const bulb = view.devices.get('light.left').group.children[0];
-  assert.ok(bulb.material.color.r > 0.9 && bulb.material.color.b < 0.1,
-    'red cue did not make a red light');
+  /* Dominance rather than exact channels: every lamp carries a small floor in
+   * all three so an unlit one is still visible in the room, which means a pure
+   * red cue is legitimately (1, 0.1, 0.1) and not (1, 0, 0). */
+  assert.ok(bulb.material.color.r > bulb.material.color.g * 3
+    && bulb.material.color.r > bulb.material.color.b * 3,
+    'red cue did not make a red light: '
+    + JSON.stringify([bulb.material.color.r, bulb.material.color.g, bulb.material.color.b]));
   assert.ok(view.devices.get('light.left').light.intensity > 0, 'point light stayed dark');
 
   /* The brightest light drives the screen wash, which is the ambient preview. */
@@ -282,11 +341,58 @@ function run(Room3D) {
   /* The seat follows the platform. */
   view.update({ 'motion.platform': { active: true, level: 1, params: { heave: 0.4, surge: 0.2, roll: 0.3 } } });
   assert.ok(view.seat.position.y > 0, 'heave did not lift the seat');
-  assert.ok(view.seat.position.z > 3.0, 'surge did not move the seat forward');
+  assert.ok(view.seat.position.z > view.seatRest, 'surge did not move the seat forward');
   assert.ok(view.seat.rotation.z !== 0, 'roll did not tilt the seat');
 
   view.update({ 'motion.platform': { active: false, level: 0, params: {} } });
   assert.strictEqual(view.seat.position.y, 0, 'seat did not return to rest');
+
+  /* --- forcing a device by hand ---
+   *
+   * The whole point is that this works with no cue at the playhead and no
+   * score behind it, so every check here runs against an empty state. */
+  view.setForced(new Map([['wind.main', 0.7]]));
+  view.update({});
+  assert.ok(cone.material.opacity > 0, 'forcing the wind did nothing');
+
+  /* A forced light with nothing to borrow from is white, not the black that
+   * cssColour returns for empty parameters. Getting this wrong makes the
+   * slider look broken: the light is at full level and invisible. */
+  view.setForced(new Map([['light.left', 1]]));
+  view.update({});
+  const forcedBulb = view.devices.get('light.left').group.children[0];
+  assert.ok(forcedBulb.material.color.r > 0.5 && forcedBulb.material.color.b > 0.5,
+    'a forced light with no cue is not lit');
+  assert.ok(view.devices.get('light.left').light.intensity > 0,
+    'a forced light does not cast');
+
+  /* A forced platform has no pose to report, so it invents one — and it has to
+   * actually move, or the slider says nothing about what the rig would do. */
+  view.setForced(new Map([['motion.platform', 1]]));
+  const seen = new Set();
+  for (let i = 0; i < 6; i++) {
+    globalThis.performance = { now: () => 1000 + i * 220 };
+    view.update({});
+    seen.add(view.seat.position.y.toFixed(4));
+  }
+  assert.ok(seen.size > 1, 'a forced platform sits still');
+  globalThis.performance = { now: () => Date.now() };
+
+  /* Releasing hands the device back to the score rather than pinning it at
+   * zero, which is the difference between this control and mute. */
+  view.setForced(new Map());
+  view.update({ 'wind.main': { active: true, level: 0.9, params: {} } });
+  assert.ok(cone.material.opacity > 0, 'releasing a forced device silenced it');
+  view.update({});
+  assert.strictEqual(cone.material.opacity, 0, 'released device did not follow the score');
+
+  /* Mute beats force, so one control cannot defeat the other. */
+  view.setForced(new Map([['wind.main', 1]]));
+  view.setMuted(new Set(['wind.main']));
+  view.update({});
+  assert.strictEqual(cone.material.opacity, 0, 'muting did not beat forcing');
+  view.setMuted(new Set());
+  view.setForced(new Map());
 
   /* Every update paints, without waiting for an animation frame that this
    * environment is never going to deliver. That is the whole reason the view
@@ -319,6 +425,8 @@ function run(Room3D) {
   assert.strictEqual(view.running, false, 'animation loop still running after dispose');
   assert.strictEqual(view.renderer.domElement.parentNode, null, 'canvas left in the page');
 }
+
+checkImportMap();
 
 loadRoom3D().then((Room3D) => {
   run(Room3D);

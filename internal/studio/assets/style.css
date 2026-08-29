@@ -260,3 +260,31 @@ code { background: #202730; padding: 0.1em 0.35em; border-radius: 3px; }
 .seg:last-child { border-radius: 0 4px 4px 0; border-left: 0; }
 .seg:hover { color: #d6dde8; }
 .seg.on { background: #223047; color: #eaf1fb; border-color: #33465f; }
+
+/* --- force panel ------------------------------------------------------- */
+
+.force { margin-top: 10px; border-top: 1px solid #202632; padding-top: 8px; }
+.force-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.small-btn {
+  font: inherit; font-size: 11px; padding: 2px 8px; cursor: pointer;
+  background: #141920; color: #8b97a8; border: 1px solid #262d38; border-radius: 4px;
+}
+.small-btn:hover { color: #d6dde8; }
+
+.force-row {
+  display: grid; grid-template-columns: 1fr 130px 44px;
+  align-items: center; gap: 8px; padding: 2px 0;
+}
+.force-name {
+  font-size: 12px; color: #93a0b2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.force-row input[type=range] { width: 100%; accent-color: #d8a24a; }
+.force-value { font-size: 11px; color: #6b7686; text-align: right; }
+.force-row.forcing .force-name { color: #e8c88a; }
+.force-row.forcing .force-value { color: #e8c88a; }
+
+.chip.forced { border-color: #6a5322; color: #e8c88a; }

@@ -2,10 +2,11 @@
  *
  * The flat CSS view answers "which device is doing what". This one answers a
  * question the flat view cannot: "what would that feel like from the seat".
- * Wind has a direction and a spread. Mist hangs in the air and falls. A light
- * spike throws colour onto the walls behind you. None of that is legible as a
- * marker on a plan, and all of it is what a contributor needs to see before
- * trusting a cue to a machine that moves a person.
+ * Wind has a direction and a spread. Fog pools on the floor and drifts. A
+ * light spike throws colour onto the walls behind you and glints off the
+ * furniture. None of that is legible as a marker on a plan, and all of it is
+ * what a contributor needs to see before trusting a cue to a machine that
+ * moves a person.
  *
  * It does not replace the flat view. Anything with a GPU gets this; anything
  * without falls back, and the fallback is a real view rather than an apology.
@@ -19,15 +20,16 @@
 
 /* Bare specifiers, resolved by the import map in index.html. The map is what
  * carries the cache-busting version onto the vendored files, and it is also
- * what makes OrbitControls' own `import ... from 'three'` resolve to the same
+ * what makes the addons' own `import ... from 'three'` resolve to the same
  * module instance this file uses rather than a second copy. */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const ROOM_W = 5.0;
 const ROOM_H = 3.0;
 const ROOM_D = 6.0;
-const SEAT_Z = 3.0;
+const SEAT_Z = 3.4;
 
 /* Above this, a device is drawn as doing something. Below it, the cue is
  * either finished or too weak to matter, and drawing it anyway makes an idle
@@ -45,6 +47,8 @@ const MAX_LIGHTS = 8;
 const readDevice = globalThis.deviceState;
 const readSeat = globalThis.seatPose;
 const colourOf = globalThis.cssColour;
+
+let SPRITE = null;
 
 /* --- materials and textures ------------------------------------------- */
 
@@ -81,154 +85,185 @@ function glowMaterial(colour, opacity) {
   });
 }
 
+function surface(colour, roughness, metalness, envIntensity) {
+  return new THREE.MeshStandardMaterial({
+    color: colour,
+    roughness: roughness,
+    metalness: metalness === undefined ? 0.05 : metalness,
+    envMapIntensity: envIntensity === undefined ? 1 : envIntensity,
+  });
+}
+
+function box(w, h, d, material) {
+  return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+}
+
+function place(mesh, x, y, z) {
+  mesh.position.set(x, y, z);
+  return mesh;
+}
+
 /* --- device builders --------------------------------------------------- */
 
 /* Each builder returns { group, apply(level, params, dt) }. The apply function
  * is called every frame with that device's current level, and owns everything
  * that moves. Adding a kind means adding one entry here and nothing else. */
 const BUILDERS = {
-  light(colour) {
+  light() {
     const group = new THREE.Group();
+    const colour = 0xffffff;
 
     const bulb = new THREE.Mesh(
-      new THREE.SphereGeometry(0.06, 16, 12),
+      new THREE.SphereGeometry(0.09, 16, 12),
       new THREE.MeshBasicMaterial({ color: colour })
     );
     group.add(bulb);
 
-    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), glowMaterial(colour, 0));
+    /* The glow is a camera-facing sprite, not a sphere.
+     *
+     * A sphere with an additive material is a flat disc of constant colour: it
+     * saturates to white and gives the glow a hard circular edge, which at any
+     * real intensity looks like a hole cut in the picture rather than a bright
+     * lamp. The sprite carries the same soft radial falloff the particles use,
+     * so it reads as light instead of as geometry. */
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: SPRITE, color: colour, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    halo.scale.setScalar(0.25);
     group.add(halo);
 
-    /* A short cone toward the room, so a wall washer reads as pointing
-     * somewhere rather than floating. */
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.4, 20, 1, true), glowMaterial(colour, 0));
-    cone.position.y = -0.7;
+    /* A wide soft cone, so a wall washer reads as throwing light somewhere
+     * rather than floating. */
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.75, 1.9, 24, 1, true), glowMaterial(colour, 0));
+    cone.position.y = -0.95;
     group.add(cone);
 
     let light = null;
     return {
       group: group,
-      /* Given a real light, drive it too. */
       attach(l) { light = l; },
       apply(level, params) {
         const c = new THREE.Color(colourOf(params));
-        bulb.material.color.copy(c);
         halo.material.color.copy(c);
         cone.material.color.copy(c);
         /* The bulb never goes fully black: an off lamp is still a lamp, and a
          * device you cannot see is a device you cannot click. */
-        bulb.material.color.multiplyScalar(0.25 + level * 0.75);
-        halo.material.opacity = level * 0.55;
-        cone.material.opacity = level * 0.16;
-        halo.scale.setScalar(1 + level * 1.6);
+        bulb.material.color.copy(c).multiplyScalar(0.3 + level * 0.7).addScalar(0.1);
+        halo.material.opacity = level * 0.3;
+        cone.material.opacity = level * 0.2;
+        halo.scale.setScalar(0.2 + level * 0.8);
         if (light) {
-          light.color.copy(c);
-          light.intensity = level * 9;
+          light.color.copy(c).addScalar(0.05);
+          light.intensity = level * 15;
           light.visible = level > ON;
         }
       },
     };
   },
 
-  wind(colour) {
+  wind() {
     const group = new THREE.Group();
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.2, 24, 1, true), glowMaterial(0x9fd8ff, 0));
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.62, 2.6, 28, 1, true), glowMaterial(0xa8dcff, 0));
     /* ConeGeometry points up the y axis with its apex at the top. Rotating by
      * -90° about x aims it down -z, and the group is then turned to face the
-     * seat, so the apex sits at the fan and the mouth opens toward the
-     * audience. */
+     * couch, so the apex sits at the fan and the mouth opens toward it. */
     cone.rotation.x = -Math.PI / 2;
-    cone.position.z = 1.1;
+    cone.position.z = 1.3;
     group.add(cone);
 
-    const streaks = particles(70, 0x9fd8ff, 0.07);
+    const streaks = particles(110, 0xbfe6ff, 0.075, 0.5, 0.5, 1.4);
     group.add(streaks.points);
 
     return {
       group: group,
       apply(level, params, dt) {
-        cone.material.opacity = level * 0.24;
-        cone.scale.set(1, 1, 0.6 + level * 0.9);
-        streaks.material.opacity = level * 0.75;
+        cone.material.opacity = level * 0.26;
+        cone.scale.set(0.7 + level * 0.5, 1, 0.55 + level * 1.0);
+        streaks.material.opacity = level * 0.85;
         /* Speed reads as speed. The stream is what tells you whether this is a
          * breeze or a gust, and a static cone tells you neither. */
-        streaks.drift(dt, 0, 0, 1.2 + level * 6.5, 2.4);
+        streaks.drift(dt, 0, 0, 1.4 + level * 8.0, 2.6);
       },
     };
   },
 
-  mist(colour) {
+  mist() {
     const group = new THREE.Group();
-    const cloud = particles(150, 0xdfefff, 0.16, 1.1, 0.7, 1.1);
+    const cloud = particles(260, 0xe6f2ff, 0.34, 1.3, 0.8, 1.3);
     group.add(cloud.points);
     return {
       group: group,
       apply(level, params, dt) {
-        cloud.material.opacity = level * 0.5;
+        cloud.material.opacity = level * 0.3;
         /* Mist falls and spreads; it does not blow away. */
-        cloud.drift(dt, 0, -0.22, 0.16, 1.6);
+        cloud.drift(dt, 0, -0.26, 0.18, 1.8);
       },
     };
   },
 
-  fog(colour) {
+  fog() {
     const group = new THREE.Group();
-    const cloud = particles(220, 0xc8d4e6, 0.34, 1.6, 0.5, 1.6);
+    /* Fog is the one effect that should look like it has volume rather than
+     * like a cluster of dots: many large, very faint sprites, low and wide,
+     * moving slowly. Small and bright reads as smoke from a machine; big and
+     * dim reads as air you would have to walk through. */
+    const cloud = particles(420, 0xd6e2f2, 1.05, 2.2, 0.4, 2.2);
     group.add(cloud.points);
     return {
       group: group,
       apply(level, params, dt) {
-        cloud.material.opacity = level * 0.34;
-        cloud.drift(dt, 0.05, -0.05, 0.1, 2.6);
+        cloud.material.opacity = level * 0.13;
+        cloud.drift(dt, 0.07, -0.04, 0.13, 3.0);
       },
     };
   },
 
-  water(colour) {
+  water() {
     const group = new THREE.Group();
-    const drops = particles(90, 0x7fd0ff, 0.05, 0.7, 0.2, 0.7);
+    const drops = particles(120, 0x9fe0ff, 0.055, 0.8, 0.25, 0.8);
     group.add(drops.points);
     return {
       group: group,
       apply(level, params, dt) {
-        drops.material.opacity = level * 0.9;
-        drops.drift(dt, 0, -1.6, 0.5, 1.2);
+        drops.material.opacity = level * 0.95;
+        drops.drift(dt, 0, -1.9, 0.55, 1.3);
       },
     };
   },
 
-  scent(colour) {
+  scent() {
     const group = new THREE.Group();
-    const puff = particles(60, 0xd8c0ff, 0.13, 0.5, 0.5, 0.5);
+    const puff = particles(80, 0xe0c8ff, 0.16, 0.55, 0.55, 0.55);
     group.add(puff.points);
     return {
       group: group,
       apply(level, params, dt) {
-        puff.material.opacity = level * 0.45;
-        puff.drift(dt, 0, 0.14, 0.06, 2.0);
+        puff.material.opacity = level * 0.5;
+        puff.drift(dt, 0, 0.16, 0.07, 2.2);
       },
     };
   },
 
-  shake(colour) {
+  shake() {
     const group = new THREE.Group();
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(0.26, 0.1, 0.26),
-      new THREE.MeshStandardMaterial({ color: 0xff9a5c, roughness: 0.5, emissive: 0xff9a5c })
-    );
-    group.add(box);
+    const unit = box(0.3, 0.12, 0.3, new THREE.MeshStandardMaterial({
+      color: 0xff9a5c, roughness: 0.4, metalness: 0.5, emissive: 0xff9a5c, emissiveIntensity: 0,
+    }));
+    group.add(unit);
     return {
       group: group,
       apply(level) {
-        box.material.emissive.setScalar(level * 0.6);
-        const a = level * 0.05;
-        box.position.set((Math.random() - 0.5) * a, (Math.random() - 0.5) * a, (Math.random() - 0.5) * a);
+        unit.material.emissiveIntensity = level * 1.4;
+        const a = level * 0.055;
+        unit.position.set(
+          (Math.random() - 0.5) * a, (Math.random() - 0.5) * a, (Math.random() - 0.5) * a);
       },
     };
   },
 };
 
-/* The platform is not a device marker; it is the seat, handled separately. */
+/* The platform is not a device marker; it is the couch, handled separately. */
 BUILDERS.motion = BUILDERS.shake;
 
 /* A drifting cloud of soft sprites, recycled rather than reallocated: the
@@ -281,8 +316,6 @@ function particles(count, colour, size, sx, sy, sz) {
   };
 }
 
-let SPRITE = null;
-
 /* --- the room ---------------------------------------------------------- */
 
 class Room3D {
@@ -290,6 +323,7 @@ class Room3D {
     this.host = host;
     this.devices = new Map();
     this.muted = new Set();
+    this.forced = new Map();
     this.lights = 0;
     this.last = 0;
     this.width = 0;
@@ -303,13 +337,11 @@ class Room3D {
     if (!SPRITE) SPRITE = softSprite();
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x05070b);
-    /* Distance haze, which is what stops a big empty box reading as flat. */
-    scene.fog = new THREE.Fog(0x05070b, 6, 20);
+    scene.background = new THREE.Color(0x0d1017);
     this.scene = scene;
 
-    const camera = new THREE.PerspectiveCamera(46, 16 / 9, 0.1, 100);
-    camera.position.set(3.8, 2.3, 9.2);
+    const camera = new THREE.PerspectiveCamera(48, 16 / 9, 0.1, 100);
+    camera.position.set(3.4, 2.1, 9.4);
     this.camera = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -318,13 +350,25 @@ class Room3D {
      * to be brighter than the soft wash can go, and without it every spike
      * clips to the same white and the two ambilight layers look identical. */
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
+    renderer.toneMappingExposure = 1.12;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer = renderer;
     this.host.appendChild(renderer.domElement);
 
+    /* Image based lighting, generated rather than downloaded.
+     *
+     * This is what puts a highlight on the edge of the television and a sheen
+     * on the floor, and it is why the furniture reads as objects rather than
+     * as flat shapes. RoomEnvironment is a handful of emissive boxes that
+     * three.js prefilters into an environment map; no HDR file, no download,
+     * nothing to license. */
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    this.environment = pmrem.fromScene(new RoomEnvironment(), 0.04);
+    scene.environment = this.environment.texture;
+    pmrem.dispose();
+
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1.25, 2.6);
+    controls.target.set(0, 1.2, 2.2);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.minDistance = 1.5;
@@ -336,6 +380,7 @@ class Room3D {
     this.controls = controls;
 
     this.buildShell();
+    this.buildFurniture();
     this.resize();
 
     /* Damping and particle drift need frames of their own. update() also
@@ -355,61 +400,129 @@ class Room3D {
     /* One inside-out box is the whole room. BackSide means the camera sees the
      * far walls and never the near ones, so the room is never occluded by the
      * wall you are looking through. */
-    const shell = new THREE.Mesh(
-      new THREE.BoxGeometry(ROOM_W, ROOM_H, ROOM_D),
-      new THREE.MeshStandardMaterial({ color: 0x161a21, roughness: 0.95, metalness: 0, side: THREE.BackSide })
-    );
-    shell.position.set(0, ROOM_H / 2, ROOM_D / 2);
+    const shell = box(ROOM_W, ROOM_H, ROOM_D, new THREE.MeshStandardMaterial({
+      color: 0x3b424e, roughness: 0.86, metalness: 0.02,
+      side: THREE.BackSide, envMapIntensity: 0.55,
+    }));
+    place(shell, 0, ROOM_H / 2, ROOM_D / 2);
     scene.add(shell);
 
+    /* The floor is its own mesh so it can be a little glossy without making
+     * the walls into mirrors. A faint reflection is most of what stops a room
+     * looking like a cardboard box, and it is also where a light cue shows up
+     * second, after the wall it is pointed at. */
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(ROOM_W, ROOM_D),
-      new THREE.MeshStandardMaterial({ color: 0x0d1015, roughness: 0.8 })
+      surface(0x3b4250, 0.36, 0.22, 1.15)
     );
     floor.rotation.x = -Math.PI / 2;
-    floor.position.set(0, 0.002, ROOM_D / 2);
+    place(floor, 0, 0.002, ROOM_D / 2);
     scene.add(floor);
 
-    /* The screen is the ambient preview. It takes the colour of whatever the
-     * soft layer is driving, which is what an Ambilight looks like from a
-     * seat, and it is also the brightest thing in the room by default so the
-     * space has an obvious front. */
-    this.screen = new THREE.Mesh(
-      new THREE.PlaneGeometry(ROOM_W * 0.66, ROOM_H * 0.42),
-      new THREE.MeshBasicMaterial({ color: 0x1b2733 })
-    );
-    this.screen.position.set(0, 1.55, 0.03);
-    scene.add(this.screen);
+    const rug = new THREE.Mesh(new THREE.PlaneGeometry(3.7, 2.7), surface(0x3b3340, 0.97, 0));
+    rug.rotation.x = -Math.PI / 2;
+    place(rug, 0, 0.006, 2.5);
+    scene.add(rug);
 
-    this.screenGlow = new THREE.PointLight(0x30506e, 2.2, 12, 2);
-    this.screenGlow.position.set(0, 1.55, 0.6);
+    /* Bright enough to read the room at a glance, which is the whole job.
+     *
+     * These numbers are far larger than most three.js examples on the web
+     * suggest, because most of them predate r155, when lighting moved to
+     * physical units and every intensity in the ecosystem changed meaning.
+     * An earlier version of this file used the old figures and rendered a
+     * black box that was, technically, a correct scene graph. */
+    scene.add(new THREE.AmbientLight(0xaebbd0, 1.3));
+    scene.add(new THREE.HemisphereLight(0xb8cbe4, 0x343a45, 1.3));
+
+    /* Two ceiling sources. They exist as much for the specular highlights they
+     * put on the television, the floor and the couch as for the light itself:
+     * without a source to reflect, physically based materials look matte no
+     * matter what their roughness says. */
+    for (const x of [-1.35, 1.35]) {
+      const lamp = new THREE.PointLight(0xfff0dc, 11, 13, 2);
+      lamp.position.set(x, ROOM_H - 0.16, 2.6);
+      scene.add(lamp);
+      const fitting = new THREE.Mesh(
+        new THREE.SphereGeometry(0.07, 12, 10),
+        new THREE.MeshBasicMaterial({ color: 0xfff4e4 })
+      );
+      place(fitting, x, ROOM_H - 0.14, 2.6);
+      scene.add(fitting);
+    }
+  }
+
+  buildFurniture() {
+    const scene = this.scene;
+
+    /* A big flat television, on a stand. The screen doubles as the ambient
+     * light preview: it takes the colour the soft layer is driving, which is
+     * what an Ambilight looks like from a seat, and it gives the room an
+     * obvious front. */
+    const tv = new THREE.Group();
+    const bezel = box(3.34, 1.94, 0.09, surface(0x0f1216, 0.32, 0.65, 1.3));
+    tv.add(bezel);
+    this.screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.22, 1.82),
+      new THREE.MeshBasicMaterial({ color: 0x9dc4e8 })
+    );
+    place(this.screen, 0, 0, 0.048);
+    tv.add(this.screen);
+    place(tv, 0, 1.62, 0.09);
+    scene.add(tv);
+
+    /* A soft glow behind the panel, so the wall around the television picks up
+     * the wash rather than the screen floating on a dark wall. */
+    this.screenGlow = new THREE.PointLight(0x4a7cad, 16, 17, 2);
+    this.screenGlow.position.set(0, 1.62, 0.7);
     scene.add(this.screenGlow);
 
-    scene.add(new THREE.AmbientLight(0x30384a, 0.5));
-    scene.add(new THREE.HemisphereLight(0x50607a, 0x0a0c10, 0.5));
+    const stand = new THREE.Group();
+    stand.add(place(box(2.5, 0.44, 0.46, surface(0x272c36, 0.28, 0.4, 1.2)), 0, 0.24, 0));
+    stand.add(place(box(2.58, 0.035, 0.52, surface(0x333a46, 0.16, 0.55, 1.4)), 0, 0.475, 0));
+    for (const x of [-1.1, 1.1]) {
+      stand.add(place(box(0.05, 0.06, 0.05, surface(0x1b1f26, 0.3, 0.7)), x, 0.03, 0));
+    }
+    place(stand, 0, 0, 0.38);
+    scene.add(stand);
 
-    /* The seat, and the thing that moves. A chair is enough geometry to read
-     * pitch and roll; anything more detailed is decoration. */
-    const seat = new THREE.Group();
-    const cushion = new THREE.Mesh(
-      new THREE.BoxGeometry(0.92, 0.16, 0.86),
-      new THREE.MeshStandardMaterial({ color: 0x3a2f2c, roughness: 0.85 })
-    );
-    cushion.position.y = 0.45;
-    seat.add(cushion);
-    const back = new THREE.Mesh(
-      new THREE.BoxGeometry(0.92, 0.72, 0.16),
-      new THREE.MeshStandardMaterial({ color: 0x3a2f2c, roughness: 0.85 })
-    );
-    back.position.set(0, 0.85, 0.4);
-    seat.add(back);
-    seat.position.set(0, 0, SEAT_Z);
-    scene.add(seat);
-    this.seat = seat;
+    /* The couch, and the thing that moves. Built from boxes rather than a
+     * loaded model: a mesh file is a binary asset with a licence, a download
+     * and a loader, and the point of this view is legibility, not upholstery.
+     * Cushions are separate pieces mostly so the shape survives being tilted —
+     * a single slab reads as a crate the moment the platform rolls. */
+    const couch = new THREE.Group();
+    const fabric = surface(0x474252, 0.92, 0.02, 0.7);
+    const fabricLight = surface(0x554f61, 0.92, 0.02, 0.7);
+    const leg = surface(0x23262d, 0.3, 0.65, 1.2);
+
+    couch.add(place(box(2.7, 0.34, 1.08, fabric), 0, 0.34, 0));
+    for (const x of [-0.66, 0.66]) {
+      couch.add(place(box(1.28, 0.2, 0.98, fabricLight), x, 0.58, -0.02));
+      couch.add(place(box(1.24, 0.58, 0.19, fabricLight), x, 0.82, 0.44));
+    }
+    couch.add(place(box(2.7, 0.8, 0.24, fabric), 0, 0.76, 0.54));
+    for (const x of [-1.34, 1.34]) {
+      couch.add(place(box(0.28, 0.34, 1.08, fabric), x, 0.66, 0));
+    }
+    for (const x of [-1.2, 1.2]) {
+      for (const z of [-0.44, 0.44]) {
+        couch.add(place(box(0.07, 0.17, 0.07, leg), x, 0.085, z));
+      }
+    }
+    place(couch, 0, 0, SEAT_Z);
+    scene.add(couch);
+    this.seat = couch;
+    this.seatRest = SEAT_Z;
   }
 
   setMuted(muted) {
     this.muted = muted;
+  }
+
+  /* Forced levels: id -> 0..1, overriding whatever the score says. See the
+   * force panel in app.js. */
+  setForced(forced) {
+    this.forced = forced || new Map();
   }
 
   /* Lay out the devices a rig declares. Structure is built once here and only
@@ -427,20 +540,20 @@ class Room3D {
 
     for (const inst of instruments || []) {
       const build = BUILDERS[inst.kind] || BUILDERS.shake;
-      const device = build(0xffffff);
+      const device = build();
       const [x, y, z] = inst.position || [0, 0, 0];
       device.group.position.set(x, y, z);
 
-      /* Emitters aim at the seat. A fan bolted to the back wall blowing at the
-       * wall behind it would be drawn exactly that way otherwise, and it is
-       * the kind of rig mistake this view exists to make obvious. */
+      /* Emitters aim at the couch. A fan bolted to the back wall blowing at
+       * the wall behind it would be drawn exactly that way otherwise, and it
+       * is the kind of rig mistake this view exists to make obvious. */
       if (inst.kind === 'wind') {
         device.group.lookAt(new THREE.Vector3(0, 1.0, SEAT_Z));
       }
 
       let light = null;
       if (inst.kind === 'light' && this.lights < MAX_LIGHTS) {
-        light = new THREE.PointLight(0xffffff, 0, 9, 2);
+        light = new THREE.PointLight(0xffffff, 0, 11, 2);
         light.position.set(x, y, z);
         this.scene.add(light);
         this.lights++;
@@ -473,19 +586,19 @@ class Room3D {
     let ambient = null;
 
     for (const [id, device] of this.devices) {
-      const { level, params, muted } = readDevice(state, id, this.muted);
+      const { level, params, muted } = readDevice(state, id, this.muted, this.forced);
       device.apply(level, params, dt);
 
       /* A muted device is shrunk, not hidden and not dimmed.
        *
        * Silence already comes from deviceState, which reports level 0 for a
-       * muted device, so everything here has to do is say *why* it is quiet —
+       * muted device, so all this has to do is say *why* it is quiet —
        * otherwise a muted device and an idle one look identical. Shrinking is
        * the right tool because it is idempotent: it can be recomputed every
        * frame from the mute set alone. The obvious alternative, scaling down
        * the materials' opacity, is not — it multiplies against last frame's
-       * value, and any material apply() does not reset walks to zero and
-       * never comes back. It did.
+       * value, and any material apply() does not reset walks to zero and never
+       * comes back. It did.
        */
       device.group.scale.setScalar(muted ? 0.55 : 1);
 
@@ -494,17 +607,26 @@ class Room3D {
       }
     }
 
-    const pose = readSeat(this.state);
+    const pose = readSeat(this.state, this.forced, now);
     /* Scaled down: real platform travel is centimetres, and centimetres at
-     * room scale is a seat that appears not to move at all. */
-    this.seat.position.set(pose.sway * 0.5, pose.heave * 0.5, SEAT_Z + pose.surge * 0.5);
+     * room scale is a couch that appears not to move at all. */
+    this.seat.position.set(pose.sway * 0.5, pose.heave * 0.5, this.seatRest + pose.surge * 0.5);
     this.seat.rotation.set(pose.pitch * 0.6, pose.yaw * 0.6, pose.roll * 0.6);
 
     if (ambient) {
+      /* Both of these have a floor, and the floor is not cosmetic.
+       *
+       * The screen shows the soft ambilight layer's own colour, which during a
+       * dark scene is very nearly black — correctly so. But the screen is also
+       * much of the light in the room, and a room lit by a black screen loses
+       * the geometry, and with it any way to see where the devices are or what
+       * the couch is doing. A real television is never truly black either. So
+       * the wash bottoms out somewhere dim rather than at nothing. */
       const c = new THREE.Color(ambient.colour);
-      this.screen.material.color.copy(c).multiplyScalar(0.35 + ambient.level * 0.65);
-      this.screenGlow.color.copy(c);
-      this.screenGlow.intensity = 1.2 + ambient.level * 7;
+      this.screen.material.color.copy(c)
+        .multiplyScalar(0.35 + ambient.level * 0.65).addScalar(0.09);
+      this.screenGlow.color.copy(c).addScalar(0.18);
+      this.screenGlow.intensity = 9 + ambient.level * 30;
     }
 
     if (this.controls) this.controls.update();
@@ -534,6 +656,7 @@ class Room3D {
     if (this.controls) this.controls.dispose();
     for (const [, d] of this.devices) disposeTree(d.group);
     disposeTree(this.scene);
+    if (this.environment) this.environment.texture.dispose();
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode) {
       this.renderer.domElement.parentNode.removeChild(this.renderer.domElement);

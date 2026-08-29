@@ -32,6 +32,92 @@ function toggleMuted(id, off) {
   applyMuted();
 }
 
+/* --- forcing a device by hand -------------------------------------------
+ *
+ * One slider per instrument, overriding whatever the score says.
+ *
+ * This is the answer to "what does 40% of that fan actually look like", which
+ * until now could only be found by hunting for a cue that happened to be that
+ * strong, or by editing the score and undoing it afterwards. It is a preview
+ * control and nothing else: it never touches the score, it is not saved, and
+ * it does not survive a reload.
+ *
+ * Zero means release, not force-off. A slider cannot express "no opinion" on
+ * its own, and rather than bolt a checkbox onto every row, the bottom of the
+ * travel hands the device back to the score. Force-off already exists and is
+ * called mute.
+ */
+const forced = new Map();
+
+function applyForced() {
+  if (room && room.setForced) room.setForced(forced);
+}
+
+function buildForcePanel() {
+  const host = el('force');
+  if (!host) return;
+  const list = (rig && rig.instruments) || [];
+  host.textContent = '';
+  host.hidden = list.length === 0;
+  if (!list.length) return;
+
+  const head = document.createElement('div');
+  head.className = 'force-head';
+  const title = document.createElement('span');
+  title.className = 'muted small';
+  title.textContent = 'Force a device, 0 releases it back to the score';
+  head.appendChild(title);
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'small-btn';
+  clear.textContent = 'Release all';
+  clear.addEventListener('click', function () {
+    forced.clear();
+    applyForced();
+    buildForcePanel();
+  });
+  head.appendChild(clear);
+  host.appendChild(head);
+
+  for (const inst of list) {
+    const row = document.createElement('div');
+    row.className = 'force-row';
+
+    const name = document.createElement('span');
+    name.className = 'force-name';
+    name.textContent = inst.id;
+    name.title = inst.kind;
+    row.appendChild(name);
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '100';
+    slider.step = '1';
+    slider.value = String(Math.round((forced.get(inst.id) || 0) * 100));
+    row.appendChild(slider);
+
+    const readout = document.createElement('span');
+    readout.className = 'force-value';
+    row.appendChild(readout);
+
+    const paint = function () {
+      const v = Number(slider.value);
+      readout.textContent = v > 0 ? v + '%' : 'auto';
+      row.classList.toggle('forcing', v > 0);
+    };
+    slider.addEventListener('input', function () {
+      const v = Number(slider.value);
+      if (v > 0) forced.set(inst.id, v / 100); else forced.delete(inst.id);
+      applyForced();
+      paint();
+    });
+    paint();
+
+    host.appendChild(row);
+  }
+}
+
 /* --- which room is on screen ------------------------------------------
  *
  * Two implementations of one interface: Room draws in CSS and always works,
@@ -64,6 +150,7 @@ function useRoomView(want) {
   roomKind = kind;
   room.setInstruments((rig && rig.instruments) || []);
   room.setMuted(muted);
+  if (room.setForced) room.setForced(forced);
 
   try { localStorage.setItem('componium.room', want); } catch (err) { /* private mode */ }
   paintRoomToggle(want);
@@ -76,8 +163,12 @@ function paintRoomToggle(want) {
   if (b && b.classList) b.classList.toggle('on', roomKind === 'flat');
   const note = el('room-note');
   if (!note) return;
+  /* Deliberately vague about the cause, because this genuinely does not know
+   * it. Room3D is absent both when the browser has no WebGL and when the
+   * module failed to load at all — a missing import map entry did exactly that
+   * once, and the page confidently blamed the GPU. */
   note.textContent = (want === '3d' && roomKind === 'flat')
-    ? 'no WebGL here, showing the flat room'
+    ? '3D is not available here, showing the flat room'
     : '';
 }
 
@@ -125,16 +216,28 @@ function duration() {
 
 function renderActive(state) {
   const host = el('active');
-  const on = Object.keys(state).filter((id) => state[id].active && state[id].level > 0.02);
-  if (on.length === 0) {
-    host.textContent = '';
+  /* A forced device is not in the score, so it would otherwise be doing
+   * something visible in the room while this line said nothing was playing.
+   * Forced chips are marked as such: the room is showing you something the
+   * film will not do. */
+  const on = Object.keys(state)
+    .filter((id) => state[id].active && state[id].level > 0.02 && !forced.has(id));
+  host.textContent = '';
+
+  if (on.length === 0 && forced.size === 0) {
     const none = document.createElement('span');
     none.className = 'muted';
     none.textContent = 'nothing playing';
     host.appendChild(none);
     return;
   }
-  host.textContent = '';
+
+  for (const id of Array.from(forced.keys()).sort()) {
+    const chip = document.createElement('span');
+    chip.className = 'chip forced';
+    chip.textContent = id + ' forced ' + (forced.get(id) * 100).toFixed(0) + '%';
+    host.appendChild(chip);
+  }
   for (const id of on.sort()) {
     const s = state[id];
     const chip = document.createElement('span');
@@ -204,6 +307,7 @@ async function load() {
   el('status').textContent = 'loaded';
 
   useRoomView(preferredRoom());
+  buildForcePanel();
 
   timeline = new Timeline(el('timeline'), {
     onSeek: function (t) { transport.currentTime = t; },
