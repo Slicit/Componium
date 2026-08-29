@@ -275,6 +275,50 @@ A discontinuity keeps the rate estimate and drops only the anchors. Rate is a
 property of the machine and the player, so it survives a seek; position is not,
 so it does not.
 
+### 2026-08-29 · M1 delivered. Latency compensation works.
+
+```
+cue at 10s, latency 1.2s, dispatched at 8.8s
+```
+
+`TestCueIsDispatchedEarlyByTheInstrumentsLatency` is the milestone, and
+everything else in M1 existed to make that assertion possible. Nine conductor
+tests and eight clock tests, the whole suite running in about 7 ms with no
+player, no socket and no sleeping.
+
+- **Decision:** The conductor is passive, like the clock. The caller drives it
+  with `Tick(wall, reading)`.
+- **Why:** Same reason as the clock. A scheduler that reads the time itself can
+  only be tested by waiting, and a test that waits ten seconds to check a ten
+  second cue would never be run often enough to be worth having.
+- **Impact:** The polling loop, the ticker and the goroutine all live in the
+  caller. Neither `internal/clock` nor `internal/conductor` starts anything.
+
+- **Decision:** Nothing is dropped without a record. Every cue that is not
+  dispatched produces a `Skip` carrying the reason.
+- **Why:** A rig that silently omits effects is indistinguishable from a rig
+  that is broken, and the cause is usually invisible from the room: a clock too
+  imprecise for that cue, a seek that stepped over it, an instrument that
+  errored. `componium doctor` will read these.
+- **Impact:** Four reasons so far: seeked past, clock too imprecise, unknown
+  instrument, instrument failed.
+
+Three behaviours worth naming, each of which came out of the measurements
+rather than out of imagination:
+
+- **Nothing fires while paused.** A paused player still reports a position, and
+  cueing against it would empty a fog machine into a motionless room.
+- **A seek resyncs the cursor rather than bursting.** Seeking forward over
+  twenty cues records twenty skips and fires none of them; seeking backwards
+  re-arms cues so they fire again on the second pass.
+- **Cues that cannot be dispatched in time are reported, not fired late.** A
+  cue half a second into a film, for an instrument needing 1.2 s of warning, is
+  physically impossible. That is a fact about the score the author should see,
+  so `Load` returns it via `Unreachable` instead of quietly firing late.
+
+Ramp is declared in the manifest but not yet used. Latency compensation lands
+first; aligning the *peak* of a ramped effect needs the score format from M5.
+
 ## Links
 
 - Branch: `feat-timing-core`

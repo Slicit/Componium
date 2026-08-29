@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Slicit/Componium/instruments/virtual"
 	"github.com/Slicit/Componium/internal/clock"
 	"github.com/Slicit/Componium/internal/conductor"
 	"github.com/Slicit/Componium/internal/instrument"
-	"github.com/Slicit/Componium/instruments/virtual"
 )
 
 var origin = time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
