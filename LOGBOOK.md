@@ -52,15 +52,16 @@ mass last.
 | ID | Milestone | Hardware needed |
 |---|---|---|
 | M1 | Conductor, virtual instrument, fake clock, latency compensation | none |
-| M2 | Real time source (mpv / Kodi) and clock filter | none |
-| M3 | First real instrument, DMX light over sACN | cheap |
-| M4 | Score format v1, `play` and `rehearse` CLI | none |
-| M5 | Safety supervisor and watchdogs, hardened | none |
-| M6 | Composer v0, LFE to shake and brightness to light | none |
-| M7 | Wind, ESP32 node with PWM fan | moderate |
-| M8 | Studio timeline editor | none |
-| M9 | Composer v1, semantic detection and subtitle mining | none |
-| M10 | Fog, water, then motion via 6DOF bridge | expensive |
+| M2 | Real time source (mpv / VLC) and clock filter | none |
+| M3 | Tuning: startup calibration and continuous refinement | none |
+| M4 | First real instrument, DMX light over sACN | cheap |
+| M5 | Score format v1, `play` and `rehearse` CLI | none |
+| M6 | Safety supervisor and watchdogs, hardened | none |
+| M7 | Composer v0, LFE to shake and brightness to light | none |
+| M8 | Wind, ESP32 node with PWM fan | moderate |
+| M9 | Studio timeline editor | none |
+| M10 | Composer v1, semantic detection and subtitle mining | none |
+| M11 | Fog, water, then motion via 6DOF bridge | expensive |
 
 ## Reading order for agents
 
