@@ -1,6 +1,7 @@
 package score
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"sort"
@@ -208,4 +209,32 @@ func (s *Score) Instruments() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Save writes a score back to disk.
+//
+// Round tripping matters more than it looks: the studio loads a score, a
+// person edits it, and it is written back. Anything the writer drops is
+// silently destroyed, which is why the round trip has a test of its own.
+func (s *Score) Save(path string) error {
+	b, err := s.Marshal()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0o644)
+}
+
+// Marshal renders a score as TOML.
+func (s *Score) Marshal() ([]byte, error) {
+	if err := s.normalise(); err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	buf.WriteString("# Componium score.\n\n")
+	enc := toml.NewEncoder(&buf)
+	enc.Indent = ""
+	if err := enc.Encode(s); err != nil {
+		return nil, fmt.Errorf("score: %w", err)
+	}
+	return buf.Bytes(), nil
 }

@@ -197,3 +197,49 @@ func TestInstrumentsListed(t *testing.T) {
 		t.Errorf("instruments %v", got)
 	}
 }
+
+// The studio loads a score, a person edits it, and it is written back.
+// Anything the writer drops is silently destroyed.
+func TestScoreRoundTripsThroughMarshal(t *testing.T) {
+	first, err := Parse([]byte(sample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := first.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Parse(b)
+	if err != nil {
+		t.Fatalf("re-parsing our own output failed: %v\n%s", err, b)
+	}
+
+	if second.Meta.Title != first.Meta.Title {
+		t.Errorf("title %q, want %q", second.Meta.Title, first.Meta.Title)
+	}
+	if second.Meta.Media.Duration != first.Meta.Media.Duration {
+		t.Errorf("duration %v, want %v", second.Meta.Media.Duration, first.Meta.Media.Duration)
+	}
+	if len(second.Cues()) != len(first.Cues()) {
+		t.Fatalf("%d cues after round trip, want %d", len(second.Cues()), len(first.Cues()))
+	}
+	for i, c := range second.Cues() {
+		want := first.Cues()[i]
+		if c.At != want.At || c.Action != want.Action || c.Instrument != want.Instrument {
+			t.Errorf("cue %d is %+v, want %+v", i, c, want)
+		}
+		if c.Params["intensity"] != want.Params["intensity"] {
+			t.Errorf("cue %d params %v, want %v", i, c.Params, want.Params)
+		}
+	}
+	fc, sc := first.Curves(), second.Curves()
+	if len(sc) != len(fc) {
+		t.Fatalf("%d curves after round trip, want %d", len(sc), len(fc))
+	}
+	if len(sc[0].Points) != len(fc[0].Points) {
+		t.Errorf("%d points, want %d", len(sc[0].Points), len(fc[0].Points))
+	}
+	if sc[0].Points[1].Value["r"] != fc[0].Points[1].Value["r"] {
+		t.Errorf("curve values did not survive the round trip")
+	}
+}

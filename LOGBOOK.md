@@ -13,7 +13,9 @@ Nothing is implemented yet. Intended shape, revisit before committing to it:
   compile to a Pi.
 - **composer** · Python. Offline AI assisted score generation from video and
   audio. Python because the CV and ML tooling lives there.
-- **studio** · TypeScript / React. Timeline authoring UI.
+- **studio** · Plain HTML, CSS and JavaScript, served by the Go binary and
+  embedded in it. No bundler, no node_modules, no build step. Revisit if the
+  editor outgrows it.
 - **node** · C / ESP-IDF. Componium firmware for ESP32 instruments.
 - Wire formats: WebSocket + JSON for control, UDP binary for curve frames,
   sACN / Art-Net for lighting.

@@ -27,6 +27,8 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "studio":
+		err = studioCmd(os.Args[2:])
 	case "node":
 		err = nodeCmd(os.Args[2:])
 	case "validate":
@@ -60,6 +62,7 @@ usage:
   componium play [flags]        play a score against a rig
   componium validate [flags]    check a score, optionally against a rig
   componium node [flags]        run a software instrument node, no hardware needed
+  componium studio [flags]      edit a score in a browser
   componium rehearse [flags]    dry run against a player, with virtual instruments
   componium tune [flags]        measure this machine and player, and cache a profile
   componium doctor [flags]      print the cached profile and what it means

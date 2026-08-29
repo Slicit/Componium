@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Componium studio</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Componium <span class="muted">studio</span></h1>
+  <div class="meta">
+    <span id="title"></span>
+    <span id="path" class="muted"></span>
+  </div>
+  <div class="actions">
+    <span id="status" class="muted">loading</span>
+    <button id="save" disabled>Save</button>
+  </div>
+</header>
+
+<main>
+  <div id="ruler"></div>
+  <div id="tracks"></div>
+</main>
+
+<aside id="inspector" hidden>
+  <h2 id="insp-title">Nothing selected</h2>
+  <label>Time <input id="insp-t" type="text" placeholder="00:00:00.000"></label>
+  <div id="insp-fields"></div>
+  <div class="row">
+    <button id="insp-delete" class="danger">Delete</button>
+    <button id="insp-close">Close</button>
+  </div>
+  <p class="muted small">
+    Times are HH:MM:SS.mmm. Values are 0 to 1, in whatever units the
+    instrument's kind defines.
+  </p>
+</aside>
+
+<footer>
+  <p class="muted small">
+    Edits are written back through the same parser <code>componium play</code>
+    uses, so this editor cannot produce a score the player will refuse.
+  </p>
+</footer>
+
+<script src="timecode.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
