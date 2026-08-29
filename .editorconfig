@@ -1,0 +1,18 @@
+# Line endings are LF. Everywhere. Always.
+# Execution happens on Linux; authoring on Windows must not leak CRLF into
+# the tree. See LOGBOOK/notes.md.
+
+root = true
+
+[*]
+end_of_line = lf
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
