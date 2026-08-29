@@ -129,3 +129,17 @@ func (m *MPV) Duration() (time.Duration, bool) {
 	}
 	return time.Duration(secs * float64(time.Second)), true
 }
+
+// Version returns mpv's own version string, used to key tuning profiles: the
+// same machine with a different player build is a different measurement.
+func (m *MPV) Version() (string, bool) {
+	raw, found, err := m.getProperty("mpv-version")
+	if err != nil || !found {
+		return "", false
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return "", false
+	}
+	return s, true
+}

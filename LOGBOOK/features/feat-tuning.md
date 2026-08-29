@@ -1,5 +1,5 @@
 ---
-status: draft
+status: shipped
 branch: feat-tuning
 ---
 
@@ -82,6 +82,28 @@ photodiode could automate it for effects that make noise or light.
   machine that is not the machine that will be running the show.
 - **Impact:** The precision field on `TimeSource` is a live value, not a
   constant read from a file at startup.
+
+## Result
+
+Delivered 2026-08-29. `componium tune` and `componium doctor` exist, and on
+claude-machine-02 with mpv they report:
+
+```
+scheduler lateness   mean 297us sd 308us p95 792us max 897us (n=800)
+player query cost    mean 66us  sd 21us  p95 103us max 415us (n=1600)
+position granularity 41ms
+playback pacing      630 ppm from realtime
+achievable precision 6ms at a 5ms poll
+```
+
+`Estimate` deliberately uses the p99 of scheduler lateness rather than the
+mean, for the same reason the clock's precision is conservative: an estimate
+that is usually right and occasionally optimistic is worse than one that is
+always pessimistic, because the conductor refuses cues on the strength of it.
+
+`doctor` ends by saying what the rig can be trusted to do rather than only
+printing numbers, and names the limiting factor when the player rather than
+the machine is the constraint.
 
 ## Links
 

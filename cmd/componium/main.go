@@ -29,6 +29,10 @@ func main() {
 	switch os.Args[1] {
 	case "rehearse":
 		err = rehearse(os.Args[2:])
+	case "tune":
+		err = tuneCmd(os.Args[2:])
+	case "doctor":
+		err = doctorCmd(os.Args[2:])
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -48,6 +52,8 @@ func usage() {
 
 usage:
   componium rehearse [flags]    dry run against a player, with virtual instruments
+  componium tune [flags]        measure this machine and player, and cache a profile
+  componium doctor [flags]      print the cached profile and what it means
 
 rehearse flags:
   -socket   mpv IPC socket path        (default /tmp/mpv.sock)
