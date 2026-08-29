@@ -2,6 +2,12 @@
 
 > Draft. Nothing implements this yet; it exists to be argued with.
 
+> **Licence:** this specification is dedicated to the public domain under
+> CC0 1.0 ([LICENSE-spec.txt](LICENSE-spec.txt)), deliberately separate from
+> the AGPL-3.0 covering Componium itself. Anyone may implement a CIP
+> instrument, in any language, under any licence, without the project's
+> copyleft reaching their implementation.
+
 CIP is how the conductor talks to instruments. It is deliberately
 language-agnostic so that an ESP32 running C, a Python script and a Go binary
 are all first-class instruments.

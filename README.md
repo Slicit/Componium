@@ -96,6 +96,22 @@ See [LOGBOOK/features/feat-composer.md](LOGBOOK/features/feat-composer.md).
 - [docs/cip.md](docs/cip.md) — Componium Instrument Protocol (draft)
 - [docs/adr/](docs/adr/) — architecture decisions and why
 
+## Licence
+
+Componium is licensed under the **GNU Affero General Public License v3.0**.
+You may use, study, modify and redistribute it, including over a network, on
+the condition that derived works are released under the same licence.
+
+The **specification** in [docs/cip.md](docs/cip.md) is separately dedicated to
+the public domain under CC0 1.0. Implementing a CIP instrument does not make
+your instrument a derived work of Componium — write one in any language, under
+any licence you like.
+
+Commercial licences that lift the AGPL's obligations are available separately.
+
+Contributions require a signed agreement before they can be merged; see
+[CLA.md](CLA.md) for why and what it grants.
+
 ## Name
 
 After the Componium, a music automaton built by Diederich Nicolaus Winkel in
