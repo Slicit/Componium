@@ -1,0 +1,28 @@
+# One installation. The score names instruments; this says what they are.
+# Both are virtual here, so this runs with no hardware at all.
+
+[rig]
+name = "demo, no hardware"
+
+[[instrument]]
+id = "wind.main"
+kind = "wind"
+driver = "virtual"
+latency = "1.2s"
+
+[[instrument]]
+id = "light.ambient"
+kind = "light"
+driver = "virtual"
+latency = "20ms"
+
+# To drive a real DMX fixture instead, change the driver and add its address:
+#
+# [[instrument]]
+# id = "light.ambient"
+# kind = "light"
+# driver = "sacn"
+# latency = "20ms"
+# universe = 1
+# start = 10
+# mode = "rgb"

@@ -27,6 +27,8 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "play":
+		err = playCmd(os.Args[2:])
 	case "rehearse":
 		err = rehearse(os.Args[2:])
 	case "tune":
@@ -51,6 +53,7 @@ func usage() {
 	fmt.Fprint(os.Stderr, `componium drives physical effects in time with a film.
 
 usage:
+  componium play [flags]        play a score against a rig
   componium rehearse [flags]    dry run against a player, with virtual instruments
   componium tune [flags]        measure this machine and player, and cache a profile
   componium doctor [flags]      print the cached profile and what it means
