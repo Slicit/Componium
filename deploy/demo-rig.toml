@@ -1,0 +1,18 @@
+# The rig the demonstration stack runs. wind.main is a real CIP node reached
+# over the network; the light is virtual, so the conductor logs what it would
+# have sent to a fixture.
+
+[rig]
+name = "demonstration, no hardware"
+
+[[instrument]]
+id = "wind.main"
+kind = "wind"
+driver = "cip"
+addr = "node:5570"
+
+[[instrument]]
+id = "light.ambient"
+kind = "light"
+driver = "virtual"
+latency = "20ms"

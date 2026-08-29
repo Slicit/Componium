@@ -1,0 +1,117 @@
+# A running Componium, with no hardware.
+#
+#   docker compose -f deploy/docker-compose.yml up -d
+#   open http://<host>:8722
+#
+# Five containers from one image: something to play, something to follow it,
+# something to be an instrument, and the studio to edit what it plays.
+#
+# Nothing here touches a physical device. Every instrument is either virtual or
+# a software node, which is the same thing a contributor with no rig would run.
+
+name: componium
+
+x-image: &image
+  image: ${COMPONIUM_IMAGE:-ghcr.io/slicit/componium:main}
+
+services:
+  # Generates the demonstration clip once, then exits. The player waits for it.
+  clips:
+    <<: *image
+    entrypoint: ["sh", "/opt/componium/hack/make-testclips.sh", "/media"]
+    volumes:
+      - media:/media
+    restart: "no"
+
+  # Seeds an editable copy of the score. The studio writes to this, and the
+  # conductor plays it, so an edit in the browser is heard on the next pass.
+  scores:
+    <<: *image
+    entrypoint:
+      - sh
+      - -c
+      - 'test -f /scores/demo.componium || cp /opt/componium/examples/demo.componium /scores/demo.componium'
+    volumes:
+      - scores:/scores
+    restart: "no"
+
+  # mpv is the reference time source: it reports position once per frame, which
+  # is what makes a 3ms clock possible. Headless, looping forever.
+  player:
+    <<: *image
+    entrypoint:
+      - mpv
+      - --no-config
+      - --vo=null
+      - --ao=null
+      - --loop=inf
+      - --input-ipc-server=/run/componium/mpv.sock
+      - /media/componium-testclip.mkv
+    volumes:
+      - media:/media:ro
+      - ipc:/run/componium
+    depends_on:
+      clips:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # A software instrument. Exactly what the ESP32 firmware does, minus the pins,
+  # so the protocol is exercised for real rather than simulated.
+  node:
+    <<: *image
+    command:
+      - node
+      - -id=wind.main
+      - -kind=wind
+      - -addr=0.0.0.0:5570
+      - -latency=1200ms
+    restart: unless-stopped
+
+  # The conductor. Follows the player, dispatches cues early by each
+  # instrument's declared latency, and drives the node over the network.
+  conductor:
+    <<: *image
+    entrypoint:
+      - sh
+      - -c
+      - |
+        until [ -S /run/componium/mpv.sock ]; do sleep 0.2; done
+        exec componium play \
+          -score /scores/demo.componium \
+          -rig /opt/componium/deploy-rig.toml \
+          -socket /run/componium/mpv.sock
+    volumes:
+      - ipc:/run/componium:ro
+      - scores:/scores:ro
+      - ./demo-rig.toml:/opt/componium/deploy-rig.toml:ro
+    depends_on:
+      player:
+        condition: service_started
+      node:
+        condition: service_started
+      scores:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # The timeline editor. This is the part with a URL.
+  studio:
+    <<: *image
+    command:
+      - studio
+      - -score=/scores/demo.componium
+      - -addr=0.0.0.0:8722
+    volumes:
+      - scores:/scores
+    ports:
+      - "8722:8722"
+    depends_on:
+      scores:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  media:
+  scores:
+  # The mpv IPC socket. A unix socket on a shared volume is how the conductor
+  # reaches the player without either of them needing a network.
+  ipc:

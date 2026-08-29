@@ -1,0 +1,7 @@
+.git
+.github
+LOGBOOK
+docs
+firmware
+deploy
+*.md
