@@ -288,3 +288,27 @@ code { background: #202730; padding: 0.1em 0.35em; border-radius: 3px; }
 .force-row.forcing .force-value { color: #e8c88a; }
 
 .chip.forced { border-color: #6a5322; color: #e8c88a; }
+
+/* --- editable timeline events ------------------------------------------ */
+
+/* Curve points. Small, because a feature length track has a lot of them, but
+ * a real target: the hit area is the circle plus the stroke, and anything
+ * smaller than this is a game rather than a control. */
+.pt {
+  fill: #0e1218;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  cursor: ns-resize;
+}
+.pt:hover { r: 5; fill: currentColor; }
+
+.cue { cursor: grab; }
+.cue:active { cursor: grabbing; }
+
+/* The length grip. Invisible until the pointer is near it — a visible handle
+ * on every span turns a dense track into a picket fence. */
+.cue-grip { fill: transparent; cursor: ew-resize; }
+.cue-grip:hover { fill: #e8c88a; }
+
+.lumen { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; }
+.lumen input[type=range] { width: 92px; accent-color: #7fa8d8; vertical-align: middle; }

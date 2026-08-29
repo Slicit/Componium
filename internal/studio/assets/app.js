@@ -154,6 +154,35 @@ function useRoomView(want) {
 
   try { localStorage.setItem('componium.room', want); } catch (err) { /* private mode */ }
   paintRoomToggle(want);
+  applyLumen(preferredLumen());
+}
+
+/* Room brightness, 0 to 100, remembered like the view choice.
+ *
+ * Only the 3D room has any lighting to adjust, so the control hides itself in
+ * the flat view rather than sitting there doing nothing. */
+function preferredLumen() {
+  try {
+    /* Test for the missing key before converting. Number(null) is 0, which is
+     * a perfectly valid brightness, so a plain Number() conversion turns
+     * "nothing stored" into "turn the lights off" — and the room comes up
+     * black on a first visit for a reason that looks like a rendering bug. */
+    const stored = localStorage.getItem('componium.lumen');
+    if (stored === null || stored === '') return 50;
+    const v = Number(stored);
+    return Number.isFinite(v) && v >= 0 && v <= 100 ? v : 50;
+  } catch (err) {
+    return 50;
+  }
+}
+
+function applyLumen(v) {
+  const slider = el('room-lumen');
+  if (slider && slider.parentNode) {
+    slider.parentNode.hidden = roomKind !== '3d';
+  }
+  if (room && room.setBrightness) room.setBrightness(v / 100);
+  try { localStorage.setItem('componium.lumen', String(v)); } catch (err) { /* private mode */ }
 }
 
 function paintRoomToggle(want) {
@@ -314,6 +343,9 @@ async function load() {
     onSelect: showInspector,
     onToggle: toggleMuted,
     onSolo: soloOnly,
+    /* Dragging an event on the timeline edits the score exactly as typing in
+     * the inspector does, so it has to arm Save the same way. */
+    onEdit: markDirty,
   });
   timeline.setScore(score, duration());
 
@@ -410,6 +442,11 @@ function parseTime(text) {
 }
 
 el('save').addEventListener('click', save);
+
+el('room-lumen').value = String(preferredLumen());
+el('room-lumen').addEventListener('input', function () {
+  applyLumen(Number(el('room-lumen').value));
+});
 
 el('room-3d').addEventListener('click', function () { useRoomView('3d'); });
 el('room-flat').addEventListener('click', function () { useRoomView('flat'); });

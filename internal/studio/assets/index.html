@@ -41,6 +41,10 @@
         <span class="viewtoggle">
           <button id="room-3d" class="seg" type="button">3D</button><button id="room-flat" class="seg" type="button">Flat</button>
         </span>
+        <label class="lumen" title="How brightly the room is lit. Turn it down to judge a dark scene, up to see where everything is.">
+          <span class="muted small">light</span>
+          <input id="room-lumen" type="range" min="0" max="100" step="1" value="50">
+        </label>
         <span id="room-note" class="muted small"></span>
       </h2>
       <div id="room" class="room-host"></div>
@@ -49,14 +53,17 @@
     </div>
   </section>
 
+  <!-- The timeline sits directly under the picture, because the two are read
+       together: you watch a moment and look at what the score does with it.
+       The library is a place you visit occasionally, so it goes last. -->
   <section class="pane wide">
-    <h2>Library <span class="muted small">one film, one score; analysis runs in the background, one at a time</span></h2>
-    <div id="library" class="library"></div>
+    <h2>Timeline <span class="muted small">drag an event to move it, its right edge to change how long it lasts; click to edit; checkboxes and solo mute the room too</span></h2>
+    <div id="timeline" class="timeline"></div>
   </section>
 
   <section class="pane wide">
-    <h2>Timeline <span class="muted small">click a lane to seek, a cue to edit; checkboxes and solo mute the room too</span></h2>
-    <div id="timeline" class="timeline"></div>
+    <h2>Library <span class="muted small">one film, one score; analysis runs in the background, one at a time</span></h2>
+    <div id="library" class="library"></div>
   </section>
 </main>
 

@@ -42,6 +42,9 @@ const ON = 0.02;
  * just does not cast. */
 const MAX_LIGHTS = 8;
 
+/* Exposure at the middle of the brightness slider. */
+const BASE_EXPOSURE = 1.12;
+
 /* Shared with the flat view via the global scope, so the two cannot disagree
  * about what a cue means. See room.js. */
 const readDevice = globalThis.deviceState;
@@ -350,7 +353,7 @@ class Room3D {
      * to be brighter than the soft wash can go, and without it every spike
      * clips to the same white and the two ambilight layers look identical. */
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.12;
+    renderer.toneMappingExposure = BASE_EXPOSURE;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer = renderer;
     this.host.appendChild(renderer.domElement);
@@ -431,8 +434,11 @@ class Room3D {
      * physical units and every intensity in the ecosystem changed meaning.
      * An earlier version of this file used the old figures and rendered a
      * black box that was, technically, a correct scene graph. */
-    scene.add(new THREE.AmbientLight(0xaebbd0, 1.3));
-    scene.add(new THREE.HemisphereLight(0xb8cbe4, 0x343a45, 1.3));
+    const ambient = new THREE.AmbientLight(0xaebbd0, 1.3);
+    const hemi = new THREE.HemisphereLight(0xb8cbe4, 0x343a45, 1.3);
+    scene.add(ambient);
+    scene.add(hemi);
+    this.fill = [ambient, hemi];
 
     /* Two ceiling sources. They exist as much for the specular highlights they
      * put on the television, the floor and the couch as for the light itself:
@@ -442,6 +448,7 @@ class Room3D {
       const lamp = new THREE.PointLight(0xfff0dc, 11, 13, 2);
       lamp.position.set(x, ROOM_H - 0.16, 2.6);
       scene.add(lamp);
+      this.fill.push(lamp);
       const fitting = new THREE.Mesh(
         new THREE.SphereGeometry(0.07, 12, 10),
         new THREE.MeshBasicMaterial({ color: 0xfff4e4 })
@@ -517,6 +524,36 @@ class Room3D {
 
   setMuted(muted) {
     this.muted = muted;
+  }
+
+  /* How brightly the room itself is lit, 0 to 1, with 0.5 meaning the level
+   * the room was built at.
+   *
+   * Only the fill lighting moves — the ambient, the sky and the two ceiling
+   * fittings. The lamps a cue drives and the wash off the television are left
+   * exactly where the score put them, because those are the thing being
+   * previewed: scaling them with this slider would make the preview agree with
+   * whatever brightness happened to be selected, which is the one property it
+   * must not have. Turning the room down therefore does not dim an effect, it
+   * makes the effect the brightest thing in the picture, which is what a dark
+   * scene actually looks like.
+   *
+   * The curve is exponential rather than linear because perceived brightness
+   * is: a linear slider spends most of its travel in a range that all looks
+   * the same and then falls off a cliff at the end. */
+  setBrightness(v) {
+    const level = Math.max(0, Math.min(1, Number(v)));
+    this.brightness = level;
+    const factor = Math.pow(16, level - 0.5);
+    for (const light of this.fill || []) {
+      if (light.baseIntensity === undefined) light.baseIntensity = light.intensity;
+      light.intensity = light.baseIntensity * factor;
+    }
+    /* Exposure moves too, but far less. It affects the cue-driven lights as
+     * well, so leaning on it would break the rule above; a little of it stops
+     * the two ends of the slider looking flat. */
+    this.renderer.toneMappingExposure = BASE_EXPOSURE * Math.pow(2, level - 0.5);
+    this.frame();
   }
 
   /* Forced levels: id -> 0..1, overriding whatever the score says. See the
