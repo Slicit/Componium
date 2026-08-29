@@ -54,8 +54,17 @@ git fetch -q origin
 # checked against what was just pushed before anything is removed. A local
 # file that differs means the sync missed it, and destroying it would be the
 # worst possible outcome of a convenience script.
+# True when origin/main and the working tree agree about a path, including
+# when they agree that it does not exist. Getting that last case wrong
+# reports a deletion that has already been pushed as a conflict, which is
+# what happened the first time a file was removed through this script.
 same_as_origin() {
-  MSYS_NO_PATHCONV=1 git show "origin/main:$1" 2>/dev/null | diff -q - "$1" >/dev/null 2>&1
+  if MSYS_NO_PATHCONV=1 git cat-file -e "origin/main:$1" 2>/dev/null; then
+    [ -f "$1" ] || return 1
+    MSYS_NO_PATHCONV=1 git show "origin/main:$1" 2>/dev/null | diff -q - "$1" >/dev/null 2>&1
+  else
+    [ ! -f "$1" ]
+  fi
 }
 
 for f in $(git diff --name-only); do
