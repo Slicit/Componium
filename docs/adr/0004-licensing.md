@@ -50,7 +50,7 @@ CIP must never make an implementation a derived work.
 - **A CLA must be in place before the first external pull request is merged.**
   Dual licensing works only while one party holds sufficient rights. Merging a
   single unsigned contribution ends the commercial option permanently, and is
-  not practically reversible. See [CLA.md](../../CLA.md).
+  not practically reversible. See [CLA/README.md](../../CLA/README.md).
 - The AGPL does not prevent anyone charging money for Componium as it stands.
   It prevents them keeping their modifications closed. If the requirement ever
   hardens to "nobody but us may charge at all", the licence must change to

@@ -1,0 +1,62 @@
+# Runs the tests. All three languages, because all three ship.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: gofmt
+        # Not a style preference: an unformatted diff makes every later review
+        # noisier than it needs to be.
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt clean:"; echo "$unformatted"; exit 1
+          fi
+      - run: go vet ./...
+      - run: go test ./...
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: composer tests
+        working-directory: composer
+        run: python3 -m unittest discover -p 'test_*.py' -v
+
+  javascript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: studio tests
+        working-directory: internal/studio/assets
+        run: node timecode.test.js
+
+  line-endings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: no CRLF
+        # Authoring happens on Windows, where CRLF is introduced at the moment
+        # a file is written. .gitattributes normalises the committed blob, but
+        # this catches anything that slips past it.
+        run: |
+          bad=$(git grep -lI $'\r' -- . || true)
+          if [ -n "$bad" ]; then
+            echo "files with CRLF line endings:"; echo "$bad"; exit 1
+          fi

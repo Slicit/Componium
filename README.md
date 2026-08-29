@@ -127,7 +127,10 @@ See [LOGBOOK/features/feat-composer.md](LOGBOOK/features/feat-composer.md).
 ## Documentation
 
 - [ROADMAP.md](ROADMAP.md) — milestones and their ordering rationale
-- [docs/cip.md](docs/cip.md) — Componium Instrument Protocol (draft)
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to help, and the CLA
+- [docs/cip.md](docs/cip.md) — Componium Instrument Protocol
+- [docs/hardware.md](docs/hardware.md) — what to buy, in what order, and why
+- [docs/wet-and-hot.md](docs/wet-and-hot.md) — fog, water, heat and moving mass
 - [docs/adr/](docs/adr/) — architecture decisions and why
 
 ## Licence
@@ -144,7 +147,7 @@ any licence you like.
 Commercial licences that lift the AGPL's obligations are available separately.
 
 Contributions require a signed agreement before they can be merged; see
-[CLA.md](CLA.md) for why and what it grants.
+[CLA/README.md](CLA/README.md) for why and what it grants.
 
 ## Name
 
