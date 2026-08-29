@@ -9,8 +9,42 @@ drives your *instruments* (motion rig, fans, DMX fixtures, foggers, misters,
 shakers) through a single *conductor* that keeps everything locked to playback
 timecode. Instruments are plugins: if you can control it, you can score it.
 
-> Status: **pre-alpha.** Nothing here drives real hardware yet. The current
-> milestone is the timing core, validated entirely against virtual instruments.
+> Status: **alpha.** Every part exists and is tested, and none of it has ever
+> driven a physical device. Drivers are verified over real sockets against real
+> listeners, which proves the protocol and proves nothing about a fixture, a
+> fan, a fogger or a platform. Read [docs/wet-and-hot.md](docs/wet-and-hot.md)
+> before pointing it at anything that can hurt you.
+
+## Try it with no hardware
+
+```sh
+mpv --input-ipc-server=/tmp/mpv.sock film.mkv
+componium play -score examples/demo.componium -rig examples/demo-rig.toml
+```
+
+Everything in that rig is virtual, so it prints what a real rig would have been
+told. `componium node` adds a software instrument over the network, and
+`componium studio` opens the timeline in a browser.
+
+To generate a score from a film:
+
+```sh
+python3 composer/compose.py film.mkv -o film.componium
+componium validate -score film.componium -rig my-rig.toml
+```
+
+## Commands
+
+| | |
+|---|---|
+| `componium play` | play a score against a rig |
+| `componium rehearse` | dry run against a player, virtual instruments only |
+| `componium validate` | check a score, optionally against a rig |
+| `componium tune` | measure this machine and player |
+| `componium doctor` | print the tuning profile and what it means |
+| `componium node` | run a software instrument node |
+| `componium studio` | edit a score in a browser |
+
 
 ## What it is not
 

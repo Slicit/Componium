@@ -51,19 +51,24 @@ Ordering principle: prove the timing core against virtual instruments before
 spending money on hardware, and put anything involving heat, water or moving
 mass last.
 
-| ID | Milestone | Hardware needed |
-|---|---|---|
-| M1 | Conductor, virtual instrument, fake clock, latency compensation | none |
-| M2 | Real time source (mpv / VLC) and clock filter | none |
-| M3 | Tuning: startup calibration and continuous refinement | none |
-| M4 | First real instrument, DMX light over sACN | cheap |
-| M5 | Score format v1, `play` and `rehearse` CLI | none |
-| M6 | Safety supervisor and watchdogs, hardened | none |
-| M7 | Composer v0, LFE to shake and brightness to light | none |
-| M8 | Wind, ESP32 node with PWM fan | moderate |
-| M9 | Studio timeline editor | none |
-| M10 | Composer v1, semantic detection and subtitle mining | none |
-| M11 | Fog, water, then motion via 6DOF bridge | expensive |
+| ID | Milestone | Status | Verified against |
+|---|---|---|---|
+| M1 | Conductor, virtual instrument, latency compensation | done | tests |
+| M2 | Time source (mpv) and clock | done | live mpv |
+| M3 | Tuning: `componium tune` and `doctor` | done | live mpv |
+| M4 | DMX light over sACN | done | real UDP, **no fixture** |
+| M5 | Score format v1, rig files, `play` | done | live mpv |
+| M6 | Safety supervisor and watchdogs | done | tests |
+| M7 | Composer v0, LFE and frame colour | done | real video |
+| M8 | CIP, `componium node`, ESP32 firmware | done | live node, **firmware uncompiled** |
+| M9 | Studio timeline editor | done | API and node tests, **not in a browser** |
+| M10 | Composer v1, subtitles and scene cuts | done | real video with subtitles |
+| M11 | Motion 6DOF bridge, fog and water | done | real UDP, **no hardware** |
+
+Nothing has been tested against physical hardware of any kind. Every driver is
+verified over a real socket against a real listener, which proves the protocol
+and the logic and proves nothing about a fixture, a fan, a fogger or a
+platform.
 
 ## Reading order for agents
 
