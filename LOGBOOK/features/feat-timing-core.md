@@ -233,6 +233,48 @@ mpv can also push notifications via `observe_property`, which would remove the
 detection delay entirely. VLC has no equivalent, so polling based detection has
 to exist regardless. Push is an optimisation for one source, not the mechanism.
 
+### 2026-08-29 · internal/clock implemented, 3.34 ms worst case in test
+
+Edge anchoring built and tested against a synthetic staircase source, with no
+player, no socket and no sleeping. Worst prediction error across five seconds
+of simulated playback is **3.34 ms**, against 41.67 ms for one frame at 24 fps
+and 12.2 ms sd for a single naive sample. About twelve times better than
+sampling naively, and better than the 9 ms the error budget predicted, because
+the budget assumed worst case scheduler lateness on every sample rather than
+occasionally.
+
+- **Decision:** The clock is passive. It polls nothing, starts no goroutine and
+  calls no timer of its own. The caller feeds it `Sample(wall, pos, ok)` and
+  asks `At(wall)`, both with wall time passed in explicitly.
+- **Why:** Every behaviour that matters here is a time dependent state machine,
+  and time dependent state machines that read the clock internally can only be
+  tested with sleeps. Passing wall time in makes pause detection, seek recovery
+  and rate convergence testable deterministically and instantly. The whole test
+  suite runs in 3 ms.
+- **Impact:** The polling loop lives in the caller, which also owns the poll
+  rate. `Config.PollInterval` is only a floor on reported precision.
+
+- **Decision:** `Precision` must never be optimistic, and there is a test whose
+  only job is to assert that.
+- **Why:** The conductor refuses cues whose required precision it cannot meet,
+  which is the mechanism that stops VLC silently degrading a motion track. That
+  mechanism is worthless if precision can under report. `TestPrecisionIsNever
+  Optimistic` checks the invariant on every sample of a run rather than at the
+  end.
+- **Impact:** Precision is deliberately conservative: the anchor's own window,
+  plus the residual spread of the rate fit, plus accumulated rate uncertainty,
+  floored at the poll interval. Before the first anchor it reports a whole
+  frame interval, because a reading with no observed edge really can be that
+  stale.
+
+Paused readings do not decay. Precision stays at one frame interval however
+long the pause lasts, because nothing is moving and the position on screen is
+still exactly what it was.
+
+A discontinuity keeps the rate estimate and drops only the anchors. Rate is a
+property of the machine and the player, so it survives a seek; position is not,
+so it does not.
+
 ## Links
 
 - Branch: `feat-timing-core`
