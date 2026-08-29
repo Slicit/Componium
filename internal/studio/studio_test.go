@@ -413,3 +413,17 @@ func TestASingleFileStillWorks(t *testing.T) {
 		t.Errorf("single file mode returned %d %q", rec.Code, rec.Body.String())
 	}
 }
+
+// embed.FS reports a zero modification time, so Go sends no Last-Modified and
+// a browser has nothing to revalidate against. Without an explicit header it
+// caches heuristically and keeps showing an old build after an upgrade.
+func TestAssetsAreNotCached(t *testing.T) {
+	s, _ := newServer(t)
+	for _, path := range []string{"/", "/app.js", "/style.css"} {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := rec.Header().Get("Cache-Control"); !strings.Contains(got, "no-store") {
+			t.Errorf("%s served with Cache-Control %q, want no-store", path, got)
+		}
+	}
+}

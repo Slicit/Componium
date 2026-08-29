@@ -72,7 +72,7 @@ func (s *Server) Handler() http.Handler {
 		panic(err) // embedded at build time; cannot fail at runtime
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/", http.FileServer(http.FS(sub)))
+	mux.Handle("/", noCache(http.FileServer(http.FS(sub))))
 	mux.HandleFunc("/api/score", s.handleScore)
 	mux.HandleFunc("/api/rig", s.handleRig)
 	mux.HandleFunc("/media", s.handleMedia)
@@ -131,6 +131,23 @@ func playable(name string) bool {
 
 func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.mediaFiles())
+}
+
+// noCache stops a browser holding on to a stale page.
+//
+// The assets are embedded, and embed.FS reports a zero modification time, so
+// Go cannot send Last-Modified and a browser has nothing to revalidate
+// against. Left alone it caches heuristically and keeps showing an old
+// build after an upgrade, which is a genuinely confusing way to lose an
+// afternoon.
+//
+// This is a local authoring tool. Never caching costs nothing and removes
+// the whole class of problem.
+func noCache(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, must-revalidate")
+		h.ServeHTTP(w, r)
+	})
 }
 
 // handleMedia serves one film.
