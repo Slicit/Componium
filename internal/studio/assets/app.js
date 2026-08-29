@@ -365,8 +365,10 @@ function attachMedia(name) {
     const note = el('no-media');
     note.hidden = false;
     note.textContent =
-      'this browser cannot decode ' + name + '. The timeline and room still ' +
-      'work, driven by the score alone. Try one of the mp4 files.';
+      'this browser cannot decode ' + name + '. Press Prepare next to it in ' +
+      'the library to build a copy that plays here — usually quick, because ' +
+      'the video is only re-encoded when it has to be. Meanwhile the timeline ' +
+      'and room still work, driven by the score alone.';
   };
 }
 

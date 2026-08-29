@@ -20,6 +20,20 @@ function libEl(tag, className, parent) {
   return n;
 }
 
+/* Whether anything is happening to this film, counting both kinds of job.
+ *
+ * Both, because the poll loop uses this to decide whether to keep asking, and
+ * a version that looked only at the analysis would let a preview build run
+ * completely invisibly: no progress bar, no completion, just a file that
+ * appears if you happen to reload. */
+function libBusy(entry) {
+  const jobs = [entry.job, entry.prepare];
+  for (const job of jobs) {
+    if (job && (job.state === 'queued' || job.state === 'running')) return true;
+  }
+  return false;
+}
+
 function libSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(0) + ' MB';
 }
@@ -49,9 +63,7 @@ class Library {
   /* Poll only while something is actually running. A studio sitting idle
    * should not be asking the server a question every second forever. */
   maybePoll() {
-    const busy = (this.data.entries || []).some(function (e) {
-      return e.job && (e.job.state === 'queued' || e.job.state === 'running');
-    });
+    const busy = (this.data.entries || []).some(libBusy);
     if (!busy || this.polling) return;
     this.polling = true;
     const tick = async () => {
@@ -60,9 +72,7 @@ class Library {
         this.data = await res.json();
         this.render();
       }
-      const stillBusy = (this.data.entries || []).some(function (e) {
-        return e.job && (e.job.state === 'queued' || e.job.state === 'running');
-      });
+      const stillBusy = (this.data.entries || []).some(libBusy);
       if (stillBusy) {
         setTimeout(tick, LIB_POLL_MS);
       } else {
@@ -79,6 +89,16 @@ class Library {
 
   async buildAll() {
     await fetch('/api/build?all=1', { method: 'POST' });
+    await this.refresh();
+  }
+
+  async prepare(film) {
+    await fetch('/api/prepare?file=' + encodeURIComponent(film), { method: 'POST' });
+    await this.refresh();
+  }
+
+  async prepareAll() {
+    await fetch('/api/prepare?all=1', { method: 'POST' });
     await this.refresh();
   }
 
@@ -115,6 +135,14 @@ class Library {
       pick.addEventListener('click', () => input.click());
     }
 
+    if (data.canPrepare) {
+      const prepAll = libEl('button', '', headActions);
+      prepAll.textContent = 'Prepare all';
+      prepAll.title = 'Make a browser-playable copy of every film that has not '
+        + 'got one. They run one at a time.';
+      prepAll.addEventListener('click', () => this.prepareAll());
+    }
+
     if (data.canBuild) {
       const all = libEl('button', '', headActions);
       all.textContent = 'Rebuild all';
@@ -146,6 +174,13 @@ class Library {
         /* The composer's own last words, not a generic failure. Knowing it was
          * ffmpeg that objected is most of the diagnosis. */
         failed.textContent = 'failed: ' + (job.error || 'unknown');
+      } else if (job && job.state === 'interrupted') {
+        /* Say it was killed rather than saying nothing. Silence here reads as
+         * "it never started", which is the opposite of the truth and sends
+         * somebody looking for a button they already pressed. */
+        const stopped = libEl('span', 'muted small', status);
+        stopped.textContent = 'analysis stopped at '
+          + Math.round((job.progress || 0) * 100) + '% when the studio restarted';
       } else if (entry.hasScore) {
         const detail = libEl('span', 'muted small', status);
         detail.textContent = entry.tracks + ' tracks, ' + entry.cues + ' cues, ' +
@@ -156,6 +191,31 @@ class Library {
       } else {
         const none = libEl('span', 'muted small', status);
         none.textContent = 'no score yet';
+      }
+
+      /* The preview line, separate from the analysis line, because the two are
+       * independent and can both be true: a film can be analysing and building
+       * its browser copy on different days. */
+      const prep = entry.prepare;
+      if (prep && (prep.state === 'queued' || prep.state === 'running')) {
+        const pstatus = libEl('div', 'lib-status', row);
+        const bar = libEl('div', 'bar', pstatus);
+        libEl('div', 'fill', bar).style.width =
+          Math.round((prep.progress || 0) * 100) + '%';
+        const label = libEl('span', 'muted small', pstatus);
+        label.textContent = prep.state === 'queued'
+          ? 'preview queued'
+          : 'preview ' + Math.round((prep.progress || 0) * 100) + '%  ' + (prep.label || '');
+      } else if (prep && prep.state === 'failed') {
+        const failed = libEl('span', 'failed small', status);
+        failed.textContent = ' preview failed: ' + (prep.error || 'unknown');
+      } else if (prep && prep.state === 'interrupted') {
+        const stopped = libEl('span', 'muted small', status);
+        stopped.textContent = ' preview stopped by a restart';
+      } else if (entry.preview) {
+        const ok = libEl('span', 'muted small', status);
+        ok.textContent = '  · browser copy ready';
+        ok.title = 'This film is played from a prepared MP4 rather than the original.';
       }
 
       const actions = libEl('div', 'lib-actions', row);
@@ -170,6 +230,14 @@ class Library {
         const running = job && (job.state === 'queued' || job.state === 'running');
         build.disabled = !!running;
         build.addEventListener('click', () => this.build(entry.film));
+      }
+      if (data.canPrepare && !entry.preview) {
+        const prepare = libEl('button', '', actions);
+        prepare.textContent = 'Prepare';
+        prepare.title = 'Make a copy this browser can play. Usually quick: the '
+          + 'video is only re-encoded when it has to be.';
+        prepare.disabled = !!(prep && (prep.state === 'queued' || prep.state === 'running'));
+        prepare.addEventListener('click', () => this.prepare(entry.film));
       }
       if (data.canUpload) {
         const del = libEl('button', 'danger', actions);

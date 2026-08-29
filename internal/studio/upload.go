@@ -25,6 +25,12 @@ func safeName(name string) error {
 	if strings.HasPrefix(name, ".") || strings.Contains(name, "..") {
 		return fmt.Errorf("name must not start with a dot or contain ..")
 	}
+	if isPreview(name) {
+		// Reserved, because a preview is generated rather than uploaded.
+		// Accepting one would let an upload masquerade as another film's
+		// prepared copy and be served in its place.
+		return fmt.Errorf(".preview.mp4 is reserved for generated previews")
+	}
 	if !playable(name) {
 		return fmt.Errorf("%s is not a video this studio can play", filepath.Ext(name))
 	}
@@ -138,6 +144,20 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The preview goes with the film, always and without being asked.
+	//
+	// Not optional like the score, because it is not anybody's work: it is a
+	// derived copy that is useless without the film, and it is frequently the
+	// larger of the two files. Deleting a film to reclaim space and leaving
+	// several gigabytes of preview behind would defeat the only reason anyone
+	// presses this button. A partial from an interrupted prepare goes too.
+	preview := previewName(want)
+	removedPreview := ""
+	if err := os.Remove(filepath.Join(dir, preview)); err == nil {
+		removedPreview = preview
+	}
+	os.Remove(filepath.Join(dir, preview+".part"))
+
 	removedScore := ""
 	if r.URL.Query().Get("score") == "1" {
 		path := s.jobs.ScorePath(want)
@@ -154,6 +174,6 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"deleted": want, "score": removedScore,
+		"deleted": want, "score": removedScore, "preview": removedPreview,
 	})
 }

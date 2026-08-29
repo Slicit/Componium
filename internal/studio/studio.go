@@ -157,6 +157,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/media", s.handleMediaList)
 	mux.HandleFunc("/api/library", s.handleLibrary)
 	mux.HandleFunc("/api/build", s.handleBuild)
+	mux.HandleFunc("/api/prepare", s.handlePrepare)
 	mux.HandleFunc("/api/jobs", s.handleJobs)
 	mux.HandleFunc("/api/upload", s.handleUpload)
 	mux.HandleFunc("/api/delete", s.handleDelete)
@@ -184,16 +185,32 @@ func (s *Server) mediaFiles() []mediaFile {
 	if err != nil {
 		return nil
 	}
+	// Which films have a browser-playable copy beside them. Gathered first
+	// because the preview for a film is discovered independently of the order
+	// the directory happens to be read in.
+	previews := map[string]bool{}
+	for _, e := range entries {
+		if !e.IsDir() && isPreview(e.Name()) {
+			previews[e.Name()] = true
+		}
+	}
+
 	var out []mediaFile
 	for _, e := range entries {
-		if e.IsDir() || !playable(e.Name()) {
+		// A preview is not a film. Listing it as one would offer to analyse
+		// it and produce a second score for the same picture.
+		if e.IsDir() || !playable(e.Name()) || isPreview(e.Name()) {
 			continue
 		}
 		fi, err := e.Info()
 		if err != nil {
 			continue
 		}
-		out = append(out, mediaFile{Name: e.Name(), Size: fi.Size()})
+		out = append(out, mediaFile{
+			Name:    e.Name(),
+			Size:    fi.Size(),
+			Preview: previews[previewName(e.Name())],
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -202,6 +219,10 @@ func (s *Server) mediaFiles() []mediaFile {
 type mediaFile struct {
 	Name string `json:"name"`
 	Size int64  `json:"size"`
+	// Preview is true when a browser-playable copy exists beside the film.
+	// The film itself may well be unplayable in a browser; this says whether
+	// there is something to play instead.
+	Preview bool `json:"preview"`
 }
 
 func playable(name string) bool {
@@ -308,7 +329,15 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 	// expressed.
 	for _, f := range files {
 		if f.Name == want {
-			http.ServeFile(w, r, filepath.Join(s.media, f.Name))
+			// Prefer the prepared copy. The original is very often something
+			// no browser can decode — that is the whole reason the preview
+			// exists — so serving it here would hand back bytes the <video>
+			// element is going to refuse.
+			name := f.Name
+			if f.Preview {
+				name = previewName(f.Name)
+			}
+			http.ServeFile(w, r, filepath.Join(s.media, name))
 			return
 		}
 	}
@@ -572,17 +601,24 @@ type libraryEntry struct {
 	Cues      int     `json:"cues,omitempty"`
 	Duration  float64 `json:"duration,omitempty"`
 	Job       *Job    `json:"job,omitempty"`
+	// Preview is whether a browser-playable copy exists, and Prepare is the
+	// job making one. Separate from Job, because a film can legitimately be
+	// being analysed and prepared at the same time.
+	Preview bool `json:"preview"`
+	Prepare *Job `json:"prepare,omitempty"`
 }
 
 type libraryView struct {
 	Scores string `json:"scores"`
 	// Free space where films live, since running out of it is the reason
 	// anybody deletes one.
-	Free      int64          `json:"free"`
-	CanBuild  bool           `json:"canBuild"`
-	CanUpload bool           `json:"canUpload"`
-	Current   string         `json:"current"`
-	Entries   []libraryEntry `json:"entries"`
+	Free      int64 `json:"free"`
+	CanBuild  bool  `json:"canBuild"`
+	CanUpload bool  `json:"canUpload"`
+	// CanPrepare is whether ffmpeg is around to make browser-playable copies.
+	CanPrepare bool           `json:"canPrepare"`
+	Current    string         `json:"current"`
+	Entries    []libraryEntry `json:"entries"`
 }
 
 // handleLibrary answers what films exist, which have scores, and what is being
@@ -595,11 +631,12 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	out := libraryView{
-		Scores:    s.scores,
-		CanBuild:  s.jobs.Available(),
-		Current:   current,
-		Free:      freeBytes(s.mediaDir()),
-		CanUpload: s.mediaDir() != "",
+		Scores:     s.scores,
+		CanBuild:   s.jobs.Available(),
+		Current:    current,
+		Free:       freeBytes(s.mediaDir()),
+		CanUpload:  s.mediaDir() != "",
+		CanPrepare: s.mediaDir() != "" && ffmpegAvailable(),
 	}
 	for _, f := range s.mediaFiles() {
 		entry := libraryEntry{Film: f.Name, Size: f.Size}
@@ -612,13 +649,65 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 			entry.Cues = len(sc.Cues())
 			entry.Duration = sc.Meta.Media.Duration.Duration().Seconds()
 		}
-		if job, ok := jobs[f.Name]; ok {
+		entry.Preview = f.Preview
+		if job, ok := jobs[jobKey(JobAnalyse, f.Name)]; ok {
 			j := job
 			entry.Job = &j
+		}
+		if job, ok := jobs[jobKey(JobPrepare, f.Name)]; ok {
+			j := job
+			entry.Prepare = &j
 		}
 		out.Entries = append(out.Entries, entry)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handlePrepare queues a browser-playable copy of a film. With all=1 it
+// queues every film that has not got one, which is the useful bulk operation:
+// a library that has just been dropped onto the machine is mostly Matroska.
+//
+// Deliberately separate from analysis rather than folded into it. Analysis
+// reads the original and does not care what container it is in, and preparing
+// a preview does not make analysis faster — measured on this project's own
+// box, re-encoding a 110 minute film costs about 95 minutes to save about 15
+// minutes of decoding, which is not a trade worth making automatically.
+func (s *Server) handlePrepare(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !ffmpegAvailable() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "ffmpeg and ffprobe are not installed, so previews cannot be made",
+		})
+		return
+	}
+
+	files := s.mediaFiles()
+	if r.URL.Query().Get("all") == "1" {
+		var queued []string
+		for _, f := range files {
+			if f.Preview {
+				continue
+			}
+			s.jobs.Enqueue(JobPrepare, f.Name)
+			queued = append(queued, f.Name)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"queued": queued})
+		return
+	}
+
+	want := r.URL.Query().Get("file")
+	// Same rule as serving media: only a name that appeared in the listing.
+	for _, f := range files {
+		if f.Name == want {
+			writeJSON(w, http.StatusOK, s.jobs.Enqueue(JobPrepare, want))
+			return
+		}
+	}
+	http.Error(w, "no such film", http.StatusNotFound)
 }
 
 // handleBuild starts an analysis. With all=1 it queues every film, which is
@@ -640,7 +729,7 @@ func (s *Server) handleBuild(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("all") == "1" {
 		var queued []string
 		for _, f := range files {
-			s.jobs.Enqueue(f.Name)
+			s.jobs.Enqueue(JobAnalyse, f.Name)
 			queued = append(queued, f.Name)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"queued": queued})
@@ -651,7 +740,7 @@ func (s *Server) handleBuild(w http.ResponseWriter, r *http.Request) {
 	// Same rule as serving media: only a name that appeared in the listing.
 	for _, f := range files {
 		if f.Name == want {
-			writeJSON(w, http.StatusOK, s.jobs.Enqueue(want))
+			writeJSON(w, http.StatusOK, s.jobs.Enqueue(JobAnalyse, want))
 			return
 		}
 	}
