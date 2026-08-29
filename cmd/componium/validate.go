@@ -41,6 +41,13 @@ func validateCmd(args []string) error {
 	var points int
 	for _, c := range curves {
 		points += len(c.Points)
+		// An empty curve track is legal and means the instrument does
+		// nothing. It has no first or last point to report, and reaching for
+		// them here panicked on every score that contained one.
+		if len(c.Points) == 0 {
+			fmt.Printf("  curve %-16s no points; this instrument does nothing\n", c.Instrument)
+			continue
+		}
 		fmt.Printf("  curve %-16s %d points, %s to %s\n",
 			c.Instrument, len(c.Points), c.Points[0].T, c.Points[len(c.Points)-1].T)
 	}

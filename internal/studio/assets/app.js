@@ -347,6 +347,7 @@ async function load() {
      * the inspector does, so it has to arm Save the same way. */
     onEdit: markDirty,
   });
+  timeline.rig = rig;
   timeline.setScore(score, duration());
 
   if (rig.hasMedia) await loadMediaList();

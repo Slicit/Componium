@@ -312,3 +312,38 @@ code { background: #202730; padding: 0.1em 0.35em; border-radius: 3px; }
 
 .lumen { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; }
 .lumen input[type=range] { width: 92px; accent-color: #7fa8d8; vertical-align: middle; }
+
+/* --- curve sub-lanes ---------------------------------------------------- */
+
+/* One lane per channel. They used to share one, which stacked r, g and b
+ * handles on the same pixel wherever their values matched — which is every
+ * moment the light is off, so most of a film. */
+.sub { position: relative; }
+.sub + .sub { border-top: 1px solid #1a1f27; }
+.sub-lane { display: block; width: 100%; height: 26px; }
+
+.sub-tag {
+  position: absolute; left: 4px; top: 2px;
+  font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase;
+  opacity: 0.75; pointer-events: none;
+}
+.sub-tag.ch-r { color: #e3736b; }
+.sub-tag.ch-g { color: #79c073; }
+.sub-tag.ch-b { color: #6b93e3; }
+.sub-tag.ch-intensity { color: #d8a24a; }
+
+.lane-hint { fill: #56607080; font-size: 9px; pointer-events: none; }
+
+/* The handle layer sits over its lane, unscaled, so a point is a round target
+ * of a fixed size no matter how wide the timeline is. */
+.sub-hit {
+  position: absolute; inset: 0;
+  width: 100%; height: 26px;
+  overflow: visible;
+}
+
+/* Stop the browser treating a drag on a lane as a scroll or a text selection.
+ * This is here rather than as preventDefault() on pointerdown, because doing
+ * it in JavaScript also cancels the click and dblclick the editor depends on. */
+.trk-lane, .sub-lane, .sub-hit { touch-action: none; }
+.trk-lane { user-select: none; -webkit-user-select: none; }

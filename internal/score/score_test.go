@@ -243,3 +243,66 @@ func TestScoreRoundTripsThroughMarshal(t *testing.T) {
 		t.Errorf("curve values did not survive the round trip")
 	}
 }
+
+// A curve is none or two, never one.
+//
+// The rule exists because of what ValueAt does at the edges: it holds the first
+// point's value before the curve starts and the last point's value after it
+// ends. With a single point those are the same point, so the channel is pinned
+// to one value for the whole film with nothing on a timeline to show it. For a
+// light that is one nobody can turn off, and it is far more likely to be a slip
+// while editing than something anyone meant.
+func TestCurveNeedsNoneOrTwoPoints(t *testing.T) {
+	const oneP = `
+[score]
+componium = "0.1"
+title = "one"
+
+[score.media]
+duration = "1m"
+
+[[track]]
+instrument = "light.a"
+type = "curve"
+points = [ { t = "00:00:01.000", value = { r = 1.0 } } ]
+`
+	if _, err := Parse([]byte(oneP)); err == nil {
+		t.Fatal("a curve with a single point was accepted")
+	}
+
+	// Zero is fine, and means the instrument does nothing.
+	const noneP = `
+[score]
+componium = "0.1"
+title = "none"
+
+[score.media]
+duration = "1m"
+
+[[track]]
+instrument = "light.a"
+type = "curve"
+points = []
+`
+	s, err := Parse([]byte(noneP))
+	if err != nil {
+		t.Fatalf("an empty curve track was rejected: %v", err)
+	}
+	if got := s.Tracks[0].ValueAt(0); got != nil {
+		t.Errorf("an empty curve produced %v, want nothing at all", got)
+	}
+
+	// And it has to survive a save, or the editor can produce a score it
+	// cannot write back.
+	out, err := s.Marshal()
+	if err != nil {
+		t.Fatalf("marshalling an empty curve track: %v", err)
+	}
+	again, err := Parse(out)
+	if err != nil {
+		t.Fatalf("an empty curve track did not round trip: %v", err)
+	}
+	if len(again.Tracks) != 1 || len(again.Tracks[0].Points) != 0 {
+		t.Errorf("round trip changed the track: %+v", again.Tracks)
+	}
+}

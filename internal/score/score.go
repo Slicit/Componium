@@ -148,8 +148,18 @@ func (s *Score) normalise() error {
 			if len(t.Cues) > 0 {
 				return fmt.Errorf("score: track %q is a curve track but has cues", t.Instrument)
 			}
-			if len(t.Points) < 2 {
-				return fmt.Errorf("score: track %q is a curve with fewer than two points", t.Instrument)
+			// None, or at least two. Never exactly one.
+			//
+			// A curve holds its value before the first point and after the
+			// last, so a single point is not a curve at all: it pins the
+			// channel to one value for the entire film, with no second point
+			// to move away from and nothing on the timeline to show that it is
+			// happening. For a light that means one that can never be turned
+			// off, authored by accident. An empty curve track is the honest
+			// way to say the instrument does nothing.
+			if len(t.Points) == 1 {
+				return fmt.Errorf("score: track %q is a curve with a single point; "+
+					"a curve needs two or more, or none at all", t.Instrument)
 			}
 			if t.Interpolation == "" {
 				t.Interpolation = Linear
