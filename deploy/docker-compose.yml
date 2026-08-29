@@ -83,7 +83,21 @@ services:
       - sh
       - -c
       - |
-        until [ -S /run/componium/mpv.sock ]; do sleep 0.2; done
+        # Bounded, and loud when it expires. An unbounded `until` here waits
+        # forever on a socket that is never coming, and the container sits
+        # there reporting Up while doing nothing at all — which is a worse
+        # failure than crashing, because it looks like success.
+        n=0
+        until [ -S /run/componium/mpv.sock ]; do
+          n=$$((n + 1))
+          if [ $$n -gt 150 ]; then
+            echo "no mpv socket after 30s: is the player running, and can it" >&2
+            echo "write to /run/componium? (a named volume seeded from an" >&2
+            echo "image path owned by another uid is the usual cause)" >&2
+            exit 1
+          fi
+          sleep 0.2
+        done
         exec componium play \
           -score /scores/demo.componium \
           -rig /opt/componium/deploy-rig.toml \

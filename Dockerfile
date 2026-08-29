@@ -40,9 +40,21 @@ WORKDIR /opt/componium
 # that user. Docker seeds a fresh named volume from the image path it covers,
 # ownership included, but only when that path already exists; otherwise it
 # creates it root-owned and a non-root container cannot write to it.
+#
+# /run/componium is the exception: it is 1777, like /tmp, because it is shared
+# scratch space rather than one user's directory. The compose file overrides
+# `user:` to whoever owns the host's media directory, so the uid that creates
+# the mpv socket is not known when this image is built — and a fresh named
+# volume inherits this path's ownership, so a 10001-owned directory means the
+# player silently cannot create its socket. What that looked like: mpv ran
+# happily with no IPC at all, a stale socket from an older deployment satisfied
+# the conductor's `[ -S ]` guard, and the conductor then failed to connect to
+# it forever. Sticky and world-writable is the /tmp pattern and it is the right
+# one here: any uid may create the socket, and none may remove another's.
 RUN useradd --create-home --uid 10001 componium \
  && mkdir -p /run/componium /scores /media \
- && chown -R componium:componium /run/componium /scores /media /opt/componium
+ && chown -R componium:componium /run/componium /scores /media /opt/componium \
+ && chmod 1777 /run/componium
 USER componium
 
 LABEL org.opencontainers.image.title="Componium" \
