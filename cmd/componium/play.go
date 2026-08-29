@@ -138,6 +138,7 @@ func playCmd(args []string) error {
 		OnReading: func(r clock.Reading) {
 			now := time.Now()
 			sup.Heartbeat(now)
+			built.Heartbeat()
 			curves.Tick(now, r)
 			if now.Sub(lastPrint) < time.Second {
 				return
@@ -151,6 +152,7 @@ func playCmd(args []string) error {
 	// Leave the rig safe whatever happened: a clean exit should not
 	// leave a fan running or a valve open.
 	sup.AllStop(time.Now(), safety.StopManual, "show ended")
+	built.Safe()
 	summarise(cond, clk)
 	if ev := sup.Events(); len(ev) > 0 {
 		fmt.Printf("safety events %d:\n", len(ev))

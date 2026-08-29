@@ -15,6 +15,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/Slicit/Componium/instruments/sacn"
 	"github.com/Slicit/Componium/instruments/virtual"
+	"github.com/Slicit/Componium/internal/cip"
 	"github.com/Slicit/Componium/internal/instrument"
 )
 
@@ -36,6 +37,8 @@ type InstConfig struct {
 	Driver  string   `toml:"driver"`
 	Latency Duration `toml:"latency"`
 
+	// Addr is where to reach the device, used by the sacn and cip drivers.
+	RemoteTimeout Duration `toml:"remote_timeout"`
 	// sACN fields, used when Driver is "sacn".
 	Universe uint16 `toml:"universe"`
 	Start    int    `toml:"start"`
@@ -87,6 +90,7 @@ func Load(path string) (*Config, error) {
 type Built struct {
 	Instruments map[string]instrument.Instrument
 	closers     []io.Closer
+	remotes     []*cip.Client
 }
 
 // Close releases every instrument that holds a resource.
@@ -128,6 +132,23 @@ func (c *Config) Build() (*Built, error) {
 			}
 			out.Instruments[in.ID] = l
 			out.closers = append(out.closers, l)
+		case "cip":
+			// The manifest comes from the node rather than from this file.
+			// The device is the only thing that actually knows its own
+			// latency, and a rig file that disagrees with the hardware is
+			// worse than no rig file at all.
+			wait := in.RemoteTimeout.Duration()
+			if wait <= 0 {
+				wait = 2 * time.Second
+			}
+			c, err := cip.Dial(in.Addr, wait)
+			if err != nil {
+				out.Close()
+				return nil, err
+			}
+			out.Instruments[in.ID] = c
+			out.closers = append(out.closers, c)
+			out.remotes = append(out.remotes, c)
 		default:
 			out.Close()
 			return nil, fmt.Errorf("rig: instrument %q has unknown driver %q", in.ID, in.Driver)
@@ -135,3 +156,23 @@ func (c *Config) Build() (*Built, error) {
 	}
 	return out, nil
 }
+
+// Heartbeat tells every remote node the conductor is still alive.
+//
+// A node that stops hearing this drives itself safe without being asked, which
+// is the only protection that survives the conductor crashing.
+func (b *Built) Heartbeat() {
+	for _, c := range b.remotes {
+		_ = c.Heartbeat()
+	}
+}
+
+// Safe orders every remote node to its safe state immediately.
+func (b *Built) Safe() {
+	for _, c := range b.remotes {
+		_ = c.Safe()
+	}
+}
+
+// Remotes reports how many instruments are reached over the network.
+func (b *Built) Remotes() int { return len(b.remotes) }

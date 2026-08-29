@@ -1,0 +1,29 @@
+# A rig with one instrument reached over the network.
+#
+# Start the node first, on this machine or any other:
+#   componium node -id wind.main -addr 0.0.0.0:5570
+#
+# The node reports its own latency, so this file does not state one. The
+# device is the only thing that actually knows, and a rig file that disagrees
+# with the hardware is worse than no rig file.
+
+[rig]
+name = "one remote node"
+
+[[instrument]]
+id = "wind.main"
+kind = "wind"
+driver = "cip"
+addr = "127.0.0.1:5570"
+
+[[instrument]]
+id = "light.ambient"
+kind = "light"
+driver = "virtual"
+latency = "20ms"
+
+[[instrument]]
+id = "shake.seat"
+kind = "shake"
+driver = "virtual"
+latency = "5ms"
