@@ -190,3 +190,91 @@ def find_plunges(movements, fps: float, min_seconds: float = 1.0,
 def speed_series(movements, fps: float, window: float = 0.5):
     """Smoothed normalised speed, one value per movement sample."""
     return smooth([m.speed for m in movements], max(2, int(window * fps)))
+
+
+def washout(values, window: int):
+    """High pass a signal by subtracting its own slow average.
+
+    This is the one place washout belongs. A platform driven by raw camera
+    movement drifts to its end stops within a minute, because a pan in one
+    direction never comes back. Subtracting the slow average means a fast
+    movement is felt and a slow one is not, and the platform always returns to
+    neutral, which is what a limited travel rig needs.
+
+    ADR 0001 argues washout is unnecessary for *authored* motion, and that
+    holds: an author works inside the rig's limits already. Generated motion is
+    the exception it named, and this is it.
+    """
+    if window < 2 or len(values) < window:
+        return [0.0] * len(values)
+    slow = smooth(values, window)
+    return [v - s for v, s in zip(values, slow)]
+
+
+def pose_series(movements, fps: float, width: int = 64, height: int = 36,
+                washout_seconds: float = 4.0, gain: float = 1.0):
+    """Turn apparent camera movement into 6DOF pose.
+
+    The mapping is deliberately literal about what can and cannot be known:
+
+      yaw    <- horizontal movement. A pan *is* a yaw.
+      pitch  <- vertical movement. A tilt is a pitch.
+      heave  <- vertical movement again, because a fall reads the same way and
+                a seat dropping is the effect people actually want from it.
+      surge  <- overall speed, as a forward push during fast movement.
+
+      sway and roll are left at zero. Nothing in a single projection pair
+      distinguishes a lateral track from a pan, or tells you about roll at all,
+      and inventing them would be making things up.
+
+    Everything is washed out and scaled to a unit range. The instrument clamps
+    to the rig's declared travel afterwards, so these are intentions rather
+    than commands.
+    """
+    if not movements:
+        return []
+
+    win = max(2, int(washout_seconds * fps))
+    dxs = washout([m.dx for m in movements], win)
+    dys = washout([m.dy for m in movements], win)
+    speeds = smooth([m.speed for m in movements], max(2, int(fps)))
+
+    peak_speed = max(speeds) if speeds else 0.0
+    out = []
+    for i in range(len(movements)):
+        # Normalised by half the frame, so a movement of half a frame per
+        # sample is full deflection. Anything faster is already extreme.
+        yaw = clamp(dxs[i] / (width / 2.0) * gain)
+        pitch = clamp(dys[i] / (height / 2.0) * gain)
+        heave = clamp(-dys[i] / (height / 2.0) * gain)
+        surge = clamp((speeds[i] / peak_speed) * gain) if peak_speed > 0 else 0.0
+        out.append({
+            "surge": round(surge * 0.6, 4),
+            "sway": 0.0,
+            "heave": round(heave, 4),
+            "roll": 0.0,
+            "pitch": round(pitch, 4),
+            "yaw": round(yaw, 4),
+        })
+    return out
+
+
+def clamp(v: float) -> float:
+    return max(-1.0, min(1.0, v))
+
+
+def wind_series(movements, fps: float, smooth_seconds: float = 1.5):
+    """Wind from apparent speed.
+
+    A fast moving camera is the closest thing an image has to airflow, and it
+    is what a fan can honestly react to. Smoothed hard, because a fan takes
+    over a second to change speed and driving it from a twitchy signal just
+    wastes the movement.
+    """
+    if not movements:
+        return []
+    speeds = smooth([m.speed for m in movements], max(2, int(smooth_seconds * fps)))
+    peak = max(speeds) if speeds else 0.0
+    if peak <= 0:
+        return [0.0] * len(speeds)
+    return [round(v / peak, 4) for v in speeds]

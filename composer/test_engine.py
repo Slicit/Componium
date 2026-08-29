@@ -261,3 +261,72 @@ class TestFeaturelessFrames(unittest.TestCase):
                                    speed=[0.0] * 100, fps=4.0)
         self.assertLess(max(levels[:80]), 0.05)
         self.assertEqual(len(dynamics.calm_regions(levels, 4.0, min_seconds=12.0)), 1)
+
+
+class TestWashout(unittest.TestCase):
+    # A platform driven by raw camera movement drifts into its end stops within
+    # a minute, because a pan in one direction never comes back.
+    def test_a_sustained_movement_washes_out_to_nothing(self):
+        steady = [5.0] * 60
+        out = motion_est.washout(steady, window=8)
+        self.assertLess(max(abs(v) for v in out[10:-10]), 0.5)
+
+    def test_a_fast_movement_survives(self):
+        signal = [0.0] * 30 + [10.0] * 3 + [0.0] * 30
+        out = motion_est.washout(signal, window=16)
+        self.assertGreater(max(out), 3.0)
+
+    def test_too_short_a_signal_yields_nothing_rather_than_noise(self):
+        self.assertEqual(motion_est.washout([1.0, 2.0], window=8), [0.0, 0.0])
+
+
+class TestPose(unittest.TestCase):
+    def moves(self, dx, dy, speed, n=60):
+        return [FakeMovement(dx, dy, speed) for _ in range(n)]
+
+    def test_a_pan_becomes_yaw(self):
+        # Alternating, so it survives washout rather than being averaged away.
+        moves = []
+        for i in range(60):
+            moves.append(FakeMovement(8 if i % 20 < 10 else -8, 0, 0.1))
+        pose = motion_est.pose_series(moves, fps=4.0)
+        self.assertGreater(max(abs(p["yaw"]) for p in pose), 0.1)
+        self.assertEqual(max(abs(p["roll"]) for p in pose), 0.0)
+
+    def test_a_fall_becomes_heave_downward(self):
+        moves = []
+        for i in range(60):
+            moves.append(FakeMovement(0, -8 if i % 20 < 10 else 0, 0.12))
+        pose = motion_est.pose_series(moves, fps=4.0)
+        # Content rising in frame means the camera is descending, so heave is
+        # positive here and the seat is asked to move with it.
+        self.assertGreater(max(p["heave"] for p in pose), 0.05)
+
+    # Nothing in a projection pair distinguishes a lateral track from a pan, or
+    # says anything about roll. Inventing them would be making things up.
+    def test_sway_and_roll_are_never_invented(self):
+        pose = motion_est.pose_series(self.moves(6, -6, 0.2), fps=4.0)
+        for p in pose:
+            self.assertEqual(p["sway"], 0.0)
+            self.assertEqual(p["roll"], 0.0)
+
+    def test_everything_stays_in_a_unit_range(self):
+        pose = motion_est.pose_series(self.moves(500, -500, 9.0), fps=4.0)
+        for p in pose:
+            for axis, v in p.items():
+                self.assertLessEqual(abs(v), 1.0, axis + " left the unit range")
+
+    def test_no_movement_means_no_pose(self):
+        self.assertEqual(motion_est.pose_series([], fps=4.0), [])
+
+
+class TestWindSeries(unittest.TestCase):
+    def test_scales_to_the_fastest_moment(self):
+        moves = [FakeMovement(0, 0, 0.02)] * 20 + [FakeMovement(9, 0, 0.4)] * 20
+        wind = motion_est.wind_series(moves, fps=4.0)
+        self.assertAlmostEqual(max(wind), 1.0, places=3)
+        self.assertLess(min(wind), 0.3)
+
+    def test_a_still_film_asks_for_no_wind(self):
+        wind = motion_est.wind_series([FakeMovement(0, 0, 0.0)] * 20, fps=4.0)
+        self.assertEqual(set(wind), {0.0})

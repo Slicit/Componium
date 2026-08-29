@@ -40,6 +40,10 @@ import water
 
 SCORE_VERSION = "0.1"
 
+# The axis order used for pose curves. Fixed, because a curve point is a tuple
+# during compression and the names have to go back on in the same order.
+POSE_AXES = ("surge", "sway", "heave", "roll", "pitch", "yaw")
+
 
 # --------------------------------------------------------------------------
 # extraction
@@ -313,19 +317,34 @@ def build(args) -> str:
         tracks.append(_curve_track(args.shake_id,
                                    [(t, {"intensity": v[0]}) for t, v in shake]))
 
-    # --- plunges -------------------------------------------------------------
+    # --- motion, as continuous 6DOF ------------------------------------------
+    #
+    # A curve rather than cues. Plunges are still detected and reported, but
+    # they are already present in this curve as heave, and emitting both would
+    # put a span and a curve driver in a fight over one instrument.
     plunges = motion_est.find_plunges(movements, args.fps, merge_gap=3.0)
     if plunges:
-        report(f"{len(plunges)} plunge candidates\n")
+        report(str(len(plunges)) + " plunges, already carried by the pose curve\n")
+
     if args.motion_id:
-        add_cues(args.motion_id, [{
-            "t": start,
-            "action": "drop",
-            # Heave is negative because the seat should follow the camera down.
-            "params": {"heave": -min(1.0, magnitude * args.motion_gain)},
-            "duration": max(0.5, end - start),
-            "source": f"sustained downward camera, magnitude {magnitude:.3f}",
-        } for start, end, magnitude in plunges])
+        pose = motion_est.pose_series(movements, args.fps, gain=args.motion_gain)
+        points = [(i / args.fps, tuple(p[a] for a in POSE_AXES))
+                  for i, p in enumerate(pose)]
+        points = compress(points, args.threshold)
+        points = scenes.snap(points, cuts)
+        if len(points) >= 2:
+            tracks.append(_curve_track(args.motion_id, [
+                (t, dict(zip(POSE_AXES, v))) for t, v in points]))
+
+    # --- wind, from apparent speed -------------------------------------------
+    if args.wind_id:
+        wind = motion_est.wind_series(movements, args.fps)
+        wpts = compress([(i / args.fps, (v * args.wind_gain,))
+                         for i, v in enumerate(wind)], args.threshold)
+        wpts = scenes.snap(wpts, cuts)
+        if len(wpts) >= 2:
+            tracks.append(_curve_track(args.wind_id,
+                                       [(t, {"intensity": v[0]}) for t, v in wpts]))
 
     # --- subtitles and the vision model --------------------------------------
     confirmations = []
@@ -430,7 +449,11 @@ def main(argv=None):
                    help="instrument for plunges; empty means do not emit them")
     p.add_argument("--mist-id", default="mist.main",
                    help="instrument for confirmed water scenes")
-    p.add_argument("--motion-gain", type=float, default=6.0)
+    p.add_argument("--motion-gain", type=float, default=1.0,
+                   help="scale on the generated 6DOF pose (default 1.0)")
+    p.add_argument("--wind-id", default="wind.main",
+                   help="instrument for wind from camera speed; empty to skip")
+    p.add_argument("--wind-gain", type=float, default=1.0)
     p.add_argument("--no-dynamics", action="store_true",
                    help="do not protect calm scenes or enforce a rest budget")
     p.add_argument("--calm-threshold", type=float, default=0.18,

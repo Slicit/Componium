@@ -41,6 +41,13 @@ fetch() {
 fetch "crab-dance.mp4" \
   "https://archive.org/download/crab-dance/crab%20dance.ia.mp4"
 
+# Sintel is the useful one for effects work: a dragon flight, a fall from
+# height, snow, fire and water in fifteen minutes, which between them exercise
+# rumble, plunge detection, the water nominator and both light layers. Big Buck
+# Bunny is gentler and better for testing calm detection.
+fetch "sintel.mp4" \
+  "https://archive.org/download/Sintel/sintel-2048-stereo_512kb.mp4"
+
 fetch "big-buck-bunny.mp4" \
   "https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4"
 
@@ -51,6 +58,11 @@ licence. They are here to test against.
 crab-dance.mp4
     Public Domain Mark 1.0
     https://archive.org/details/crab-dance
+
+sintel.mp4
+    Creative Commons Attribution 3.0
+    (c) copyright Blender Foundation | durian.blender.org
+    https://archive.org/details/Sintel
 
 big-buck-bunny.mp4
     Creative Commons Attribution 3.0
