@@ -20,7 +20,7 @@ import {
   History, insertPoints, moveCues, movePoints, removeCues, removePoints, resizeCues,
 } from '../core/history';
 import { clamp, clamp01, round3 } from '../core/time';
-import { cueEnd, isSpan, valueAt, channelsOf, type Cue, type Point, type Rig, type Score } from '../core/score';
+import { cueEnd, isHSI, isSpan, valueAt, channelsOf, type Cue, type Point, type Rig, type Score } from '../core/score';
 
 /** Below this many pixels a press is a click, not a drag. */
 const SLOP = 3;
@@ -320,7 +320,7 @@ export function useEditing(opts: {
     const localY = y - geom.rulerH - hit.row.y;
     const v = clamp01(1 - (localY - 3) / Math.max(1, hit.row.h - 6));
 
-    const value = valueAt(track.points ?? [], t, channels);
+    const value = valueAt(track.points ?? [], t, channels, isHSI(track));
     value[hit.row.channel] = round3(v);
 
     const adding: Point[] = [{ t, value }];

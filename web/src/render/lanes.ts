@@ -15,7 +15,7 @@
 
 import { TimeView } from '../core/view';
 import {
-  amplitudeOf, colourOf, cueEnd, isNominated, isSpan, valueAt,
+  amplitudeOf, colourOf, cueEnd, isHSI, isNominated, isSpan, valueAt,
   type Cue, type Point, type Track,
 } from '../core/score';
 import { DrawList } from './drawlist';
@@ -301,7 +301,7 @@ export function drawRibbon(
   for (let i = 0; i <= samples; i++) {
     const at = i / samples;
     const t = view.start + view.span * at;
-    const v = valueAt(points, t, channels);
+    const v = valueAt(points, t, channels, isHSI(track));
     stops.push({ at, colour: colourOf(v) ?? theme.eventSoft });
   }
   list.ribbon({ x: box.x, y: box.y, w: box.w, h: box.h, stops });

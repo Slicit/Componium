@@ -8,7 +8,7 @@
 
 import { batch, insertCues, insertPoints, movePoints, moveCues, removeCues, resizeCues, type Command } from './history';
 import { clamp, clamp01, round3, type Seconds } from './time';
-import { cueEnd, isSpan, valueAt, channelsOf, type Cue, type Instrument, type Point, type Rig, type Score, type Track } from './score';
+import { cueEnd, isHSI, isSpan, valueAt, channelsOf, type Cue, type Instrument, type Point, type Rig, type Score, type Track } from './score';
 
 /** The shortest a split can leave either half. Below this it is not a span. */
 const MIN_PIECE = 0.04;
@@ -254,7 +254,7 @@ export function paste(
       /* Keep whatever the destination already has for channels the copy does
        * not carry, so pasting a red curve into an RGB track does not zero
        * green and blue. */
-      const base = valueAt(track.points ?? [], cap(p.t), channels);
+      const base = valueAt(track.points ?? [], cap(p.t), channels, isHSI(track));
       return { t: cap(p.t), value: { ...base, ...p.point.value } };
     });
     return batch(`Paste ${points.length} points`, [insertPoints(track, points)]);

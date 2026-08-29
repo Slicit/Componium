@@ -32,6 +32,40 @@ SOFT_CEILING = 0.65
 SOFT_DESATURATION = 0.35
 
 
+def to_hsi(rgb):
+    """Hue, saturation and intensity, each 0 to 1, with hue in turns.
+
+    The authoring form, and the one this composer has effectively been using
+    all along: desaturate() below is a saturation move written as a lerp
+    toward grey, and the flash code divides by the largest channel with the
+    comment "keeping the hue". Both are HSI operations expressed in RGB
+    because the format offered no other way to say them.
+
+    Intensity rather than a lightness, because intensity is the axis every
+    other instrument already has. The duty cycle, the maximum continuous run
+    and the rest budget all read it, and a light stored as RGB is the one
+    effect whose level has to be guessed at by taking its largest channel.
+
+    Grey has no hue, and this returns zero for it. The score's interpolation
+    carries a neighbour's hue across such a point rather than sweeping through
+    whatever number lands here, so the zero never becomes a colour.
+    """
+    r, g, b = rgb
+    hi, lo = max(r, g, b), min(r, g, b)
+    d = hi - lo
+    if hi <= 0:
+        return (0.0, 0.0, 0.0)
+    if d == 0:
+        return (0.0, 0.0, hi)
+    if hi == r:
+        h = ((g - b) / d % 6) / 6
+    elif hi == g:
+        h = ((b - r) / d + 2) / 6
+    else:
+        h = ((r - g) / d + 4) / 6
+    return (h % 1.0, d / hi, hi)
+
+
 def desaturate(rgb, amount: float):
     r, g, b = rgb
     grey = (r + g + b) / 3.0
@@ -106,18 +140,22 @@ def flashes(frames, colours, fps: float, rise: float = 0.22,
         # Colour the spike from the frame itself, so an explosion reads warm
         # and lightning reads cold, without anyone having to classify which.
         if i < len(colours):
-            r, g, b = colours[i]
-            peak = max(r, g, b, 0.001)
-            # Pushed to full brightness, keeping the hue. A flash that is not
-            # bright is not a flash.
-            r, g, b = r / peak, g / peak, b / peak
+            h, s, _ = to_hsi(colours[i])
         else:
-            r = g = b = 1.0
+            h, s = 0.0, 0.0
+        # Pushed to full brightness, keeping the hue. A flash that is not
+        # bright is not a flash.
+        #
+        # This used to be a division by the largest channel, which is the same
+        # operation written the long way round: setting intensity to one while
+        # holding hue and saturation is exactly what dividing RGB by its peak
+        # achieves. Saying it directly is the point of the colour space.
+        i_out = 1.0
 
         out.append({
             "t": at,
             "action": "flash",
-            "params": {"r": round(r, 4), "g": round(g, 4), "b": round(b, 4)},
+            "params": {"h": round(h, 4), "s": round(s, 4), "i": round(i_out, 4)},
             "duration": hold,
             "source": f"luminance rose {cur - prev:.2f} to {cur:.2f}",
         })

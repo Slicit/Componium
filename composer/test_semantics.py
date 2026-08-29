@@ -6,6 +6,8 @@ extracted data is pure and is tested here.
 
 import unittest
 
+import analysis
+import light
 import scenes
 import subtitles
 
@@ -108,3 +110,50 @@ class TestSceneSnap(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ColourSpace(unittest.TestCase):
+    """A light is authored as hue, saturation and intensity.
+
+    The composer was already doing this arithmetic by hand — desaturating by
+    lerping toward grey, and dividing RGB by its peak with the comment
+    "keeping the hue". Those are saturation and intensity moves written in a
+    space that cannot express them.
+    """
+
+    def test_primaries_round_trip(self):
+        for rgb in [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 1), (0.5, 0.25, 0)]:
+            h, s, i = light.to_hsi(rgb)
+            self.assertGreaterEqual(h, 0.0)
+            self.assertLess(h, 1.0)
+            self.assertAlmostEqual(i, max(rgb), places=6)
+
+    def test_intensity_is_the_largest_channel(self):
+        # Which is what "how bright is this" has always meant here, and what
+        # the duty cycle and the rest budget read.
+        self.assertAlmostEqual(light.to_hsi((0.4, 0.2, 0.1))[2], 0.4, places=6)
+
+    def test_grey_has_no_hue_and_no_saturation(self):
+        for v in (0.0, 0.25, 1.0):
+            h, s, i = light.to_hsi((v, v, v))
+            self.assertEqual(h, 0.0)
+            self.assertEqual(s, 0.0)
+            self.assertAlmostEqual(i, v, places=6)
+
+    def test_black_is_not_a_division_by_zero(self):
+        self.assertEqual(light.to_hsi((0, 0, 0)), (0.0, 0.0, 0.0))
+
+    def test_flashes_are_full_intensity_and_keep_their_hue(self):
+        # A warm frame must flash warm and a cold one cold, at full output:
+        # a flash that is not bright is not a flash.
+        # Luma is on the byte scale the decoder produces, not a fraction.
+        frames = [analysis.Luma(40), analysis.Luma(210)]
+        warm = [(1.0, 0.4, 0.1)] * len(frames)
+        cues = light.flashes(frames, warm, 4.0)
+        self.assertTrue(cues, "no flash was found")
+        for cue in cues:
+            self.assertEqual(set(cue["params"]), {"h", "s", "i"})
+            self.assertEqual(cue["params"]["i"], 1.0)
+            # Warm is near the red end of the wheel, not the cyan end.
+            self.assertLess(cue["params"]["h"], 0.15)
+            self.assertGreater(cue["params"]["s"], 0.5)

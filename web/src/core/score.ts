@@ -20,6 +20,8 @@ export interface Score {
 export interface Track {
   instrument: string;
   type: 'cue' | 'curve' | string;
+  /** How colour is written down. Absent means rgb, as every older score is. */
+  space?: 'rgb' | 'hsi' | string;
   cues?: Cue[];
   points?: Point[];
 }
@@ -69,10 +71,13 @@ export interface Rig {
  */
 
 /** The parameter names that are amplitude by another name. */
-const LEVEL_KEYS = ['intensity', 'level', 'amount', 'speed', 'strength'];
+const LEVEL_KEYS = ['i', 'intensity', 'level', 'amount', 'speed', 'strength'];
 
 /** Colour channels, which are amplitude when taken together. */
 const COLOUR_KEYS = ['r', 'g', 'b'];
+
+/** Hue, saturation and intensity, in the order lanes should appear. */
+const HSI_KEYS = ['h', 's', 'i'];
 
 /** Axes of motion, where what matters is how far from rest, in any direction. */
 const AXIS_KEYS = ['surge', 'sway', 'heave', 'roll', 'pitch', 'yaw'];
@@ -116,6 +121,15 @@ export function amplitudeOf(params: Params | undefined): number | null {
 /** A colour to tint an event with, when it has one. */
 export function colourOf(params: Params | undefined): string | null {
   if (!params) return null;
+
+  /* Authored as hue: convert, so the ribbon and every event tint show the
+   * colour a fixture will actually be sent rather than nothing at all. */
+  if (typeof params.h === 'number' || typeof params.s === 'number') {
+    const [r, g, b] = hsiToRGB(params.h ?? 0, params.s ?? 0, params.i ?? 0);
+    const c = (v: number) => Math.round(clamp01(v) * 255);
+    return `rgb(${c(r)}, ${c(g)}, ${c(b)})`;
+  }
+
   const has = COLOUR_KEYS.some((k) => typeof params[k] === 'number');
   if (!has) return null;
   const c = (k: string) => Math.round(clamp01(params[k] ?? 0) * 255);
@@ -153,8 +167,11 @@ export function channelsOf(track: Track, rig?: Rig | null): string[] {
     for (const k of Object.keys(p.value ?? {})) seen.add(k);
   }
   if (seen.size) {
-    const first = COLOUR_KEYS.filter((c) => seen.has(c));
-    const rest = [...seen].filter((c) => !COLOUR_KEYS.includes(c)).sort();
+    /* Hue, then saturation, then intensity — the order they are thought about
+     * — or red, green, blue for a track written the older way. */
+    const order = HSI_KEYS.some((k) => seen.has(k)) ? HSI_KEYS : COLOUR_KEYS;
+    const first = order.filter((c) => seen.has(c));
+    const rest = [...seen].filter((c) => !order.includes(c)).sort();
     return [...first, ...rest];
   }
   return kindOf(track.instrument, rig) === 'light' ? [...COLOUR_KEYS] : ['intensity'];
@@ -182,7 +199,7 @@ export function latencyOf(instrument: string, rig?: Rig | null): number {
  * has its own copy in Go; the two must agree, because a point inserted here at
  * the value this returns must not visibly move when the player evaluates it.
  */
-export function valueAt(points: Point[], t: Seconds, channels: string[]): Params {
+export function valueAt(points: Point[], t: Seconds, channels: string[], hsi = false): Params {
   const out: Params = {};
   for (const c of channels) out[c] = 0;
   if (!points.length) return out;
@@ -205,6 +222,11 @@ export function valueAt(points: Point[], t: Seconds, channels: string[]): Params
     const av = a.value?.[k];
     out[k] = av === undefined ? b.value[k] : round3(av + (b.value[k] - av) * f);
   }
+
+  /* Hue is not a number that can be averaged: it wraps, and it does not exist
+   * without saturation. Doing it channel by channel above sweeps a fade from
+   * red to red the long way round through cyan. */
+  if (hsi) Object.assign(out, lerpHSI(a.value, b.value, f));
   return out;
 }
 
@@ -224,4 +246,77 @@ export function trackExtent(track: Track): { start: Seconds; end: Seconds } | nu
     end = Math.max(end, p.t);
   }
   return { start, end };
+}
+
+/* --- colour spaces ------------------------------------------------------ */
+
+/** True when a track's colour is written as hue, saturation and intensity. */
+export function isHSI(track: Track): boolean {
+  if (track.space === 'hsi') return true;
+  /* A track can carry hsi values without declaring the space — a paste, or a
+   * hand edit — and the lanes should still be named properly. */
+  for (const p of track.points ?? []) {
+    if ('h' in (p.value ?? {}) && 's' in (p.value ?? {})) return true;
+  }
+  return false;
+}
+
+/**
+ * Hue, saturation and intensity to red, green and blue.
+ *
+ * The same geometry as internal/colour in Go, and it has to stay that way:
+ * this is what the editor previews and that is what the fixture is sent, so a
+ * disagreement between them is a preview that lies.
+ */
+export function hsiToRGB(h: number, s: number, i: number): [number, number, number] {
+  let hue = h % 1;
+  if (hue < 0) hue += 1;
+  const sat = clamp01(s);
+  const val = clamp01(i);
+  if (sat === 0) return [val, val, val];
+
+  const sector = hue * 6;
+  const k = Math.floor(sector) % 6;
+  const f = sector - Math.floor(sector);
+  const p = val * (1 - sat);
+  const q = val * (1 - sat * f);
+  const t = val * (1 - sat * (1 - f));
+  switch (k) {
+    case 0: return [val, t, p];
+    case 1: return [q, val, p];
+    case 2: return [p, val, t];
+    case 3: return [p, q, val];
+    case 4: return [t, p, val];
+    default: return [val, p, q];
+  }
+}
+
+/**
+ * Interpolate a colour, taking hue the short way round and carrying a hue
+ * across a point that has none.
+ *
+ * Mirrors colour.Lerp in Go. See that file for why hue cannot simply be
+ * averaged: the seam is red, and white has no hue to average with.
+ */
+export function lerpHSI(
+  a: Params, b: Params, f: number,
+): { h: number; s: number; i: number } {
+  const neutral = 1e-4;
+  const wrap = (h: number) => { const x = h % 1; return x < 0 ? x + 1 : x; };
+  let ah = wrap(a.h ?? 0);
+  let bh = wrap(b.h ?? 0);
+  const as = a.s ?? 0;
+  const bs = b.s ?? 0;
+  if (as <= neutral && bs <= neutral) { ah = 0; bh = 0; }
+  else if (as <= neutral) ah = bh;
+  else if (bs <= neutral) bh = ah;
+
+  let d = bh - ah;
+  if (d > 0.5) d -= 1; else if (d < -0.5) d += 1;
+
+  return {
+    h: wrap(ah + d * f),
+    s: as + (bs - as) * f,
+    i: (a.i ?? 0) + ((b.i ?? 0) - (a.i ?? 0)) * f,
+  };
 }

@@ -21,6 +21,11 @@ export const dark: Theme = {
     g: '#79c073',
     b: '#6b93e3',
     intensity: '#d8a24a',
+    /* Hue gets a colour that is not itself a hue anyone would confuse for a
+     * value: the lane shows a number, not a swatch. */
+    h: '#c58ae0',
+    s: '#7fc7c2',
+    i: '#d8a24a',
     heave: '#c99ae0',
     surge: '#7fc7c2',
   },

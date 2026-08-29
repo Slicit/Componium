@@ -245,7 +245,10 @@ def render(meta, tracks) -> str:
                 lines.append(row)
             lines.append("]")
         else:
-            lines += ['type = "curve"', 'interpolation = "linear"', "points = ["]
+            lines += ['type = "curve"', 'interpolation = "linear"']
+            if tr.get("space"):
+                lines.append(f'space = "{tr["space"]}"')
+            lines.append("points = [")
             for at, values in tr["points"]:
                 body = ", ".join(f"{k} = {v:.4f}" for k, v in values.items())
                 lines.append(f'  {{ t = "{timecode(at)}", value = {{ {body} }} }},')
@@ -257,8 +260,11 @@ def _cue_track(instrument, cues):
     return {"instrument": instrument, "type": "cue", "cues": cues}
 
 
-def _curve_track(instrument, points):
-    return {"instrument": instrument, "type": "curve", "points": points}
+def _curve_track(instrument, points, space=None):
+    track = {"instrument": instrument, "type": "curve", "points": points}
+    if space:
+        track["space"] = space
+    return track
 
 
 def progress(fraction: float, label: str):
@@ -314,8 +320,15 @@ def build(args) -> str:
     soft = compress([(i / args.fps, rgb) for i, rgb in enumerate(soft)], args.threshold)
     soft = scenes.snap(soft, cuts)
     if len(soft) >= 2:
-        tracks.append(_curve_track(args.light_id,
-                                   [(t, {"r": v[0], "g": v[1], "b": v[2]}) for t, v in soft]))
+        # Written as hue, saturation and intensity rather than as three
+        # colour channels. The wash is edited far more often than any other
+        # track, and almost every edit to it is "dim this stretch" — one
+        # number here, three that must move together in RGB.
+        tracks.append(_curve_track(
+            args.light_id,
+            [(t, dict(zip(("h", "s", "i"), light.to_hsi(v)))) for t, v in soft],
+            space="hsi",
+        ))
 
     # Flashes get their own fast pass. At the analysis rate most of them
     # fall between samples: a lightning strike lasts about 150ms, and 4 Hz

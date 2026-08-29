@@ -10,7 +10,7 @@
  * glitch and is actually two pieces of arithmetic disagreeing.
  */
 
-import { channelsOf, type Rig, type Track } from './score';
+import { channelsOf, isHSI, type Rig, type Track } from './score';
 
 export const ROW_CUE = 54;
 export const ROW_CHANNEL = 34;
@@ -110,7 +110,7 @@ export function layout(tracks: Track[], opts: LayoutOptions): Layout {
     /* A colour track's compound view is the colour it actually makes, which
      * says more about a look than three value graphs do. Everything else
      * compounds to its amplitude envelope. */
-    const summary = channels.every((c) => 'rgb'.includes(c)) ? 'ribbon' as const : 'envelope' as const;
+    const summary = isColourTrack(track, channels) ? 'ribbon' as const : 'envelope' as const;
 
     rows.push({
       track: ti, instrument: track.instrument, head: true,
@@ -148,9 +148,13 @@ export function canCollapse(track: Track, rig?: Rig | null): boolean {
 
 /** What the compound row of a track is called. */
 export function summaryLabel(track: Track, rig?: Rig | null): string {
-  const channels = channelsOf(track, rig);
-  if (channels.every((c) => 'rgb'.includes(c))) return 'colour';
-  return 'all';
+  return isColourTrack(track, channelsOf(track, rig)) ? 'colour' : 'all';
+}
+
+/** A track whose channels together describe one colour. */
+function isColourTrack(track: Track, channels: string[]): boolean {
+  if (isHSI(track)) return true;
+  return channels.length > 1 && channels.every((c) => 'rgb'.includes(c));
 }
 
 /** Which row a y coordinate is in, or null above or below everything. */

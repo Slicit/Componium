@@ -334,3 +334,7 @@ button:hover { border-color: #3a4553; }
   border: 1px dashed var(--line);
 }
 .tl-add:hover { color: var(--accent); border-color: #4a3a1c; border-style: solid; }
+
+.ch-h { color: #c58ae0; }
+.ch-s { color: #7fc7c2; }
+.ch-i { color: #d8a24a; }
