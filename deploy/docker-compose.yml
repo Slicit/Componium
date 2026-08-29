@@ -101,6 +101,7 @@ services:
       - -score=/scores/demo.componium
       - -rig=/opt/componium/deploy-rig.toml
       - -media=/media
+      - -scores=/scores
       - -addr=0.0.0.0:8722
     volumes:
       - ${COMPONIUM_MEDIA:-./media}:/media:ro
