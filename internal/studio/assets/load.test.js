@@ -59,6 +59,7 @@ function freshContext() {
     window: { addEventListener() { calls.listeners++; } },
     performance: { now: () => 0 },
     requestAnimationFrame() { calls.frames++; },
+    setTimeout() {},
     /* Fails fast, so load() stops before it needs a real server. Reaching it
      * at all is the point. */
     fetch(url) {
@@ -72,7 +73,7 @@ function freshContext() {
 }
 
 const dir = __dirname;
-const scripts = ['state.js', 'room.js', 'timeline.js', 'app.js'];
+const scripts = ['state.js', 'room.js', 'timeline.js', 'library.js', 'app.js'];
 
 function loadAll() {
   const ctx = vm.createContext(freshContext());

@@ -43,7 +43,7 @@ func newServer(t *testing.T) (*Server, string) {
 	if err := os.WriteFile(path, []byte(sample), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s, err := New(path, "", "")
+	s, err := New(Options{Score: path})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestMediaSupportsRangeRequests(t *testing.T) {
 	scorePath := filepath.Join(dir, "s.componium")
 	os.WriteFile(scorePath, []byte(sample), 0o644)
 
-	s, err := New(scorePath, "", media)
+	s, err := New(Options{Score: scorePath, Media: media})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestMissingMediaFileIsRefusedAtStartup(t *testing.T) {
 	dir := t.TempDir()
 	scorePath := filepath.Join(dir, "s.componium")
 	os.WriteFile(scorePath, []byte(sample), 0o644)
-	if _, err := New(scorePath, "", filepath.Join(dir, "nope.mp4")); err == nil {
+	if _, err := New(Options{Score: scorePath, Media: filepath.Join(dir, "nope.mp4")}); err == nil {
 		t.Error("a missing film was accepted, and would have failed silently later")
 	}
 }
@@ -318,7 +318,7 @@ func mediaDir(t *testing.T) (*Server, string) {
 
 	scorePath := filepath.Join(dir, "s.componium")
 	os.WriteFile(scorePath, []byte(sample), 0o644)
-	s, err := New(scorePath, "", films)
+	s, err := New(Options{Score: scorePath, Media: films})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +403,7 @@ func TestASingleFileStillWorks(t *testing.T) {
 	scorePath := filepath.Join(dir, "s.componium")
 	os.WriteFile(scorePath, []byte(sample), 0o644)
 
-	s, err := New(scorePath, "", film)
+	s, err := New(Options{Score: scorePath, Media: film})
 	if err != nil {
 		t.Fatal(err)
 	}

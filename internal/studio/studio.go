@@ -35,37 +35,105 @@ import (
 //go:embed assets
 var assets embed.FS
 
-// Server edits one score, and previews it against a rig and a film.
-type Server struct {
-	mu    sync.Mutex
-	path  string
-	sc    *score.Score
-	rig   *rig.Config
-	media string
+// Options configures a studio. Everything except Score is optional: the editor
+// works without a rig, a film or a composer, it just has less to show and
+// fewer things it can do.
+type Options struct {
+	// Score is the score to open. When Media is a directory and Scores is
+	// set, the score follows whichever film is selected instead.
+	Score string
+	// Rig describes what is in the room, for the preview.
+	Rig string
+	// Media is a film, or a directory of them.
+	Media string
+	// Scores is where generated scores live, one per film.
+	Scores string
+	// Composer is the path to compose.py. Without it, analysis cannot run and
+	// the library says so rather than offering a button that does nothing.
+	Composer string
 }
 
-// New loads a score, and optionally the rig and film to preview it against.
-// Both may be empty: the editor works without them, it just has less to show.
-func New(scorePath, rigPath, mediaPath string) (*Server, error) {
-	sc, err := score.Load(scorePath)
-	if err != nil {
-		return nil, err
-	}
-	s := &Server{path: scorePath, sc: sc, media: mediaPath}
+// Server edits scores and previews them against a rig and a film.
+type Server struct {
+	mu     sync.Mutex
+	path   string
+	sc     *score.Score
+	rig    *rig.Config
+	media  string
+	scores string
+	jobs   *Jobs
+}
 
-	if rigPath != "" {
-		rc, err := rig.Load(rigPath)
+// New opens a studio.
+func New(o Options) (*Server, error) {
+	s := &Server{path: o.Score, media: o.Media, scores: o.Scores}
+
+	if o.Score != "" {
+		sc, err := score.Load(o.Score)
+		if err != nil {
+			return nil, err
+		}
+		s.sc = sc
+	}
+	if o.Rig != "" {
+		rc, err := rig.Load(o.Rig)
 		if err != nil {
 			return nil, err
 		}
 		s.rig = rc
 	}
-	if mediaPath != "" {
-		if _, err := os.Stat(mediaPath); err != nil {
+	if o.Media != "" {
+		if _, err := os.Stat(o.Media); err != nil {
 			return nil, fmt.Errorf("media: %w", err)
 		}
 	}
+
+	scores := o.Scores
+	if scores == "" {
+		// Default to sitting beside the films. Keeping a score next to the
+		// film it belongs to is what people do by hand anyway.
+		if info, err := os.Stat(o.Media); err == nil && info.IsDir() {
+			scores = o.Media
+		}
+	}
+	s.scores = scores
+	s.jobs = NewJobs(o.Composer, scores, o.Media)
+
+	// With no score named, open whichever film's score already exists, so a
+	// studio started against a library is useful immediately.
+	if s.sc == nil {
+		s.openFirstAvailable()
+	}
+	if s.sc == nil {
+		return nil, fmt.Errorf("no score given and none found in %s", scores)
+	}
 	return s, nil
+}
+
+// openFirstAvailable loads the score of the first film that has one.
+func (s *Server) openFirstAvailable() {
+	for _, f := range s.mediaFiles() {
+		path := s.jobs.ScorePath(f.Name)
+		if sc, err := score.Load(path); err == nil {
+			s.sc, s.path = sc, path
+			return
+		}
+	}
+}
+
+// openForFilm switches the editor to a film's score.
+//
+// Returns false when that film has no score yet, which is not an error: it is
+// the normal state of a film nobody has analysed, and the library offers a
+// button for exactly that.
+func (s *Server) openForFilm(film string) bool {
+	path := s.jobs.ScorePath(film)
+	sc, err := score.Load(path)
+	if err != nil {
+		return false
+	}
+	s.sc, s.path = sc, path
+	return true
 }
 
 // Handler returns the HTTP routes.
@@ -87,6 +155,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/rig", s.handleRig)
 	mux.HandleFunc("/media", s.handleMedia)
 	mux.HandleFunc("/api/media", s.handleMediaList)
+	mux.HandleFunc("/api/library", s.handleLibrary)
+	mux.HandleFunc("/api/build", s.handleBuild)
+	mux.HandleFunc("/api/jobs", s.handleJobs)
 	return mux
 }
 
@@ -363,6 +434,13 @@ func (s *Server) handleScore(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		s.mu.Lock()
+		// Selecting a film in the picker switches the editor to that film's
+		// score. Without this the picker changed the picture and left the
+		// score alone, so a fifteen minute film played against a three cue
+		// demo and looked like nothing was happening after the first minute.
+		if film := r.URL.Query().Get("film"); film != "" {
+			s.openForFilm(film)
+		}
 		out := toWire(s.sc, s.path)
 		s.mu.Unlock()
 		writeJSON(w, http.StatusOK, out)
@@ -468,4 +546,99 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		fmt.Fprintf(w, `{"error":%q}`, err.Error())
 	}
+}
+
+// --- the library ---
+
+type libraryEntry struct {
+	Film      string  `json:"film"`
+	Size      int64   `json:"size"`
+	HasScore  bool    `json:"hasScore"`
+	ScoreName string  `json:"scoreName,omitempty"`
+	Tracks    int     `json:"tracks,omitempty"`
+	Cues      int     `json:"cues,omitempty"`
+	Duration  float64 `json:"duration,omitempty"`
+	Job       *Job    `json:"job,omitempty"`
+}
+
+type libraryView struct {
+	Scores   string         `json:"scores"`
+	CanBuild bool           `json:"canBuild"`
+	Current  string         `json:"current"`
+	Entries  []libraryEntry `json:"entries"`
+}
+
+// handleLibrary answers what films exist, which have scores, and what is being
+// analysed right now.
+func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
+	jobs := s.jobs.Snapshot()
+
+	s.mu.Lock()
+	current := filepath.Base(s.path)
+	s.mu.Unlock()
+
+	out := libraryView{
+		Scores:   s.scores,
+		CanBuild: s.jobs.Available(),
+		Current:  current,
+	}
+	for _, f := range s.mediaFiles() {
+		entry := libraryEntry{Film: f.Name, Size: f.Size}
+		path := s.jobs.ScorePath(f.Name)
+		entry.ScoreName = filepath.Base(path)
+
+		if sc, err := score.Load(path); err == nil {
+			entry.HasScore = true
+			entry.Tracks = len(sc.Tracks)
+			entry.Cues = len(sc.Cues())
+			entry.Duration = sc.Meta.Media.Duration.Duration().Seconds()
+		}
+		if job, ok := jobs[f.Name]; ok {
+			j := job
+			entry.Job = &j
+		}
+		out.Entries = append(out.Entries, entry)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleBuild starts an analysis. With all=1 it queues every film, which is
+// the "rebuild everything" the library offers.
+func (s *Server) handleBuild(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.jobs.Available() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "no composer available; start the studio with -composer path/to/compose.py",
+		})
+		return
+	}
+
+	files := s.mediaFiles()
+	if r.URL.Query().Get("all") == "1" {
+		var queued []string
+		for _, f := range files {
+			s.jobs.Enqueue(f.Name)
+			queued = append(queued, f.Name)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"queued": queued})
+		return
+	}
+
+	want := r.URL.Query().Get("file")
+	// Same rule as serving media: only a name that appeared in the listing.
+	for _, f := range files {
+		if f.Name == want {
+			writeJSON(w, http.StatusOK, s.jobs.Enqueue(want))
+			return
+		}
+	}
+	http.Error(w, "no such film", http.StatusNotFound)
+}
+
+func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.jobs.Snapshot())
 }

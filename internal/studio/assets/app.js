@@ -165,7 +165,8 @@ async function load() {
   });
   timeline.setScore(score, duration());
 
-  if (rig.hasMedia) loadMediaList();
+  if (rig.hasMedia) await loadMediaList();
+  await loadLibrary();
 }
 
 /* The picker. Pointing the studio at a directory rather than a single file
@@ -185,7 +186,7 @@ async function loadMediaList() {
     picker.appendChild(option);
   }
   picker.hidden = false;
-  picker.addEventListener("change", function () { attachMedia(picker.value); });
+  picker.addEventListener("change", function () { openFilm(picker.value); });
   attachMedia(files[0].name);
 }
 
@@ -299,3 +300,46 @@ window.addEventListener('beforeunload', function (e) {
  * application. */
 load();
 requestAnimationFrame(frame);
+
+/* --- library ------------------------------------------------------------ */
+
+let library = null;
+
+/* Selecting a film switches both the picture and the score. Changing only the
+ * picture is what made a fifteen minute film look empty after the first
+ * minute: it was playing against a three cue demo score. */
+async function openFilm(name) {
+  attachMedia(name);
+
+  const res = await fetch('/api/score?film=' + encodeURIComponent(name));
+  if (!res.ok) return;
+  score = await res.json();
+  el('title').textContent = score.title || '(untitled)';
+  timeline.setScore(score, duration());
+  applyMuted();
+  if (library) library.refresh();
+}
+
+async function loadLibrary() {
+  library = new Library(el('library'), {
+    onOpen: function (film) {
+      const picker = el('media-picker');
+      if (picker) picker.value = film;
+      openFilm(film);
+    },
+  });
+  await library.refresh();
+
+  /* Line the picker up with whichever score is actually open, so the two
+   * panes never disagree about what is being previewed. */
+  const data = library.data;
+  const picker = el('media-picker');
+  if (!data || !picker) return;
+  for (const entry of (data.entries || [])) {
+    if (entry.scoreName === data.current) {
+      picker.value = entry.film;
+      attachMedia(entry.film);
+      return;
+    }
+  }
+}

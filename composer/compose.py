@@ -261,23 +261,40 @@ def _curve_track(instrument, points):
     return {"instrument": instrument, "type": "curve", "points": points}
 
 
+def progress(fraction: float, label: str):
+    """Emit machine readable progress on stderr.
+
+    The studio runs this as a background job and parses these lines to draw
+    a bar. Printed rather than returned because the work is a subprocess,
+    and stderr because stdout may be carrying the score itself.
+    """
+    sys.stderr.write("PROGRESS %.3f %s\n" % (fraction, label))
+    sys.stderr.flush()
+
+
 def build(args) -> str:
     report = sys.stderr.write
     duration = ffprobe_duration(args.input)
 
     # One grayscale pass and one colour pass. Everything below is derived from
     # those two, rather than decoding the film once per feature.
+    progress(0.05, "decoding frames")
     frames = analysis.analyse(args.input, args.fps)
+    progress(0.45, "decoding colour")
     colour_raw = list(analysis.colour_frames(args.input, args.fps))
     colours = [analysis.mean_colour(f) for f in colour_raw]
     report(f"{len(frames)} frames analysed at {args.fps} Hz\n")
 
+    progress(0.55, "detecting scene cuts")
     cuts = [] if args.no_scenes else scenes.detect(args.input, args.scene_threshold)
+    progress(0.62, "estimating camera movement")
     movements = motion_est.track(frames, width=analysis.GRAY_W)
     speed = motion_est.speed_series(movements, args.fps)
+    progress(0.72, "reading low frequency audio")
     env = lfe_envelope(args.input, args.fps)
 
     # --- what the film is doing, before deciding what to play ----------------
+    progress(0.80, "finding calm")
     levels = dynamics.activity(audio=env, speed=speed, cuts=cuts, fps=args.fps,
                                duration=duration)
     calm = [] if args.no_dynamics else dynamics.calm_regions(
@@ -303,6 +320,7 @@ def build(args) -> str:
     # Flashes get their own fast pass. At the analysis rate most of them
     # fall between samples: a lightning strike lasts about 150ms, and 4 Hz
     # misses four out of five. One byte per frame makes 24 Hz free.
+    progress(0.86, "finding flashes")
     flash_fps = args.flash_fps or (args.media_fps or 24.0)
     lumas = [analysis.Luma(v) for v in analysis.luma_series(args.input, flash_fps)]
     flash_colours = [analysis.mean_colour(f)
@@ -350,6 +368,7 @@ def build(args) -> str:
     confirmations = []
     semantic = []
     if not args.no_subtitles:
+        progress(0.92, "mining subtitles")
         srt = subtitles.extract(args.input, args.subtitle_stream)
         if srt:
             entries = subtitles.parse(srt)
@@ -369,6 +388,7 @@ def build(args) -> str:
         report(f"{len(times)} keyframes labelled, {len(semantic)} semantic cues\n")
 
     # --- water, nominated then confirmed -------------------------------------
+    progress(0.95, "nominating water")
     nominated = water.candidates(colour_raw, args.fps)
     wet = water.confirmed(nominated, confirmations)
     report(f"{len(nominated)} water nominations, {len(wet)} confirmed\n")
@@ -412,6 +432,7 @@ def build(args) -> str:
         "fps": args.media_fps,
         "hash": "" if args.no_hash else file_hash(args.input, args.hash_mb),
     }
+    progress(1.0, "writing the score")
     return render(meta, tracks)
 def main(argv=None):
     p = argparse.ArgumentParser(description="Generate a Componium score from a film.")
