@@ -355,6 +355,22 @@ Running it found three defects that no test had:
   iteration and uses the same value for the sample, the reading and the tick,
   so all three agree on when the iteration happened.
 
+### 2026-08-29 · Module path and repository renamed to lowercase
+
+Supersedes the 2026-08-29 decision above that used
+`github.com/Slicit/Componium` with a capital C.
+
+- **Decision:** The module path is `github.com/Slicit/componium`, and the
+  GitHub repository has been renamed to match.
+- **Why:** Go escapes uppercase letters in proxy paths, so the capital C became
+  `github.com/!slicit/!componium` in the module cache and on the proxy. It
+  worked, and it was ugly in every place a person would ever read it. The cost
+  of changing it grows with every clone and every import, so it was cheapest
+  today.
+- **Impact:** 25 files touched, all imports rewritten. Git remotes updated on
+  the laptop and on claude-machine-02. GitHub redirects the old name, so
+  anything already cloned keeps working.
+
 ## Links
 
 - Branch: `feat-timing-core`

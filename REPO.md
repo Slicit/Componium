@@ -23,7 +23,7 @@ LOGBOOK/              project context, features, notes
 
 ## One Go module
 
-`github.com/Slicit/Componium` at the root. The Go parts are one program, so
+`github.com/Slicit/componium` at the root. The Go parts are one program, so
 they are one module. `composer/`, `studio/` and `firmware/` are separate
 languages and carry their own toolchains.
 
