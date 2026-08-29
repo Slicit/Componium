@@ -174,6 +174,7 @@ func (c *Client) Dispatch(d instrument.Dispatch) error {
 		Type: TypeCue, Seq: seq, N: c.next(),
 		Instrument: d.Cue.Instrument,
 		Action:     d.Cue.Action,
+		HoldMS:     Ms(d.Cue.Hold),
 		Params:     d.Cue.Params,
 	}
 	b, err := Encode(msg)

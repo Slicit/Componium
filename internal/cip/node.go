@@ -43,6 +43,9 @@ type Node struct {
 	rejected  int
 	startedAt time.Time
 	auth      *Auth
+	// holdUntil is when a span the node was given must end, whether or not a
+	// stop ever arrives.
+	holdUntil time.Time
 	replay    replayGuard
 }
 
@@ -111,6 +114,12 @@ func (n *Node) watchdog(ctx context.Context) {
 			n.mu.Lock()
 			overdue := !n.lastBeat.IsZero() && now.Sub(n.lastBeat) > n.cfg.Timeout && !n.safe
 			n.mu.Unlock()
+			// A span that has run its declared duration ends here, whether or
+			// not the conductor's stop ever arrived. This is the layer that
+			// survives a lost datagram.
+			if n.holdExpired(now) {
+				n.applySafe()
+			}
 			if overdue {
 				n.mu.Lock()
 				n.tripped++
@@ -170,11 +179,22 @@ func (n *Node) handle(b []byte, from *net.UDPAddr) {
 		n.lastBeat = time.Now()
 		n.mu.Unlock()
 	case TypeCue:
+		if instrumentStop(m.Action) {
+			n.applySafe()
+			n.send(&Message{Type: TypeAck, Seq: m.Seq}, from)
+			return
+		}
 		n.mu.Lock()
 		n.cues++
 		n.safe = false
 		for k, v := range m.Params {
 			n.state[k] = v
+		}
+		if m.HoldMS > 0 {
+			n.holdUntil = time.Now().Add(m.HoldMS.Duration())
+		} else {
+			n.holdUntil = time.Time{}
+
 		}
 		n.mu.Unlock()
 		n.send(&Message{Type: TypeAck, Seq: m.Seq}, from)
@@ -248,4 +268,21 @@ func (n *Node) Rejected() int {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.rejected
+}
+
+// instrumentStop mirrors instrument.IsStop without importing that package,
+// which would make the wire protocol depend on the conductor's types.
+func instrumentStop(action string) bool {
+	switch action {
+	case "stop", "off", "safe", "neutral":
+		return true
+	}
+	return false
+}
+
+// holdExpired reports whether a span the node was given has run its course.
+func (n *Node) holdExpired(now time.Time) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return !n.holdUntil.IsZero() && now.After(n.holdUntil) && !n.safe
 }
