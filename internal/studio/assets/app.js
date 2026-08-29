@@ -235,3 +235,67 @@ async function save() {
   el('save').disabled = true;
   el('status').textContent = 'saved, ' + body.cues + ' cues';
 }
+
+/* --- wiring ------------------------------------------------------------- */
+
+function parseTime(text) {
+  text = String(text).trim();
+  if (!text) return null;
+  if (text.indexOf(':') === -1) {
+    const n = Number(text);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }
+  let total = 0;
+  for (const part of text.split(':')) {
+    const v = Number(part);
+    if (!Number.isFinite(v) || v < 0) return null;
+    total = total * 60 + v;
+  }
+  return total;
+}
+
+el('save').addEventListener('click', save);
+
+el('play').addEventListener('click', function () {
+  if (transport.paused) transport.play(); else transport.pause();
+  el('play').textContent = transport.paused ? 'Play' : 'Pause';
+});
+
+el('insp-close').addEventListener('click', function () {
+  el('inspector').hidden = true;
+  selected = null;
+});
+
+el('insp-t').addEventListener('change', function () {
+  if (!selected) return;
+  const t = parseTime(el('insp-t').value);
+  if (t === null) { el('status').textContent = 'that is not a timecode'; return; }
+  selected.cue.t = t;
+  (selected.track.cues || []).sort(function (a, b) { return a.t - b.t; });
+  markDirty();
+  timeline.setScore(score, duration());
+});
+
+el('insp-dur').addEventListener('change', function () {
+  if (!selected) return;
+  const d = Number(el('insp-dur').value);
+  if (!Number.isFinite(d) || d < 0) return;
+  selected.cue.duration = d;
+  markDirty();
+  timeline.setScore(score, duration());
+});
+
+document.addEventListener('keydown', function (e) {
+  if (e.target && e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { e.preventDefault(); el('play').click(); }
+});
+
+window.addEventListener('beforeunload', function (e) {
+  if (dirty) { e.preventDefault(); e.returnValue = ''; }
+});
+
+/* Start. Without these two lines every function above is defined and none of
+ * them ever runs, which is a perfectly valid script and a completely dead
+ * application. */
+load();
+requestAnimationFrame(frame);
