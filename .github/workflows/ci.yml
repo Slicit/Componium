@@ -48,6 +48,34 @@ jobs:
         run: |
           node state.test.js
           node load.test.js
+          node timeline.test.js
+          node room3d.test.js
+
+  web:
+    # The new studio: the editing core and the renderer that will replace the
+    # hand-written timeline. Separate from the `javascript` job because it has
+    # a lockfile and a toolchain and that one deliberately has neither.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: install
+        working-directory: web
+        run: npm ci
+      - name: types
+        working-directory: web
+        run: npm run typecheck
+      - name: tests
+        # Includes the performance budget: a two hour score across eight lanes
+        # must draw in a bounded number of primitives. That test is the guard
+        # against anyone reintroducing per-point drawing, which is what made
+        # the previous timeline unable to hold a feature film.
+        working-directory: web
+        run: npm test
 
   line-endings:
     runs-on: ubuntu-latest
@@ -89,7 +117,7 @@ jobs:
   image:
     # Only after everything else passes. Publishing an image that fails its own
     # tests would make the registry a worse source of truth than the repository.
-    needs: [go, python, javascript, line-endings, smoke]
+    needs: [go, python, javascript, web, line-endings, smoke]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
