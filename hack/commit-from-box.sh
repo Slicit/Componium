@@ -69,6 +69,14 @@ for f in $(git ls-files --others --exclude-standard); do
     fi
   fi
 done
-git checkout -- . 2>/dev/null || true
-git pull -q --ff-only
+# Move to origin in one step, now that every local file has been verified
+# to match it. The obvious alternative, git checkout followed by git pull,
+# is dangerous: checkout reverts to *local* HEAD, so if the pull then fails
+# for any reason, the working tree has been reset to a commit older than
+# what was just pushed. The next sync propagates that as a reversion.
+#
+# That is not hypothetical. It happened on 2026-08-29 and silently undid
+# 346 lines of a feature in a commit whose message said it was fixing this
+# script.
+git reset --hard origin/main >/dev/null
 echo "laptop at $(git log --oneline -1)"

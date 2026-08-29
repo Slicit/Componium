@@ -70,6 +70,12 @@ static volatile float   s_level = 0.0f;
 static volatile bool    s_safe = true;
 static volatile uint64_t s_highest_counter = 0;
 
+/* A span ends when its hold expires, whether or not the conductor's stop
+ * ever arrives. This is the layer that survives a lost datagram, and it is
+ * why a cue carries its own duration rather than relying on being told when
+ * to stop. */
+static volatile int64_t s_hold_until_us = 0;
+
 /* ---------------------------------------------------------------- output */
 
 static void output_apply(float level)
@@ -88,6 +94,7 @@ static void output_safe(const char *why)
         ESP_LOGW(TAG, "going safe: %s", why);
     }
     s_safe = true;
+    s_hold_until_us = 0;
     output_apply(0.0f);
 }
 
@@ -262,6 +269,13 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
         if (cJSON_IsObject(params)) {
             const cJSON *value = cJSON_GetObjectItem(params, NODE_CHANNEL);
             if (cJSON_IsNumber(value)) {
+                const cJSON *hold = cJSON_GetObjectItem(root, "hold_ms");
+                if (cJSON_IsNumber(hold) && hold->valuedouble > 0) {
+                    s_hold_until_us = esp_timer_get_time() +
+                                      (int64_t)(hold->valuedouble * 1000);
+                } else {
+                    s_hold_until_us = 0;
+                }
                 s_safe = false;
                 output_apply((float)value->valuedouble);
             }
@@ -273,12 +287,18 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
     cJSON_Delete(root);
 }
 
+
 /* -------------------------------------------------------------- watchdog */
 
 static void watchdog_task(void *arg)
 {
     (void)arg;
     for (;;) {
+        int64_t now_us = esp_timer_get_time();
+        if (s_hold_until_us != 0 && now_us > s_hold_until_us && !s_safe) {
+            s_hold_until_us = 0;
+            output_safe("hold expired");
+        }
         if (s_last_heartbeat_us != 0) {
             int64_t idle_ms = (esp_timer_get_time() - s_last_heartbeat_us) / 1000;
             if (idle_ms > CIP_WATCHDOG_MS && !s_safe) {
