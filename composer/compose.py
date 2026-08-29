@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate a Componium score from a film.
 
-Composer v0 extracts the two cheapest signals that carry most of the value:
+Composer v1 extracts four signals:
 
   LFE energy -> shake.  Sub-bass maps almost directly onto rumble, and it is
   nearly free to compute.  Explosions, engines and thunder all live here.
@@ -9,9 +9,10 @@ Composer v0 extracts the two cheapest signals that carry most of the value:
   Average frame colour -> ambient light.  This is what Ambilight does.  It is
   one ffmpeg filter and it demonstrates the whole pipeline end to end.
 
-Both are deliberately dumb.  The expensive signals (scene detection, optical
-flow, subtitle mining, a vision model over keyframes) come later, and they are
-worth having only once the cheap ones are proven.
+  Subtitle descriptions -> cues.  SDH subtitles already carry timestamped,
+  human authored labels for exactly the events a rig wants: [thunder rumbles].
+
+  Scene cuts -> curve snapping, so effects do not bleed across a hard cut.
 
 The output is a proposal for a human to refine, never something to play
 unreviewed.  See LOGBOOK/features/feat-composer.md.
@@ -27,6 +28,9 @@ import os
 import shutil
 import subprocess
 import sys
+
+import scenes
+import subtitles
 
 SCORE_VERSION = "0.1"
 
@@ -212,35 +216,76 @@ def render(meta, tracks) -> str:
         lines.append(f'fps = {meta["fps"]:.3f}')
 
     for tr in tracks:
-        lines += ["", "[[track]]", f'instrument = "{tr["instrument"]}"',
-                  'type = "curve"', 'interpolation = "linear"', "points = ["]
-        for at, values in tr["points"]:
-            body = ", ".join(f"{k} = {v:.4f}" for k, v in values.items())
-            lines.append(f'  {{ t = "{timecode(at)}", value = {{ {body} }} }},')
-        lines.append("]")
+        lines += ["", "[[track]]", f'instrument = "{tr["instrument"]}"']
+        if tr.get("type") == "cue":
+            lines += ['type = "cue"', "cues = ["]
+            for cue in tr["cues"]:
+                params = ", ".join(f"{k} = {v:.4f}" for k, v in cue["params"].items())
+                row = f'  {{ t = "{timecode(cue["t"])}", action = "{cue["action"]}"'
+                if params:
+                    row += f", params = {{ {params} }}"
+                if cue.get("duration"):
+                    row += f', duration = "{cue["duration"]:.1f}s"'
+                row += " },"
+                if cue.get("source"):
+                    lines.append(f'  # from the subtitle: {cue["source"]}')
+                lines.append(row)
+            lines.append("]")
+        else:
+            lines += ['type = "curve"', 'interpolation = "linear"', "points = ["]
+            for at, values in tr["points"]:
+                body = ", ".join(f"{k} = {v:.4f}" for k, v in values.items())
+                lines.append(f'  {{ t = "{timecode(at)}", value = {{ {body} }} }},')
+            lines.append("]")
     return "\n".join(lines) + "\n"
 
 
 def build(args) -> str:
     duration = ffprobe_duration(args.input)
 
+    cuts = []
+    if not args.no_scenes:
+        cuts = scenes.detect(args.input, args.scene_threshold)
+
     colours = average_colours(args.input, args.fps)
     light = [(i / args.fps,
               (r * args.light_gain, g * args.light_gain, b * args.light_gain))
              for i, (r, g, b) in enumerate(colours)]
     light = compress(light, args.threshold)
+    # Snapping happens after compression, so a cut is never removed as
+    # redundant by the very step that is meant to preserve it.
+    light = scenes.snap(light, cuts)
     light_points = [(t, {"r": v[0], "g": v[1], "b": v[2]}) for t, v in light]
 
     env = lfe_envelope(args.input, args.fps)
     shake = [(i / args.fps, (v * args.shake_gain,)) for i, v in enumerate(env)]
     shake = compress(shake, args.threshold)
+    shake = scenes.snap(shake, cuts)
     shake_points = [(t, {"intensity": v[0]}) for t, v in shake]
 
     tracks = []
     if len(light_points) >= 2:
-        tracks.append({"instrument": args.light_id, "points": light_points})
+        tracks.append({"instrument": args.light_id, "type": "curve", "points": light_points})
     if len(shake_points) >= 2:
-        tracks.append({"instrument": args.shake_id, "points": shake_points})
+        tracks.append({"instrument": args.shake_id, "type": "curve", "points": shake_points})
+
+    subtitle_cues = []
+    if not args.no_subtitles:
+        srt = subtitles.extract(args.input, args.subtitle_stream)
+        if srt:
+            mapping = subtitles.load_mapping(args.mapping)
+            # Align subtitle cues with the instrument ids the curve tracks
+            # already use, so a generated score does not name both
+            # light.ambient and light.main for the same fixture.
+            kinds = {"light": args.light_id, "shake": args.shake_id}
+            subtitle_cues = subtitles.cues(subtitles.parse(srt), mapping, kinds)
+
+    by_instrument = {}
+    for cue in subtitle_cues:
+        by_instrument.setdefault(cue["instrument"], []).append(cue)
+    for instrument, cue_list in sorted(by_instrument.items()):
+        tracks.append({"instrument": instrument, "type": "cue", "cues": cue_list})
+
     if not tracks:
         sys.exit("nothing extracted; is the input a playable file?")
 
@@ -250,6 +295,9 @@ def build(args) -> str:
         "fps": args.media_fps,
         "hash": "" if args.no_hash else file_hash(args.input, args.hash_mb),
     }
+    report = (f"{len(cuts)} scene cuts, {len(light_points)} light points, "
+              f"{len(shake_points)} shake points, {len(subtitle_cues)} subtitle cues")
+    sys.stderr.write(report + "\n")
     return render(meta, tracks)
 
 
@@ -271,6 +319,15 @@ def main(argv=None):
     p.add_argument("--hash-mb", type=int, default=64,
                    help="megabytes to hash, 0 for the whole file (default 64)")
     p.add_argument("--no-hash", action="store_true")
+    p.add_argument("--no-subtitles", action="store_true",
+                   help="do not mine the subtitle track for effect cues")
+    p.add_argument("--subtitle-stream", type=int, default=0,
+                   help="which subtitle stream to read (default 0)")
+    p.add_argument("--mapping", help="JSON file replacing the word to effect mapping")
+    p.add_argument("--no-scenes", action="store_true",
+                   help="do not detect scene cuts")
+    p.add_argument("--scene-threshold", type=float, default=0.35,
+                   help="scene change sensitivity, higher is fewer cuts (default 0.35)")
     args = p.parse_args(argv)
 
     out = build(args)
