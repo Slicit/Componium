@@ -60,3 +60,26 @@ jobs:
           if [ -n "$bad" ]; then
             echo "files with CRLF line endings:"; echo "$bad"; exit 1
           fi
+
+  smoke:
+    # Builds the binary and runs it against the example score and rig. The unit
+    # tests cover the pieces; this is the only job that checks they still add up
+    # to a working program.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go build -o componium ./cmd/componium
+      - name: validate the example score against the example rig
+        run: ./componium validate -score examples/demo.componium -rig examples/demo-rig.toml
+      - name: the full rig example must also parse
+        run: ./componium validate -score examples/demo.componium -rig examples/full-rig.toml
+      - name: composer output must satisfy the parser
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          sh hack/make-testclips.sh "$RUNNER_TEMP"
+          python3 composer/compose.py "$RUNNER_TEMP/componium-subbed.mkv" \
+            -o "$RUNNER_TEMP/generated.componium" --media-fps 24
+          ./componium validate -score "$RUNNER_TEMP/generated.componium"
