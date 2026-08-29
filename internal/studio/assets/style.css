@@ -160,3 +160,39 @@ aside input {
 }
 .row { display: flex; gap: 0.5rem; margin-top: 0.8rem; }
 code { background: #202730; padding: 0.1em 0.35em; border-radius: 3px; }
+
+/* --- media picker ------------------------------------------------------- */
+
+.pane h2 select {
+  margin-left: 0.7rem; text-transform: none; letter-spacing: 0;
+  font: inherit; font-size: 11px;
+  background: #0a0c10; color: var(--ink);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 0.15rem 0.3rem; max-width: 62%;
+}
+
+/* --- muting ------------------------------------------------------------- */
+
+/* A muted track is dimmed rather than hidden. Removing the row would make the
+   timeline jump about as things are toggled, and losing your place is worse
+   than a faint row. */
+.trk.muted { opacity: 0.32; }
+.trk.muted .cue { fill: var(--muted); }
+.trk.muted .curve { stroke: var(--muted); }
+
+.trk-name { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.trk-name input[type="checkbox"] { margin: 0; accent-color: var(--accent); cursor: pointer; }
+.trk-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.trk-count { width: 100%; font-size: 10px; color: var(--muted); }
+
+.solo {
+  font-size: 9px; padding: 0.05rem 0.3rem; line-height: 1.4;
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 3px;
+}
+.solo:hover { color: var(--ink); border-color: var(--accent); }
+
+/* In the room a muted device fades almost out but keeps its place, so the
+   room's layout does not reflow every time something is toggled. */
+.device.muted { opacity: 0.12; }
+.device.muted .dot { animation: none !important; }

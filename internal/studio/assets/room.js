@@ -42,6 +42,9 @@ class Room {
   constructor(host) {
     this.host = host;
     this.devices = new Map();
+    /* Shared with the timeline: muting a track there takes its device out
+     * of the room too, which is what makes reviewing one effect possible. */
+    this.muted = new Set();
     this.build();
   }
 
@@ -114,8 +117,10 @@ class Room {
     let ambient = null;
 
     for (const [id, device] of this.devices) {
+      const off = this.muted.has(id);
+      device.node.classList.toggle("muted", off);
       const s = state[id];
-      const level = s && s.active ? s.level : 0;
+      const level = (!off && s && s.active) ? s.level : 0;
       device.node.classList.toggle('on', level > 0.02);
 
       const params = (s && s.params) || {};
@@ -173,3 +178,7 @@ function cssColour(params) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { cssColour, PX_PER_M };
 }
+
+Room.prototype.setMuted = function (muted) {
+  this.muted = muted;
+};

@@ -20,7 +20,7 @@ services:
     <<: *image
     entrypoint: ["sh", "/opt/componium/hack/make-testclips.sh", "/media"]
     volumes:
-      - media:/media
+      - ${COMPONIUM_MEDIA:-./media}:/media
     restart: "no"
 
   # Seeds an editable copy of the score. The studio writes to this, and the
@@ -48,7 +48,7 @@ services:
       - --input-ipc-server=/run/componium/mpv.sock
       - /media/componium-testclip.mkv
     volumes:
-      - media:/media:ro
+      - ${COMPONIUM_MEDIA:-./media}:/media:ro
       - ipc:/run/componium
     depends_on:
       clips:
@@ -100,10 +100,10 @@ services:
       - studio
       - -score=/scores/demo.componium
       - -rig=/opt/componium/deploy-rig.toml
-      - -media=/media/componium-testclip.mkv
+      - -media=/media
       - -addr=0.0.0.0:8722
     volumes:
-      - media:/media:ro
+      - ${COMPONIUM_MEDIA:-./media}:/media:ro
       - ./demo-rig.toml:/opt/componium/deploy-rig.toml:ro
       - scores:/scores
     ports:
@@ -116,7 +116,9 @@ services:
     restart: unless-stopped
 
 volumes:
-  media:
+  # media is a bind mount rather than a named volume, so films can be
+  # dropped in from outside: hack/fetch-test-videos.sh writes there, and so
+  # does the clip generator. Override with COMPONIUM_MEDIA.
   scores:
   # The mpv IPC socket. A unix socket on a shared volume is how the conductor
   # reaches the player without either of them needing a network.

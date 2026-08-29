@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,20 +76,96 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/score", s.handleScore)
 	mux.HandleFunc("/api/rig", s.handleRig)
 	mux.HandleFunc("/media", s.handleMedia)
+	mux.HandleFunc("/api/media", s.handleMediaList)
 	return mux
 }
 
-// handleMedia serves the film.
+// mediaFiles lists what can be previewed.
+//
+// The media path may be a single file or a directory of them. A directory
+// is what makes the picker useful: point the studio at a folder of films
+// and choose between them without restarting.
+func (s *Server) mediaFiles() []mediaFile {
+	if s.media == "" {
+		return nil
+	}
+	info, err := os.Stat(s.media)
+	if err != nil {
+		return nil
+	}
+	if !info.IsDir() {
+		return []mediaFile{{Name: filepath.Base(s.media), Size: info.Size()}}
+	}
+
+	entries, err := os.ReadDir(s.media)
+	if err != nil {
+		return nil
+	}
+	var out []mediaFile
+	for _, e := range entries {
+		if e.IsDir() || !playable(e.Name()) {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		out = append(out, mediaFile{Name: e.Name(), Size: fi.Size()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+type mediaFile struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
+func playable(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".mp4", ".m4v", ".mkv", ".webm", ".mov", ".avi", ".ogv":
+		return true
+	}
+	return false
+}
+
+func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.mediaFiles())
+}
+
+// handleMedia serves one film.
 //
 // http.ServeFile implements range requests, which is the whole game: without
 // them a browser must download a two hour film before it can seek, and
 // scrubbing a timeline is the entire point of previewing.
 func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
-	if s.media == "" {
+	files := s.mediaFiles()
+	if len(files) == 0 {
 		http.Error(w, "no media loaded; start the studio with -media", http.StatusNotFound)
 		return
 	}
-	http.ServeFile(w, r, s.media)
+
+	info, err := os.Stat(s.media)
+	if err == nil && !info.IsDir() {
+		http.ServeFile(w, r, s.media)
+		return
+	}
+
+	want := r.URL.Query().Get("file")
+	if want == "" {
+		want = files[0].Name
+	}
+	// Only ever serve a name that appeared in the listing. Comparing against
+	// the listing rather than sanitising the input means path traversal is
+	// not something that has to be got right, it is something that cannot be
+	// expressed.
+	for _, f := range files {
+		if f.Name == want {
+			http.ServeFile(w, r, filepath.Join(s.media, f.Name))
+			return
+		}
+	}
+	http.Error(w, "no such media", http.StatusNotFound)
 }
 
 // wireInstrument is what the room needs to draw a device.
@@ -135,7 +213,7 @@ func (s *Server) handleRig(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	out := wireRig{Name: "no rig loaded", HasMedia: s.media != ""}
+	out := wireRig{Name: "no rig loaded", HasMedia: len(s.mediaFiles()) > 0}
 	if s.rig == nil {
 		// Invent one from the score, so the room still has something to draw.
 		// A preview with no devices in it is not a preview.

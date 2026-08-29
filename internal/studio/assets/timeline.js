@@ -26,6 +26,9 @@ class Timeline {
     this.onSelect = (callbacks && callbacks.onSelect) || function () {};
     this.duration = 1;
     this.selected = null;
+    this.muted = new Set();
+    this.onToggle = (callbacks && callbacks.onToggle) || function () {};
+    this.onSolo = (callbacks && callbacks.onSolo) || function () {};
   }
 
   setScore(score, duration) {
@@ -42,13 +45,43 @@ class Timeline {
       const row = document.createElement('div');
       row.className = 'trk';
 
-      const name = document.createElement('div');
-      name.className = 'trk-name';
-      name.textContent = track.instrument;
-      const kind = document.createElement('span');
-      kind.textContent = track.type === 'curve'
-        ? (track.points || []).length + ' points'
-        : (track.cues || []).length + ' cues';
+      row.classList.toggle("muted", this.muted.has(track.instrument));
+
+      const name = document.createElement("div");
+      name.className = "trk-name";
+
+      /* The checkbox is the same state the room reads, so muting a track here
+       * takes its device out of the room too. Reviewing one effect at a time
+       * is most of what previewing is for. */
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = !this.muted.has(track.instrument);
+      box.addEventListener("change", (e) => {
+        e.stopPropagation();
+        this.onToggle(track.instrument, !box.checked);
+      });
+      name.appendChild(box);
+
+      const label = document.createElement("span");
+      label.className = "trk-label";
+      label.textContent = track.instrument;
+      name.appendChild(label);
+
+      const solo = document.createElement("button");
+      solo.className = "solo";
+      solo.textContent = "solo";
+      solo.title = "mute everything else, or restore if this is already alone";
+      solo.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.onSolo(track.instrument);
+      });
+      name.appendChild(solo);
+
+      const kind = document.createElement("span");
+      kind.className = "trk-count";
+      kind.textContent = track.type === "curve"
+        ? (track.points || []).length + " points"
+        : (track.cues || []).length + " cues";
       name.appendChild(kind);
       row.appendChild(name);
 
@@ -142,3 +175,9 @@ function fmt(t) {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { fmt, clamp01 };
 }
+
+/* Attached after the class so the file reads top down. */
+Timeline.prototype.setMuted = function (muted) {
+  this.muted = muted;
+  if (this.score) this.render();
+};

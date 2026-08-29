@@ -298,3 +298,118 @@ func TestCueDurationSurvivesTheEditor(t *testing.T) {
 		t.Errorf("file does not carry the duration:\n%s", b)
 	}
 }
+
+// --- the media picker ---
+
+func mediaDir(t *testing.T) (*Server, string) {
+	t.Helper()
+	dir := t.TempDir()
+	films := filepath.Join(dir, "films")
+	if err := os.MkdirAll(films, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a.mp4", "b.mkv", "notes.txt", "poster.jpg"} {
+		if err := os.WriteFile(filepath.Join(films, name), bytes.Repeat([]byte("x"), 500), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Something outside the directory, to try to reach.
+	os.WriteFile(filepath.Join(dir, "secret.mp4"), []byte("not yours"), 0o644)
+
+	scorePath := filepath.Join(dir, "s.componium")
+	os.WriteFile(scorePath, []byte(sample), 0o644)
+	s, err := New(scorePath, "", films)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, films
+}
+
+func TestMediaListingOnlyIncludesPlayableFiles(t *testing.T) {
+	s, _ := mediaDir(t)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/media", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("returned %d", rec.Code)
+	}
+	var got []mediaFile
+	json.Unmarshal(rec.Body.Bytes(), &got)
+
+	names := map[string]bool{}
+	for _, f := range got {
+		names[f.Name] = true
+	}
+	if !names["a.mp4"] || !names["b.mkv"] {
+		t.Errorf("films missing from the listing: %v", names)
+	}
+	if names["notes.txt"] || names["poster.jpg"] {
+		t.Errorf("listing includes things that are not films: %v", names)
+	}
+}
+
+func TestMediaPickerServesTheNamedFile(t *testing.T) {
+	s, _ := mediaDir(t)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/media?file=b.mkv", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("returned %d", rec.Code)
+	}
+	if rec.Body.Len() != 500 {
+		t.Errorf("served %d bytes, want 500", rec.Body.Len())
+	}
+}
+
+// Path traversal is not something that has to be got right here, it is
+// something that cannot be expressed: only a name that appeared in the
+// listing is ever served.
+func TestMediaPickerRefusesAnythingNotInTheListing(t *testing.T) {
+	s, _ := mediaDir(t)
+	for _, attempt := range []string{
+		"../secret.mp4",
+		"..%2Fsecret.mp4",
+		"/etc/passwd",
+		"films/a.mp4",
+		"notes.txt",
+		"a.mp4/../../secret.mp4",
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/media", nil)
+		q := req.URL.Query()
+		q.Set("file", attempt)
+		req.URL.RawQuery = q.Encode()
+		s.Handler().ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%q returned %d, want 404", attempt, rec.Code)
+		}
+	}
+}
+
+func TestMediaDefaultsToTheFirstFilm(t *testing.T) {
+	s, _ := mediaDir(t)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/media", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("returned %d with no file named, want the first film", rec.Code)
+	}
+}
+
+func TestASingleFileStillWorks(t *testing.T) {
+	// Pointing at one film rather than a directory must keep working, since
+	// that is what every existing invocation does.
+	dir := t.TempDir()
+	film := filepath.Join(dir, "one.mp4")
+	os.WriteFile(film, []byte("hello"), 0o644)
+	scorePath := filepath.Join(dir, "s.componium")
+	os.WriteFile(scorePath, []byte(sample), 0o644)
+
+	s, err := New(scorePath, "", film)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/media", nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != "hello" {
+		t.Errorf("single file mode returned %d %q", rec.Code, rec.Body.String())
+	}
+}

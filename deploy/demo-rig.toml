@@ -51,3 +51,47 @@ latency = "5ms"
 x = 0.0
 y = 0.35
 z = 3.0
+
+# The rest of the room. All virtual: the conductor logs what it would have sent
+# and nothing is driven, but the studio's room preview has every device kind in
+# it, which is what makes toggling one at a time worth doing.
+
+[[instrument]]
+id = "motion.platform"
+kind = "motion"
+driver = "virtual"
+latency = "60ms"
+[instrument.position]
+x = 0.0
+y = 0.5
+z = 3.0
+
+[[instrument]]
+id = "mist.main"
+kind = "mist"
+driver = "virtual"
+latency = "200ms"
+[instrument.position]
+x = 0.0
+y = 2.4
+z = 2.2
+
+[[instrument]]
+id = "fog.left"
+kind = "fog"
+driver = "virtual"
+latency = "2s"
+[instrument.position]
+x = -1.8
+y = 0.15
+z = 1.0
+
+[[instrument]]
+id = "scent.main"
+kind = "scent"
+driver = "virtual"
+latency = "1s"
+[instrument.position]
+x = 1.8
+y = 1.1
+z = 2.6

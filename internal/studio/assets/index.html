@@ -25,7 +25,9 @@
 <main>
   <section class="views">
     <div class="pane">
-      <h2>Film</h2>
+      <h2>Film
+        <select id="media-picker" hidden></select>
+      </h2>
       <video id="video" hidden controls preload="metadata"></video>
       <p id="no-media" class="muted small">
         No film loaded. Start with <code>-media film.mp4</code> to scrub the
@@ -42,7 +44,7 @@
   </section>
 
   <section class="pane wide">
-    <h2>Timeline <span class="muted small">click a lane to seek, a cue to edit</span></h2>
+    <h2>Timeline <span class="muted small">click a lane to seek, a cue to edit; checkboxes and solo mute the room too</span></h2>
     <div id="timeline" class="timeline"></div>
   </section>
 </main>

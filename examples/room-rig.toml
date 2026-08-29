@@ -1,0 +1,117 @@
+# A room with one of everything, for previewing a score in the studio.
+#
+# Every instrument is virtual, so this drives nothing and is safe to point at
+# anything. It exists so the studio's room has all the device kinds in it, and
+# so a generated score has somewhere for every track to land.
+#
+# Positions are metres. Origin at the centre of the screen wall: x right, y up,
+# z toward the audience. The room drawn in the studio is 5m wide, 3m tall and
+# 6m deep, which is a generous but ordinary home cinema.
+
+[rig]
+name = "reference room, all virtual"
+
+# --- light, two layers ------------------------------------------------------
+# The soft wash sits behind the screen and is ceilinged, so it never competes
+# with the event layer. The event layer is overhead and gets the full range.
+
+[[instrument]]
+id = "light.ambient"
+kind = "light"
+driver = "virtual"
+latency = "20ms"
+[instrument.position]
+x = 0.0
+y = 1.4
+z = -0.1
+
+[[instrument]]
+id = "light.event"
+kind = "light"
+driver = "virtual"
+latency = "20ms"
+[instrument.position]
+x = 0.0
+y = 2.6
+z = 1.2
+
+# --- wind -------------------------------------------------------------------
+# In front, blowing back at the seats. A pair, so the room shows that placement
+# is a thing scores can care about.
+
+[[instrument]]
+id = "wind.left"
+kind = "wind"
+driver = "virtual"
+latency = "1.2s"
+[instrument.position]
+x = -1.4
+y = 1.7
+z = 0.6
+
+[[instrument]]
+id = "wind.right"
+kind = "wind"
+driver = "virtual"
+latency = "1.2s"
+[instrument.position]
+x = 1.4
+y = 1.7
+z = 0.6
+
+# --- shake and motion -------------------------------------------------------
+# Both at the seat, because that is where a body is.
+
+[[instrument]]
+id = "shake.seat"
+kind = "shake"
+driver = "virtual"
+latency = "5ms"
+[instrument.position]
+x = 0.0
+y = 0.35
+z = 3.0
+
+[[instrument]]
+id = "motion.platform"
+kind = "motion"
+driver = "virtual"
+latency = "60ms"
+[instrument.position]
+x = 0.0
+y = 0.5
+z = 3.0
+
+# --- the wet and hot ones ---------------------------------------------------
+# Virtual here. Read docs/wet-and-hot.md before any of these becomes real: all
+# three declare limits in a working rig, and the studio does not enforce them.
+
+[[instrument]]
+id = "mist.main"
+kind = "mist"
+driver = "virtual"
+latency = "200ms"
+[instrument.position]
+x = 0.0
+y = 2.4
+z = 2.2
+
+[[instrument]]
+id = "fog.left"
+kind = "fog"
+driver = "virtual"
+latency = "2s"
+[instrument.position]
+x = -1.8
+y = 0.15
+z = 1.0
+
+[[instrument]]
+id = "scent.main"
+kind = "scent"
+driver = "virtual"
+latency = "1s"
+[instrument.position]
+x = 1.8
+y = 1.1
+z = 2.6

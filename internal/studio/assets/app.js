@@ -17,6 +17,35 @@ let timeline = null;
 let dirty = false;
 let selected = null;
 
+/* Which instruments are silenced in the preview. One set, shared by the
+ * timeline and the room: a toggle that affected only one of them would be
+ * telling you something untrue about the other. */
+const muted = new Set();
+
+function applyMuted() {
+  if (room) room.setMuted(muted);
+  if (timeline) timeline.setMuted(muted);
+}
+
+function toggleMuted(id, off) {
+  if (off) muted.add(id); else muted.delete(id);
+  applyMuted();
+}
+
+/* Solo is a toggle, not a mode. Pressing it on the only audible track
+ * restores everything, so the same button gets you in and out. */
+function soloOnly(id) {
+  const all = (score.tracks || []).map(function (t) { return t.instrument; });
+  const alreadyAlone = all.every(function (other) {
+    return other === id ? !muted.has(other) : muted.has(other);
+  });
+  muted.clear();
+  if (!alreadyAlone) {
+    for (const other of all) if (other !== id) muted.add(other);
+  }
+  applyMuted();
+}
+
 /* --- transport ---------------------------------------------------------- */
 
 /* Stands in for the video when there is no film loaded. Same three members, so
@@ -131,34 +160,61 @@ async function load() {
   timeline = new Timeline(el('timeline'), {
     onSeek: function (t) { transport.currentTime = t; },
     onSelect: showInspector,
+    onToggle: toggleMuted,
+    onSolo: soloOnly,
   });
   timeline.setScore(score, duration());
 
-  if (rig.hasMedia) attachMedia();
+  if (rig.hasMedia) loadMediaList();
 }
 
-function attachMedia() {
+/* The picker. Pointing the studio at a directory rather than a single file
+ * is what makes this useful: choose a film without restarting anything. */
+async function loadMediaList() {
+  const res = await fetch("/api/media");
+  if (!res.ok) return;
+  const files = await res.json();
+  const picker = el("media-picker");
+  picker.textContent = "";
+  if (!files || files.length === 0) { picker.hidden = true; return; }
+
+  for (const f of files) {
+    const option = document.createElement("option");
+    option.value = f.name;
+    option.textContent = f.name + "  (" + megabytes(f.size) + ")";
+    picker.appendChild(option);
+  }
+  picker.hidden = false;
+  picker.addEventListener("change", function () { attachMedia(picker.value); });
+  attachMedia(files[0].name);
+}
+
+function megabytes(bytes) {
+  return (bytes / (1024 * 1024)).toFixed(0) + " MB";
+}
+
+function attachMedia(name) {
   const video = el('video');
-  video.src = '/media';
+  video.src = '/media?file=' + encodeURIComponent(name);
   video.hidden = false;
   el('no-media').hidden = true;
 
-  video.addEventListener('loadedmetadata', function () {
+  video.onloadedmetadata = function () {
     transport = video;
     timeline.setScore(score, duration());
-  });
+  };
 
   /* A file the browser cannot decode is common with mkv, and silently showing
    * a black rectangle would be worse than saying so. */
-  video.addEventListener('error', function () {
+  video.onerror = function () {
     video.hidden = true;
     transport = synthetic;
     const note = el('no-media');
     note.hidden = false;
     note.textContent =
-      'this browser cannot decode that file. The timeline and room still work, ' +
-      'driven by the score alone.';
-  });
+      'this browser cannot decode ' + name + '. The timeline and room still ' +
+      'work, driven by the score alone. Try one of the mp4 files.';
+  };
 }
 
 async function save() {
@@ -179,64 +235,3 @@ async function save() {
   el('save').disabled = true;
   el('status').textContent = 'saved, ' + body.cues + ' cues';
 }
-
-/* --- wiring ------------------------------------------------------------- */
-
-function parseTime(text) {
-  text = String(text).trim();
-  if (!text) return null;
-  if (text.indexOf(':') === -1) {
-    const n = Number(text);
-    return Number.isFinite(n) && n >= 0 ? n : null;
-  }
-  let total = 0;
-  for (const part of text.split(':')) {
-    const v = Number(part);
-    if (!Number.isFinite(v) || v < 0) return null;
-    total = total * 60 + v;
-  }
-  return total;
-}
-
-el('save').addEventListener('click', save);
-
-el('play').addEventListener('click', function () {
-  if (transport.paused) transport.play(); else transport.pause();
-  el('play').textContent = transport.paused ? 'Play' : 'Pause';
-});
-
-el('insp-close').addEventListener('click', function () {
-  el('inspector').hidden = true;
-  selected = null;
-});
-
-el('insp-t').addEventListener('change', function () {
-  if (!selected) return;
-  const t = parseTime(el('insp-t').value);
-  if (t === null) { el('status').textContent = 'that is not a timecode'; return; }
-  selected.cue.t = t;
-  (selected.track.cues || []).sort(function (a, b) { return a.t - b.t; });
-  markDirty();
-  timeline.setScore(score, duration());
-});
-
-el('insp-dur').addEventListener('change', function () {
-  if (!selected) return;
-  const d = Number(el('insp-dur').value);
-  if (!Number.isFinite(d) || d < 0) return;
-  selected.cue.duration = d;
-  markDirty();
-  timeline.setScore(score, duration());
-});
-
-document.addEventListener('keydown', function (e) {
-  if (e.target && e.target.tagName === 'INPUT') return;
-  if (e.code === 'Space') { e.preventDefault(); el('play').click(); }
-});
-
-window.addEventListener('beforeunload', function (e) {
-  if (dirty) { e.preventDefault(); e.returnValue = ''; }
-});
-
-load();
-requestAnimationFrame(frame);
