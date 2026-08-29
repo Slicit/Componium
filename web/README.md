@@ -37,3 +37,10 @@ this is developed against blocks subresources on LAN origins and never
 delivers animation frames, so anything that can only be checked by looking at
 a running page is effectively unchecked. Keeping that layer small is how the
 bugs stay findable.
+
+## Why jsdom is pinned
+
+`jsdom` 26 and later need a Node that has `webidl.util.markAsUncloneable`,
+which Node 20 does not have — it fails at import with a stack trace from inside
+undici rather than anything resembling a version error. Both this project's
+build box and CI run Node 20, so jsdom stays on 25 until that moves.
