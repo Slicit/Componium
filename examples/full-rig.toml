@@ -46,6 +46,18 @@ kind = "mist"
 driver = "cip"
 addr = "192.168.1.52:5570"
 
+# --- scent: a relay per cartridge, through a node ---------------------------
+# Scent is the one effect that cannot be taken back. It lingers well past the
+# scene that called for it, and some people are asthmatic or allergic. Use
+# short puffs, long duty windows, and ask your guests first.
+
+[[instrument]]
+id = "scent.main"
+kind = "scent"
+driver = "cip"
+addr = "192.168.1.53:5570"
+secret = "change me, or leave this out on a wired network you trust"
+
 # --- motion: 6DOF pose handed to an existing rig controller -----------------
 # Componium does not drive actuators. It says where the platform should be and
 # something else works out how. travel is not optional in practice: without it

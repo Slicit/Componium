@@ -31,6 +31,7 @@ import sys
 
 import scenes
 import subtitles
+import vision
 
 SCORE_VERSION = "0.1"
 
@@ -280,6 +281,20 @@ def build(args) -> str:
             kinds = {"light": args.light_id, "shake": args.shake_id}
             subtitle_cues = subtitles.cues(subtitles.parse(srt), mapping, kinds)
 
+    if args.vlm_command:
+        # The expensive pass runs only on windows the cheap detectors already
+        # flagged. Sending every frame of a feature to a model would cost a
+        # fortune to learn what the audio already said.
+        times = vision.candidates(env, args.fps, cuts, args.vlm_frames)
+        labels = vision.describe(args.input, times, args.vlm_command)
+        kinds = {"light": args.light_id, "shake": args.shake_id}
+        vlm = subtitles.cues_from_descriptions(
+            labels, subtitles.load_mapping(args.mapping), kinds)
+        sys.stderr.write(
+            f'{len(times)} keyframes labelled, {len(vlm)} cues from the model\n')
+        subtitle_cues = subtitles.dedupe(sorted(
+            subtitle_cues + vlm, key=lambda c: (c["t"], c["instrument"])))
+
     by_instrument = {}
     for cue in subtitle_cues:
         by_instrument.setdefault(cue["instrument"], []).append(cue)
@@ -326,6 +341,11 @@ def main(argv=None):
     p.add_argument("--mapping", help="JSON file replacing the word to effect mapping")
     p.add_argument("--no-scenes", action="store_true",
                    help="do not detect scene cuts")
+    p.add_argument("--vlm-command",
+                   help="program that takes an image path and prints labels, "
+                        "one per line; Componium ships no model")
+    p.add_argument("--vlm-frames", type=int, default=40,
+                   help="how many keyframes to label at most (default 40)")
     p.add_argument("--scene-threshold", type=float, default=0.35,
                    help="scene change sensitivity, higher is fewer cuts (default 0.35)")
     args = p.parse_args(argv)

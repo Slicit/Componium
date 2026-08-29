@@ -47,6 +47,15 @@ Clamping is not a safety system. It is a last resort inside one process. A
 platform needs mechanical end stops and an emergency stop that is not on the
 network.
 
+**Scent that will not go away.** Scent is the only effect here that cannot be
+undone. A fan stops, a light goes dark, a platform returns to neutral; a smell
+stays in the room for the rest of the film and often the rest of the evening.
+It is also the effect most likely to affect somebody physically: asthma and
+fragrance allergies are common and are not visible.
+
+The composer maps only the most unambiguous words to scent, on purpose. Keep
+puffs short, duty windows long, and ask before using it on guests.
+
 **Heat.** Foggers and hazers contain a heater block. They should never be
 driven immediately from cold, and Componium does not know whether yours is
 warm. Nothing in the software models this; it is on the operator.

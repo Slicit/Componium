@@ -56,6 +56,12 @@ DEFAULT_MAPPING = {
     "rumbles":   [{"kind": "shake", "action": "rumble", "params": {"intensity": 0.5}, "duration": 2.0}],
     "roars":     [{"kind": "shake", "action": "rumble", "params": {"intensity": 0.6}, "duration": 2.0}],
     "crash":     [{"kind": "shake", "action": "hit", "params": {"intensity": 0.8}, "duration": 1.0}],
+    # Scent. Conservative by necessity: a smell cannot be taken back, it
+    # lingers past the scene that called for it, and some people are
+    # asthmatic or allergic. Only the most unambiguous words qualify.
+    "burning":   [{"kind": "scent", "action": "puff", "params": {"channel": 1.0}, "duration": 1.0}],
+    "smoke":     [{"kind": "scent", "action": "puff", "params": {"channel": 1.0}, "duration": 1.0}],
+    "petrichor": [{"kind": "scent", "action": "puff", "params": {"channel": 2.0}, "duration": 1.0}],
 }
 
 
@@ -133,15 +139,25 @@ def descriptions(entries):
 
 
 def cues(entries, mapping=None, kinds=None):
-    """Turn subtitle descriptions into cue dictionaries.
+    """Turn subtitle descriptions into cue dictionaries."""
+    return cues_from_descriptions(descriptions(entries), mapping, kinds)
 
-    kinds maps an effect kind to the instrument id in the target rig, so that a
-    rig calling its fan "wind.left" still works.
+
+def cues_from_descriptions(descs, mapping=None, kinds=None):
+    """Turn (time, phrase) pairs into cue dictionaries.
+
+    Shared with the vision seam on purpose. A model that says "explosion"
+    should produce exactly the same cues as a subtitle that said
+    "[explosion]", so there is one vocabulary and one mapping rather than
+    two that drift apart.
+
+    kinds maps an effect kind to the instrument id in the target rig, so
+    that a rig calling its fan "wind.left" still works.
     """
     mapping = mapping or DEFAULT_MAPPING
     kinds = kinds or {}
     out = []
-    for at, phrase in descriptions(entries):
+    for at, phrase in descs:
         words = set(re.findall(r"[a-z]+", phrase.lower()))
         for word, effects in mapping.items():
             if word not in words:
