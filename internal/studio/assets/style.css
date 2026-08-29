@@ -234,3 +234,9 @@ code { background: #202730; padding: 0.1em 0.35em; border-radius: 3px; }
   transition: width 300ms linear;
 }
 .failed { color: var(--danger); }
+
+/* A film being uploaded appears as a row immediately, so the page shows
+   something is happening before the server knows anything about it. */
+.lib-row.uploading { opacity: 0.85; }
+.lib-row.uploading .lib-name { font-style: italic; }
+.lib-head .lib-actions { flex: none; }

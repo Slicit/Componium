@@ -92,9 +92,31 @@ class Library {
     where.textContent = data.canBuild
       ? 'scores in ' + (data.scores || '(none)')
       : 'no composer found, so films cannot be analysed here';
+    if (data.free) {
+      where.textContent += '  ·  ' + libSize(data.free) + ' free';
+    }
+
+    const headActions = libEl('div', 'lib-actions', head);
+
+    if (data.canUpload) {
+      /* A hidden input driven by a button, because the native file control is
+       * unstyleable and says "no file chosen" forever after an upload. */
+      const input = libEl('input', '', headActions);
+      input.type = 'file';
+      input.accept = 'video/*,.mkv,.mp4,.webm,.mov,.m4v';
+      input.hidden = true;
+      input.addEventListener('change', () => {
+        if (input.files && input.files[0]) this.upload(input.files[0]);
+        input.value = '';
+      });
+
+      const pick = libEl('button', '', headActions);
+      pick.textContent = 'Upload film';
+      pick.addEventListener('click', () => input.click());
+    }
 
     if (data.canBuild) {
-      const all = libEl('button', '', head);
+      const all = libEl('button', '', headActions);
       all.textContent = 'Rebuild all';
       all.title = 'Queue every film. They run one at a time.';
       all.addEventListener('click', () => this.buildAll());
@@ -149,6 +171,12 @@ class Library {
         build.disabled = !!running;
         build.addEventListener('click', () => this.build(entry.film));
       }
+      if (data.canUpload) {
+        const del = libEl('button', 'danger', actions);
+        del.textContent = 'Delete';
+        del.title = 'Remove the film from disk';
+        del.addEventListener('click', () => this.remove(entry));
+      }
     }
   }
 }
@@ -156,3 +184,60 @@ class Library {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { libSize, libClock };
 }
+
+/* Upload with XMLHttpRequest rather than fetch, because fetch reports no
+ * progress on the way *up* and a film is gigabytes. Watching a browser sit
+ * silent for four minutes is indistinguishable from it having hung. */
+Library.prototype.upload = function (file) {
+  const host = this.host;
+  const row = libEl('div', 'lib-row uploading', host);
+  const name = libEl('div', 'lib-name', row);
+  name.textContent = file.name;
+  const status = libEl('div', 'lib-status', row);
+  const bar = libEl('div', 'bar', status);
+  const fill = libEl('div', 'fill', bar);
+  const label = libEl('span', 'muted small', status);
+  label.textContent = 'uploading ' + libSize(file.size);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/upload?name=' + encodeURIComponent(file.name));
+  xhr.upload.onprogress = function (e) {
+    if (!e.lengthComputable) return;
+    fill.style.width = Math.round((e.loaded / e.total) * 100) + '%';
+    label.textContent = libSize(e.loaded) + ' of ' + libSize(e.total);
+  };
+  xhr.onload = () => {
+    if (xhr.status === 200) {
+      this.refresh();
+      return;
+    }
+    let message = 'upload failed';
+    try { message = JSON.parse(xhr.responseText).error || message; } catch (e) {}
+    label.className = 'failed small';
+    label.textContent = message;
+  };
+  xhr.onerror = function () {
+    label.className = 'failed small';
+    label.textContent = 'upload failed';
+  };
+  xhr.send(file);
+};
+
+Library.prototype.remove = async function (entry) {
+  /* Deleting a film is the only thing here that cannot be undone, so it asks,
+   * and it says what else goes with it. */
+  const alsoScore = entry.hasScore;
+  const question = alsoScore
+    ? 'Delete ' + entry.film + ' and its score? This cannot be undone.'
+    : 'Delete ' + entry.film + '? This cannot be undone.';
+  if (!window.confirm(question)) return;
+
+  const url = '/api/delete?file=' + encodeURIComponent(entry.film) +
+              (alsoScore ? '&score=1' : '');
+  const res = await fetch(url, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = await res.json().catch(function () { return {}; });
+    window.alert('Could not delete: ' + (body.error || res.status));
+  }
+  await this.refresh();
+};

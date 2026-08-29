@@ -536,3 +536,136 @@ func TestAFilmWithAScoreIsOpened(t *testing.T) {
 		t.Errorf("did not open the film's own score: %s", rec.Body)
 	}
 }
+
+// --- upload and delete ---
+
+func upload(t *testing.T, s *Server, name string, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/upload", bytes.NewReader(body))
+	q := req.URL.Query()
+	q.Set("name", name)
+	req.URL.RawQuery = q.Encode()
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+func TestUploadWritesAFilmAndItAppears(t *testing.T) {
+	s, films := mediaDir(t)
+	body := bytes.Repeat([]byte("v"), 4096)
+
+	if rec := upload(t, s, "new.mp4", body); rec.Code != http.StatusOK {
+		t.Fatalf("upload returned %d: %s", rec.Code, rec.Body)
+	}
+	written, err := os.ReadFile(filepath.Join(films, "new.mp4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(written, body) {
+		t.Error("what was written is not what was sent")
+	}
+	for _, f := range s.mediaFiles() {
+		if f.Name == "new.mp4" {
+			return
+		}
+	}
+	t.Error("the uploaded film is not in the listing")
+}
+
+// Rejecting rather than sanitising means there is no clever encoding that
+// survives, because nothing is rewritten.
+func TestUploadRefusesUnsafeNames(t *testing.T) {
+	s, films := mediaDir(t)
+	for _, name := range []string{
+		"../escape.mp4", "sub/dir.mp4", `back\slash.mp4`, ".hidden.mp4",
+		"notes.txt", "noextension", "", "a..b.mp4",
+	} {
+		rec := upload(t, s, name, []byte("x"))
+		if rec.Code == http.StatusOK {
+			t.Errorf("%q was accepted", name)
+		}
+	}
+	// And nothing escaped the directory.
+	if _, err := os.Stat(filepath.Join(filepath.Dir(films), "escape.mp4")); err == nil {
+		t.Error("a file was written outside the media directory")
+	}
+}
+
+func TestUploadRefusesAnEmptyBody(t *testing.T) {
+	s, films := mediaDir(t)
+	if rec := upload(t, s, "empty.mp4", nil); rec.Code == http.StatusOK {
+		t.Error("an empty upload was accepted")
+	}
+	if _, err := os.Stat(filepath.Join(films, "empty.mp4")); err == nil {
+		t.Error("an empty upload left a file behind")
+	}
+}
+
+// A failed or abandoned upload must never appear in the library as a playable
+// film, which is why it is written beside the target and renamed.
+func TestAPartialUploadIsNotListed(t *testing.T) {
+	s, films := mediaDir(t)
+	os.WriteFile(filepath.Join(films, "half.mp4.part"), []byte("incomplete"), 0o644)
+	for _, f := range s.mediaFiles() {
+		if strings.Contains(f.Name, ".part") {
+			t.Errorf("a partial upload is listed as a film: %s", f.Name)
+		}
+	}
+}
+
+func TestDeleteRemovesTheFilm(t *testing.T) {
+	s, films := mediaDir(t)
+	req := httptest.NewRequest(http.MethodDelete, "/api/delete?file=a.mp4", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete returned %d: %s", rec.Code, rec.Body)
+	}
+	if _, err := os.Stat(filepath.Join(films, "a.mp4")); err == nil {
+		t.Error("the film is still there")
+	}
+}
+
+func TestDeleteCanTakeTheScoreWithIt(t *testing.T) {
+	s, films := mediaDir(t)
+	scorePath := filepath.Join(films, "a.componium")
+	os.WriteFile(scorePath, []byte(sample), 0o644)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/delete?file=a.mp4&score=1", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete returned %d: %s", rec.Code, rec.Body)
+	}
+	if _, err := os.Stat(scorePath); err == nil {
+		t.Error("the score outlived its film")
+	}
+}
+
+// Deleting is the one operation here that cannot be undone, so it will not act
+// on a name it did not itself just offer.
+func TestDeleteRefusesAnythingNotInTheListing(t *testing.T) {
+	s, films := mediaDir(t)
+	outside := filepath.Join(filepath.Dir(films), "secret.mp4")
+
+	for _, attempt := range []string{"../secret.mp4", "notes.txt", "/etc/passwd", "nope.mp4"} {
+		req := httptest.NewRequest(http.MethodDelete, "/api/delete", nil)
+		q := req.URL.Query()
+		q.Set("file", attempt)
+		req.URL.RawQuery = q.Encode()
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%q returned %d, want 404", attempt, rec.Code)
+		}
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Error("a file outside the media directory was deleted")
+	}
+	if _, err := os.Stat(filepath.Join(films, "notes.txt")); err != nil {
+		t.Error("a non-film inside the directory was deleted")
+	}
+}

@@ -48,7 +48,7 @@ services:
       - --input-ipc-server=/run/componium/mpv.sock
       - /media/componium-testclip.mkv
     volumes:
-      - ${COMPONIUM_MEDIA:-./media}:/media:ro
+      - ${COMPONIUM_MEDIA:-./media}:/media
       - ipc:/run/componium
     depends_on:
       clips:
@@ -104,7 +104,7 @@ services:
       - -scores=/scores
       - -addr=0.0.0.0:8722
     volumes:
-      - ${COMPONIUM_MEDIA:-./media}:/media:ro
+      - ${COMPONIUM_MEDIA:-./media}:/media
       - ./demo-rig.toml:/opt/componium/deploy-rig.toml:ro
       - scores:/scores
     ports:
@@ -117,6 +117,9 @@ services:
     restart: unless-stopped
 
 volumes:
+  # Writable for the studio, which uploads and deletes films; read only for
+  # the player and the clip generator would be nice but compose mounts are
+  # per service and the studio needs write, so they share one mode.
   # media is a bind mount rather than a named volume, so films can be
   # dropped in from outside: hack/fetch-test-videos.sh writes there, and so
   # does the clip generator. Override with COMPONIUM_MEDIA.

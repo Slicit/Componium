@@ -158,6 +158,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/library", s.handleLibrary)
 	mux.HandleFunc("/api/build", s.handleBuild)
 	mux.HandleFunc("/api/jobs", s.handleJobs)
+	mux.HandleFunc("/api/upload", s.handleUpload)
+	mux.HandleFunc("/api/delete", s.handleDelete)
 	return mux
 }
 
@@ -573,10 +575,14 @@ type libraryEntry struct {
 }
 
 type libraryView struct {
-	Scores   string         `json:"scores"`
-	CanBuild bool           `json:"canBuild"`
-	Current  string         `json:"current"`
-	Entries  []libraryEntry `json:"entries"`
+	Scores string `json:"scores"`
+	// Free space where films live, since running out of it is the reason
+	// anybody deletes one.
+	Free      int64          `json:"free"`
+	CanBuild  bool           `json:"canBuild"`
+	CanUpload bool           `json:"canUpload"`
+	Current   string         `json:"current"`
+	Entries   []libraryEntry `json:"entries"`
 }
 
 // handleLibrary answers what films exist, which have scores, and what is being
@@ -589,9 +595,11 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	out := libraryView{
-		Scores:   s.scores,
-		CanBuild: s.jobs.Available(),
-		Current:  current,
+		Scores:    s.scores,
+		CanBuild:  s.jobs.Available(),
+		Current:   current,
+		Free:      freeBytes(s.mediaDir()),
+		CanUpload: s.mediaDir() != "",
 	}
 	for _, f := range s.mediaFiles() {
 		entry := libraryEntry{Film: f.Name, Size: f.Size}
