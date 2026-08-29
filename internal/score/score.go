@@ -178,7 +178,6 @@ func (s *Score) Cues() []instrument.Cue {
 				Instrument:        t.Instrument,
 				Action:            c.Action,
 				Params:            c.Params,
-				Hold:              c.Duration.Duration(),
 				RequiredPrecision: c.RequiredPrecision.Duration(),
 			})
 		}

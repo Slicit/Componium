@@ -41,14 +41,32 @@ ssh -i "$KEY" "$USER_AT" "cd $REMOTE_DIR && git push -q origin main && git log -
 
 echo "bringing the laptop back in line"
 git fetch -q origin
-# Refuse to discard anything the box does not already have. A local file that
-# differs from what was just pushed means the sync missed it, and destroying it
-# would be the worst possible outcome of a convenience script.
+# Two kinds of local change to clear: tracked files that were modified, and
+# files that were untracked here but are tracked on origin now. Both are
+# checked against what was just pushed before anything is removed. A local
+# file that differs means the sync missed it, and destroying it would be the
+# worst possible outcome of a convenience script.
+same_as_origin() {
+  MSYS_NO_PATHCONV=1 git show "origin/main:$1" 2>/dev/null | diff -q - "$1" >/dev/null 2>&1
+}
+
 for f in $(git diff --name-only); do
-  if ! MSYS_NO_PATHCONV=1 git show "origin/main:$f" 2>/dev/null | diff -q - "$f" >/dev/null 2>&1; then
+  if ! same_as_origin "$f"; then
     echo "refusing to continue: $f differs from what is on origin/main" >&2
-    echo "the sync did not include it, or something changed after the push" >&2
     exit 1
+  fi
+done
+
+# Untracked locally, tracked on origin: the pull would refuse to overwrite
+# them. Remove only the ones origin already has byte for byte.
+for f in $(git ls-files --others --exclude-standard); do
+  if MSYS_NO_PATHCONV=1 git show "origin/main:$f" >/dev/null 2>&1; then
+    if same_as_origin "$f"; then
+      rm -f "$f"
+    else
+      echo "refusing to continue: untracked $f differs from origin/main" >&2
+      exit 1
+    fi
   fi
 done
 git checkout -- . 2>/dev/null || true

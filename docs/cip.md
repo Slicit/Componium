@@ -80,36 +80,6 @@ The node replies with an `ack` carrying the same `seq`. Unacknowledged cues are
 retried; a cue that cannot be delivered becomes an error the conductor records
 as a skip, because a silently lost cue is invisible.
 
-## Spans: every effect carries its own ending
-
-A cue may declare `hold_ms`. A node that receives one **must end the effect
-itself when it expires**, without waiting to be told.
-
-```json
-{ "v": "0.2", "t": "cue", "seq": 17, "action": "burst",
-  "params": { "output": 0.8 }, "hold_ms": 4000 }
-```
-
-The conductor will *also* send a stop when the span ends. Both, deliberately.
-The stop is a UDP datagram and can be lost; the conductor is a process and can
-crash. An instrument that only stops when told is one dropped packet away from
-running until somebody pulls a plug.
-
-That gives three independent layers, in decreasing order of how much they can
-be trusted:
-
-1. **The node's own hold timer.** Needs nothing from the network.
-2. **The conductor's stop**, which is retried like any other cue.
-3. **The heartbeat watchdog**, which catches the case where the conductor
-   stopped talking entirely.
-
-Only the first survives every failure, which is why it exists even though the
-other two would usually be enough.
-
-An action of `stop`, `off`, `safe` or `neutral` ends an effect. A node that
-does not recognise an action should do nothing, with that one exception:
-failing to understand a stop must never mean carrying on.
-
 ## Curve frames
 
 Binary, because at 50 Hz per instrument the JSON parser is the expensive part

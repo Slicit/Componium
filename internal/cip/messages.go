@@ -67,15 +67,6 @@ type Message struct {
 	Instrument string             `json:"instrument,omitempty"`
 	Action     string             `json:"action,omitempty"`
 	Params     map[string]float64 `json:"params,omitempty"`
-	// HoldMS is how long the effect should last. A node that receives one
-	// must end the effect itself when it expires, without waiting to be
-	// told.
-	//
-	// This duplicates the stop the conductor will also send, on purpose. The
-	// stop is a UDP datagram and can be lost, and the conductor is a process
-	// and can crash. An instrument that only stops when told is one dropped
-	// packet away from running until somebody pulls a plug.
-	HoldMS Millis `json:"hold_ms,omitempty"`
 	// DispatchIn is how long from receipt the node should act. The conductor
 	// has already subtracted the declared latency, so a node that can time
 	// precisely may use this, and a simple node may ignore it and act at once.

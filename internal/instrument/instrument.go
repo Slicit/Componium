@@ -67,16 +67,6 @@ type Cue struct {
 	Action string
 	// Params carries domain values, in units the instrument's kind defines.
 	Params map[string]float64
-	// Hold is how long the effect should last. Zero means the cue is
-	// momentary and needs no stopping: a flash, a single impact.
-	//
-	// A cue with a Hold becomes a span. The conductor schedules a matching
-	// stop, and the instrument is *also* told the duration so that it ends
-	// the effect itself. Both, deliberately. The stop is a UDP datagram and
-	// can be lost; the conductor is a process and can crash. An instrument
-	// that only stops when told is one dropped packet away from running
-	// until somebody pulls a plug.
-	Hold time.Duration
 	// RequiredPrecision is how accurate the media clock must be for this cue
 	// to be worth firing. Zero means no requirement.
 	//
@@ -104,20 +94,4 @@ type Dispatch struct {
 type Instrument interface {
 	Manifest() Manifest
 	Dispatch(Dispatch) error
-}
-
-// ActionStop is the action a conductor sends to end a span.
-//
-// An instrument that does not recognise an action should do nothing, with one
-// exception: this one. Failing to understand "stop" must never mean carrying
-// on.
-const ActionStop = "stop"
-
-// IsStop reports whether an action ends an effect rather than starting one.
-func IsStop(action string) bool {
-	switch action {
-	case ActionStop, "off", "safe", "neutral":
-		return true
-	}
-	return false
 }
