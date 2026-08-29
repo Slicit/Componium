@@ -6,14 +6,15 @@
 # option permanently and irreversibly, which is exactly the kind of mistake a
 # human reviewer makes at 1am and cannot undo.
 #
-# SETUP, once, before the repository takes contributions:
+# SETUP:
 #
-#   1. Create a repository (or organisation) secret named PERSONAL_ACCESS_TOKEN
-#      with a classic PAT that has `repo` scope. The action uses it to write
-#      the signature file, which is why the default GITHUB_TOKEN is not enough.
-#   2. Create an empty branch or use the default one to hold
-#      signatures/version1/cla.json. The action creates the file on first use.
-#   3. Merge this workflow. That is all.
+#   Probably none. Signatures are stored in this repository, and the action's
+#   own documentation says PERSONAL_ACCESS_TOKEN is needed only when they
+#   live in a different one. Its environment variable table contradicts that
+#   and calls the token required, so if a run fails complaining about it,
+#   create a repository secret named PERSONAL_ACCESS_TOKEN holding a classic
+#   PAT with repo scope. Referencing a secret that does not exist is
+#   harmless: it substitutes to an empty string.
 #
 # Contributors sign by commenting on their own pull request. No forms.
 
