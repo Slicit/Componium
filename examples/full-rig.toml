@@ -1,0 +1,68 @@
+# A complete rig, showing every driver Componium has.
+#
+# Nothing here is safe to point at real hardware without reading
+# docs/wet-and-hot.md first. Fog, water and motion can hurt people and
+# property; light and wind cannot.
+
+[rig]
+name = "the works"
+
+# --- light: DMX over the network -------------------------------------------
+# Speaks E1.31, so any sACN node, Art-Net gateway or WLED controller works.
+
+[[instrument]]
+id = "light.ambient"
+kind = "light"
+driver = "sacn"
+latency = "20ms"
+universe = 1
+start = 10
+mode = "rgb"
+
+# --- wind: an ESP32 running the Componium node firmware ---------------------
+# No latency here on purpose. The node reports its own, because it is the only
+# thing that actually knows.
+
+[[instrument]]
+id = "wind.main"
+kind = "wind"
+driver = "cip"
+addr = "192.168.1.50:5570"
+
+# --- shake: another node, driving a bass shaker -----------------------------
+
+[[instrument]]
+id = "shake.seat"
+kind = "shake"
+driver = "cip"
+addr = "192.168.1.51:5570"
+
+# --- mist: a valve on a relay, through a node -------------------------------
+# The node enforces its own duty cycle. Read docs/wet-and-hot.md.
+
+[[instrument]]
+id = "mist.main"
+kind = "mist"
+driver = "cip"
+addr = "192.168.1.52:5570"
+
+# --- motion: 6DOF pose handed to an existing rig controller -----------------
+# Componium does not drive actuators. It says where the platform should be and
+# something else works out how. travel is not optional in practice: without it
+# the defaults are deliberately tiny, so an undeclared rig moves timidly.
+
+[[instrument]]
+id = "motion.platform"
+kind = "motion"
+driver = "motion"
+addr = "127.0.0.1:9010"
+format = "csv"
+latency = "60ms"
+
+[instrument.travel]
+surge = 0.08
+sway = 0.08
+heave = 0.06
+roll = 6.0
+pitch = 6.0
+yaw = 4.0

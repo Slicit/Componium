@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/Slicit/Componium/instruments/motion"
 	"github.com/Slicit/Componium/instruments/sacn"
 	"github.com/Slicit/Componium/instruments/virtual"
 	"github.com/Slicit/Componium/internal/cip"
@@ -39,6 +40,10 @@ type InstConfig struct {
 
 	// Addr is where to reach the device, used by the sacn and cip drivers.
 	RemoteTimeout Duration `toml:"remote_timeout"`
+
+	// Motion fields, used when Driver is "motion".
+	Format string        `toml:"format"`
+	Travel *MotionTravel `toml:"travel"`
 	// sACN fields, used when Driver is "sacn".
 	Universe uint16 `toml:"universe"`
 	Start    int    `toml:"start"`
@@ -59,6 +64,18 @@ func (d *Duration) UnmarshalText(b []byte) error {
 }
 
 func (d Duration) Duration() time.Duration { return time.Duration(d) }
+
+// MotionTravel is a platform's declared range of movement, in metres and
+// degrees. Nothing is ever commanded outside it, because a platform driven
+// past its travel does not politely refuse: it drives into its end stops.
+type MotionTravel struct {
+	Surge float64 `toml:"surge"`
+	Sway  float64 `toml:"sway"`
+	Heave float64 `toml:"heave"`
+	Roll  float64 `toml:"roll"`
+	Pitch float64 `toml:"pitch"`
+	Yaw   float64 `toml:"yaw"`
+}
 
 // Load reads a rig file.
 func Load(path string) (*Config, error) {
@@ -149,6 +166,25 @@ func (c *Config) Build() (*Built, error) {
 			out.Instruments[in.ID] = c
 			out.closers = append(out.closers, c)
 			out.remotes = append(out.remotes, c)
+		case "motion":
+			cfg := motion.Config{
+				ID: in.ID, Addr: in.Addr,
+				Format:  motion.Format(in.Format),
+				Latency: in.Latency.Duration(),
+			}
+			if t := in.Travel; t != nil {
+				cfg.Limits = motion.Limits{
+					Surge: t.Surge, Sway: t.Sway, Heave: t.Heave,
+					Roll: t.Roll, Pitch: t.Pitch, Yaw: t.Yaw,
+				}
+			}
+			m, err := motion.New(cfg)
+			if err != nil {
+				out.Close()
+				return nil, err
+			}
+			out.Instruments[in.ID] = m
+			out.closers = append(out.closers, m)
 		default:
 			out.Close()
 			return nil, fmt.Errorf("rig: instrument %q has unknown driver %q", in.ID, in.Driver)
