@@ -34,8 +34,16 @@ Nothing is implemented yet. Intended shape, revisit before committing to it:
   conductor deliberately killed.
 - **Every instrument kind needs a virtual implementation** before its hardware
   driver is written. Contributors without a rig must be able to run everything.
-- **Development runs on `claude-machine-02`.** Author locally, commit, push,
-  pull on the box, run there. See the claude-machine skill.
+- **Everything runs on `claude-machine-02`.** Builds, tests, git and GitHub
+  operations all happen there. `gh` is authenticated on the box as of
+  2026-08-29, so pull requests, workflow runs and repository settings are
+  reachable from it without involving a laptop.
+- **Commits originate on the box.** Files may be authored elsewhere and
+  synced across, but `git commit` and `git push` run on Linux, where line
+  endings are LF by construction rather than by cleanup.
+- The box's `gh` token deliberately lacks the `workflow` scope. That does
+  not prevent pushing changes to `.github/workflows`, because git pushes go
+  over SSH with a key rather than with the token. Verified, not assumed.
 
 ## Non-goals
 
