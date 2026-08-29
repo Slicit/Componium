@@ -43,6 +43,12 @@ type InstConfig struct {
 	// Secret authenticates CIP traffic. Both ends must agree.
 	Secret string `toml:"secret"`
 
+	// Position places the instrument in the room, for the studio's preview.
+	// Metres, origin at the centre of the screen wall, x right, y up,
+	// z toward the audience. Optional: the studio falls back to a sensible
+	// spot for the kind.
+	Position *Position `toml:"position"`
+
 	// Motion fields, used when Driver is "motion".
 	Format string        `toml:"format"`
 	Travel *MotionTravel `toml:"travel"`
@@ -66,6 +72,13 @@ func (d *Duration) UnmarshalText(b []byte) error {
 }
 
 func (d Duration) Duration() time.Duration { return time.Duration(d) }
+
+// Position is where an instrument physically sits, in metres.
+type Position struct {
+	X float64 `toml:"x"`
+	Y float64 `toml:"y"`
+	Z float64 `toml:"z"`
+}
 
 // MotionTravel is a platform's declared range of movement, in metres and
 // degrees. Nothing is ever commanded outside it, because a platform driven

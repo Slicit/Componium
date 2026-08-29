@@ -45,7 +45,7 @@ jobs:
           node-version: '20'
       - name: studio tests
         working-directory: internal/studio/assets
-        run: node timecode.test.js
+        run: node state.test.js
 
   line-endings:
     runs-on: ubuntu-latest

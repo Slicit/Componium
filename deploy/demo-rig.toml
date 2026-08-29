@@ -1,6 +1,10 @@
 # The rig the demonstration stack runs. wind.main is a real CIP node reached
-# over the network; the light is virtual, so the conductor logs what it would
+# over the network; the lights are virtual, so the conductor logs what it would
 # have sent to a fixture.
+#
+# The position blocks are what the studio's room preview draws from. Metres,
+# origin at the centre of the screen wall: x right, y up, z toward the
+# audience. Leave them out and the studio picks a sensible spot for the kind.
 
 [rig]
 name = "demonstration, no hardware"
@@ -10,9 +14,40 @@ id = "wind.main"
 kind = "wind"
 driver = "cip"
 addr = "node:5570"
+[instrument.position]
+x = 0.0
+y = 1.7
+z = 0.7
 
+# The soft wash, behind the screen. Ceilinged, so it never competes with the
+# event layer above it.
 [[instrument]]
 id = "light.ambient"
 kind = "light"
 driver = "virtual"
 latency = "20ms"
+[instrument.position]
+x = 0.0
+y = 1.4
+z = -0.1
+
+# The event layer: lightning and explosions, overhead and punchy.
+[[instrument]]
+id = "light.event"
+kind = "light"
+driver = "virtual"
+latency = "20ms"
+[instrument.position]
+x = 0.0
+y = 2.5
+z = 1.2
+
+[[instrument]]
+id = "shake.seat"
+kind = "shake"
+driver = "virtual"
+latency = "5ms"
+[instrument.position]
+x = 0.0
+y = 0.35
+z = 3.0

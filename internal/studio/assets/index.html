@@ -7,45 +7,62 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
 <header>
   <h1>Componium <span class="muted">studio</span></h1>
   <div class="meta">
     <span id="title"></span>
-    <span id="path" class="muted"></span>
+    <span id="rigname" class="muted"></span>
   </div>
   <div class="actions">
+    <span id="clock" class="clock">00:00.000</span>
+    <button id="play">Play</button>
     <span id="status" class="muted">loading</span>
     <button id="save" disabled>Save</button>
   </div>
 </header>
 
 <main>
-  <div id="ruler"></div>
-  <div id="tracks"></div>
+  <section class="views">
+    <div class="pane">
+      <h2>Film</h2>
+      <video id="video" hidden controls preload="metadata"></video>
+      <p id="no-media" class="muted small">
+        No film loaded. Start with <code>-media film.mp4</code> to scrub the
+        score against the picture. Play still works: the transport runs on its
+        own clock.
+      </p>
+    </div>
+
+    <div class="pane">
+      <h2>Room</h2>
+      <div id="room" class="room-host"></div>
+      <div id="active" class="active"></div>
+    </div>
+  </section>
+
+  <section class="pane wide">
+    <h2>Timeline <span class="muted small">click a lane to seek, a cue to edit</span></h2>
+    <div id="timeline" class="timeline"></div>
+  </section>
 </main>
 
 <aside id="inspector" hidden>
   <h2 id="insp-title">Nothing selected</h2>
-  <label>Time <input id="insp-t" type="text" placeholder="00:00:00.000"></label>
+  <label>Time <input id="insp-t" type="text" placeholder="00:00.000"></label>
+  <label>Duration, seconds <input id="insp-dur" type="text"></label>
   <div id="insp-fields"></div>
-  <div class="row">
-    <button id="insp-delete" class="danger">Delete</button>
-    <button id="insp-close">Close</button>
-  </div>
+  <p class="muted small">Nominated by: <span id="insp-src"></span></p>
+  <div class="row"><button id="insp-close">Close</button></div>
   <p class="muted small">
-    Times are HH:MM:SS.mmm. Values are 0 to 1, in whatever units the
-    instrument's kind defines.
+    Saving round trips through the same parser <code>componium play</code>
+    uses, so this cannot write a score the player would refuse.
   </p>
 </aside>
 
-<footer>
-  <p class="muted small">
-    Edits are written back through the same parser <code>componium play</code>
-    uses, so this editor cannot produce a score the player will refuse.
-  </p>
-</footer>
-
-<script src="timecode.js"></script>
+<script src="state.js"></script>
+<script src="room.js"></script>
+<script src="timeline.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

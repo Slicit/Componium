@@ -99,12 +99,18 @@ services:
     command:
       - studio
       - -score=/scores/demo.componium
+      - -rig=/opt/componium/deploy-rig.toml
+      - -media=/media/componium-testclip.mkv
       - -addr=0.0.0.0:8722
     volumes:
+      - media:/media:ro
+      - ./demo-rig.toml:/opt/componium/deploy-rig.toml:ro
       - scores:/scores
     ports:
       - "8722:8722"
     depends_on:
+      clips:
+        condition: service_completed_successfully
       scores:
         condition: service_completed_successfully
     restart: unless-stopped
