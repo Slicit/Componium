@@ -312,7 +312,18 @@ async function openFilm(name) {
   attachMedia(name);
 
   const res = await fetch('/api/score?film=' + encodeURIComponent(name));
-  if (!res.ok) return;
+  if (!res.ok) {
+    /* Say so, and clear the timeline. Leaving the previous film's score on
+     * screen under this film's name is the confusion this whole feature
+     * exists to end. */
+    score = { title: name, duration: 0, tracks: [] };
+    el('title').textContent = name;
+    el('status').textContent = 'no score yet; use Analyse in the library';
+    timeline.setScore(score, duration());
+    if (room) room.setInstruments((rig && rig.instruments) || []);
+    if (library) library.refresh();
+    return;
+  }
   score = await res.json();
   el('title').textContent = score.title || '(untitled)';
   timeline.setScore(score, duration());

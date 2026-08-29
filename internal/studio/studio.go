@@ -439,7 +439,18 @@ func (s *Server) handleScore(w http.ResponseWriter, r *http.Request) {
 		// score alone, so a fifteen minute film played against a three cue
 		// demo and looked like nothing was happening after the first minute.
 		if film := r.URL.Query().Get("film"); film != "" {
-			s.openForFilm(film)
+			// A film with no score gets an honest refusal. Leaving the
+			// previous score loaded would hand back another film's score
+			// under this film's name, which is precisely the confusion this
+			// whole feature exists to end.
+			if !s.openForFilm(film) {
+				s.mu.Unlock()
+				writeJSON(w, http.StatusNotFound, map[string]string{
+					"error": "no score for " + film + " yet",
+					"film":  film,
+				})
+				return
+			}
 		}
 		out := toWire(s.sc, s.path)
 		s.mu.Unlock()

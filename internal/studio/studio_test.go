@@ -318,7 +318,7 @@ func mediaDir(t *testing.T) (*Server, string) {
 
 	scorePath := filepath.Join(dir, "s.componium")
 	os.WriteFile(scorePath, []byte(sample), 0o644)
-	s, err := New(Options{Score: scorePath, Media: films})
+	s, err := New(Options{Score: scorePath, Media: films, Scores: films})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,5 +492,47 @@ func TestComposerPathIsMadeAbsolute(t *testing.T) {
 	}
 	if strings.Count(j.composer, "composer") > 1 {
 		t.Errorf("composer path %q contains its directory twice", j.composer)
+	}
+}
+
+// Asking for a film with no score used to return whichever score happened to
+// be loaded, under the new film's name. That is precisely the confusion the
+// library exists to end.
+func TestAFilmWithNoScoreIsRefusedRatherThanSubstituted(t *testing.T) {
+	s, films := mediaDir(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/score", nil)
+	q := req.URL.Query()
+	q.Set("film", "a.mp4")
+	req.URL.RawQuery = q.Encode()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("returned %d for a film with no score, want 404: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "a.mp4") {
+		t.Errorf("the refusal does not name the film: %s", rec.Body)
+	}
+	_ = films
+}
+
+func TestAFilmWithAScoreIsOpened(t *testing.T) {
+	s, films := mediaDir(t)
+	// Put a score where the runner would have written one.
+	os.WriteFile(filepath.Join(films, "a.componium"), []byte(sample), 0o644)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/score", nil)
+	q := req.URL.Query()
+	q.Set("film", "a.mp4")
+	req.URL.RawQuery = q.Encode()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("returned %d: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "Demo") {
+		t.Errorf("did not open the film's own score: %s", rec.Body)
 	}
 }
