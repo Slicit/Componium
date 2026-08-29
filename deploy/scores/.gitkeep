@@ -1,0 +1,4 @@
+# Generated scores live here when the demonstration stack runs.
+# The directory is tracked so the bind mount has something to attach to;
+# Docker creates a missing source directory as root, which the container
+# then cannot write to.

@@ -11,13 +11,21 @@
 
 name: componium
 
+# Every container that touches a bind mount runs as the host user. The image
+# has its own unprivileged user, which is right for a container writing only
+# to its own volumes and wrong the moment it writes to a directory somebody
+# owns: the uid inside would not match the uid outside and every write is
+# refused. Override with COMPONIUM_UID and COMPONIUM_GID if yours differ.
+x-user: &asuser
+  user: "${COMPONIUM_UID:-1000}:${COMPONIUM_GID:-1000}"
+
 x-image: &image
   image: ${COMPONIUM_IMAGE:-ghcr.io/slicit/componium:main}
 
 services:
   # Generates the demonstration clip once, then exits. The player waits for it.
   clips:
-    <<: *image
+    <<: [*image, *asuser]
     entrypoint: ["sh", "/opt/componium/hack/make-testclips.sh", "/media"]
     volumes:
       - ${COMPONIUM_MEDIA:-./media}:/media
@@ -26,19 +34,19 @@ services:
   # Seeds an editable copy of the score. The studio writes to this, and the
   # conductor plays it, so an edit in the browser is heard on the next pass.
   scores:
-    <<: *image
+    <<: [*image, *asuser]
     entrypoint:
       - sh
       - -c
       - 'test -f /scores/demo.componium || cp /opt/componium/examples/demo.componium /scores/demo.componium'
     volumes:
-      - scores:/scores
+      - ${COMPONIUM_SCORES:-./scores}:/scores
     restart: "no"
 
   # mpv is the reference time source: it reports position once per frame, which
   # is what makes a 3ms clock possible. Headless, looping forever.
   player:
-    <<: *image
+    <<: [*image, *asuser]
     entrypoint:
       - mpv
       - --no-config
@@ -58,7 +66,7 @@ services:
   # A software instrument. Exactly what the ESP32 firmware does, minus the pins,
   # so the protocol is exercised for real rather than simulated.
   node:
-    <<: *image
+    <<: [*image, *asuser]
     command:
       - node
       - -id=wind.main
@@ -70,7 +78,7 @@ services:
   # The conductor. Follows the player, dispatches cues early by each
   # instrument's declared latency, and drives the node over the network.
   conductor:
-    <<: *image
+    <<: [*image, *asuser]
     entrypoint:
       - sh
       - -c
@@ -82,7 +90,7 @@ services:
           -socket /run/componium/mpv.sock
     volumes:
       - ipc:/run/componium:ro
-      - scores:/scores:ro
+      - ${COMPONIUM_SCORES:-./scores}:/scores:ro
       - ./demo-rig.toml:/opt/componium/deploy-rig.toml:ro
     depends_on:
       player:
@@ -95,7 +103,7 @@ services:
 
   # The timeline editor. This is the part with a URL.
   studio:
-    <<: *image
+    <<: [*image, *asuser]
     command:
       - studio
       - -score=/scores/demo.componium
@@ -106,7 +114,7 @@ services:
     volumes:
       - ${COMPONIUM_MEDIA:-./media}:/media
       - ./demo-rig.toml:/opt/componium/deploy-rig.toml:ro
-      - scores:/scores
+      - ${COMPONIUM_SCORES:-./scores}:/scores
     ports:
       - "8722:8722"
     depends_on:
@@ -117,13 +125,14 @@ services:
     restart: unless-stopped
 
 volumes:
-  # Writable for the studio, which uploads and deletes films; read only for
-  # the player and the clip generator would be nice but compose mounts are
-  # per service and the studio needs write, so they share one mode.
-  # media is a bind mount rather than a named volume, so films can be
-  # dropped in from outside: hack/fetch-test-videos.sh writes there, and so
-  # does the clip generator. Override with COMPONIUM_MEDIA.
-  scores:
-  # The mpv IPC socket. A unix socket on a shared volume is how the conductor
+  # Only one named volume, and it holds nothing anybody would miss.
+  #
+  # Films and scores are bind mounts instead, under COMPONIUM_MEDIA and
+  # COMPONIUM_SCORES, so they can be dropped in, backed up and deleted from
+  # outside a container. A named volume would put the user's own files
+  # somewhere only Docker can reach.
+  #
+  # The mpv IPC socket is different: it is a unix socket that exists only while
+  # the stack runs, and putting it on a shared volume is how the conductor
   # reaches the player without either of them needing a network.
   ipc:
