@@ -2,11 +2,12 @@ package cip_test
 
 import (
 	"context"
+	"net"
 	"testing"
 	"time"
 
-	"github.com/Slicit/Componium/internal/cip"
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/internal/cip"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 func fanManifest() cip.Manifest {
@@ -70,7 +71,7 @@ func TestDecodeRejectsAnotherProtocolVersion(t *testing.T) {
 // actually knows its own latency.
 func TestClientLearnsTheManifestFromTheNode(t *testing.T) {
 	n := startNode(t, cip.NodeConfig{Manifest: fanManifest()})
-	c, err := cip.Dial(n.Addr(), time.Second)
+	c, err := cip.Dial(n.Addr(), time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +91,7 @@ func TestClientLearnsTheManifestFromTheNode(t *testing.T) {
 
 func TestCueIsDeliveredAndAcknowledged(t *testing.T) {
 	n := startNode(t, cip.NodeConfig{Manifest: fanManifest()})
-	c, err := cip.Dial(n.Addr(), time.Second)
+	c, err := cip.Dial(n.Addr(), time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +117,7 @@ func TestCueIsDeliveredAndAcknowledged(t *testing.T) {
 // room explains why. Undeliverable cues must become errors.
 func TestUndeliverableCueBecomesAnError(t *testing.T) {
 	n := startNode(t, cip.NodeConfig{Manifest: fanManifest()})
-	c, err := cip.Dial(n.Addr(), time.Second)
+	c, err := cip.Dial(n.Addr(), time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +135,7 @@ func TestUndeliverableCueBecomesAnError(t *testing.T) {
 
 func TestCurveFramesReachTheNode(t *testing.T) {
 	n := startNode(t, cip.NodeConfig{Manifest: fanManifest()})
-	c, err := cip.Dial(n.Addr(), time.Second)
+	c, err := cip.Dial(n.Addr(), time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +168,7 @@ func TestCurveFramesReachTheNode(t *testing.T) {
 // The behaviour the whole protocol exists to guarantee.
 func TestNodeGoesSafeOnItsOwnWhenHeartbeatsStop(t *testing.T) {
 	n := startNode(t, cip.NodeConfig{Manifest: fanManifest(), Timeout: 120 * time.Millisecond})
-	c, err := cip.Dial(n.Addr(), time.Second)
+	c, err := cip.Dial(n.Addr(), time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +202,7 @@ func TestNodeGoesSafeOnItsOwnWhenHeartbeatsStop(t *testing.T) {
 
 func TestExplicitSafeCommand(t *testing.T) {
 	n := startNode(t, cip.NodeConfig{Manifest: fanManifest()})
-	c, err := cip.Dial(n.Addr(), time.Second)
+	c, err := cip.Dial(n.Addr(), time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,5 +230,144 @@ func TestMillisRoundsRatherThanTruncates(t *testing.T) {
 	}
 	if got := cip.Ms(1501 * time.Microsecond); got != 2 {
 		t.Errorf("1.501ms became %d, want 2", got)
+	}
+}
+
+// --- authentication ---
+
+const secret = "correct horse battery staple"
+
+func TestAuthenticatedTrafficWorksEndToEnd(t *testing.T) {
+	n := startNode(t, cip.NodeConfig{Manifest: fanManifest(), Secret: secret})
+	c, err := cip.Dial(n.Addr(), time.Second, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if !c.Authenticated() {
+		t.Error("client reports it is not authenticating")
+	}
+
+	err = c.Dispatch(instrument.Dispatch{Cue: instrument.Cue{
+		Action: "gust", Params: map[string]float64{"intensity": 0.5}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := n.State()["intensity"]; got != 0.5 {
+		t.Errorf("node intensity %v, want 0.5", got)
+	}
+}
+
+// A node that requires a secret should be invisible to anyone without it.
+// Not "refuses politely": invisible. Replying at all would confirm it exists.
+func TestNodeIgnoresClientsWithoutTheSecret(t *testing.T) {
+	n := startNode(t, cip.NodeConfig{Manifest: fanManifest(), Secret: secret})
+
+	if _, err := cip.Dial(n.Addr(), 300*time.Millisecond, ""); err == nil {
+		t.Fatal("a client with no secret was welcomed")
+	}
+	if n.Rejected() == 0 {
+		t.Error("the node did not record the rejected datagram")
+	}
+}
+
+func TestWrongSecretIsRejected(t *testing.T) {
+	n := startNode(t, cip.NodeConfig{Manifest: fanManifest(), Secret: secret})
+	if _, err := cip.Dial(n.Addr(), 300*time.Millisecond, "hunter2"); err == nil {
+		t.Fatal("a client with the wrong secret was welcomed")
+	}
+}
+
+func TestTamperedDatagramIsRejected(t *testing.T) {
+	a := cip.NewAuth(secret)
+	wrapped := a.Wrap([]byte(`{"v":"0.2","t":"cue"}`))
+
+	// Flip one bit of the body.
+	tampered := append([]byte(nil), wrapped...)
+	tampered[len(tampered)-2] ^= 0x01
+	if _, err := a.Unwrap(tampered); err == nil {
+		t.Error("a tampered body verified")
+	}
+
+	// And one bit of the tag.
+	badTag := append([]byte(nil), wrapped...)
+	badTag[0] ^= 0x01
+	if _, err := a.Unwrap(badTag); err == nil {
+		t.Error("a tampered tag verified")
+	}
+}
+
+func TestUnwrapRejectsRunts(t *testing.T) {
+	a := cip.NewAuth(secret)
+	if _, err := a.Unwrap([]byte{1, 2, 3}); err == nil {
+		t.Error("a datagram too short to hold a tag was accepted")
+	}
+}
+
+// An attacker who cannot forge a tag can still record a valid cue and send it
+// again later. The counter is what stops that.
+func TestReplayedCueIsRejected(t *testing.T) {
+	n := startNode(t, cip.NodeConfig{Manifest: fanManifest(), Secret: secret})
+	c, err := cip.Dial(n.Addr(), time.Second, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	// Capture a genuine, correctly authenticated cue off the wire by building
+	// one exactly as the client would.
+	a := cip.NewAuth(secret)
+	body, _ := cip.Encode(&cip.Message{
+		Type: cip.TypeCue, Seq: 900, N: 500,
+		Action: "gust", Params: map[string]float64{"intensity": 1},
+	})
+	replay := a.Wrap(body)
+
+	raw, err := net.Dial("udp", n.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+
+	raw.Write(replay)
+	waitFor(t, func() bool { return n.State()["intensity"] == 1 })
+
+	// Now send the identical datagram again. Same counter, so it must not land.
+	n.Close()
+	nn := startNode(t, cip.NodeConfig{Manifest: fanManifest(), Secret: secret})
+	raw2, _ := net.Dial("udp", nn.Addr())
+	defer raw2.Close()
+	raw2.Write(replay)
+	waitFor(t, func() bool { return nn.State()["intensity"] == 1 })
+	raw2.Write(replay)
+	time.Sleep(100 * time.Millisecond)
+	if nn.Rejected() == 0 {
+		t.Error("the replayed datagram was not rejected")
+	}
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("condition never became true")
+}
+
+// Authentication must remain optional: a rig on a trusted wired LAN should not
+// be forced to configure a secret.
+func TestUnauthenticatedStillWorks(t *testing.T) {
+	n := startNode(t, cip.NodeConfig{Manifest: fanManifest()})
+	c, err := cip.Dial(n.Addr(), time.Second, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if c.Authenticated() {
+		t.Error("client claims to authenticate with no secret")
 	}
 }

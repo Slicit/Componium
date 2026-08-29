@@ -3,7 +3,7 @@ package tune
 import (
 	"time"
 
-	"github.com/Slicit/Componium/internal/source"
+	"github.com/Slicit/componium/internal/source"
 )
 
 // MeasureTimer records how late a ticker actually fires.

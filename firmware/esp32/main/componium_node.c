@@ -32,11 +32,19 @@
 #include "driver/ledc.h"
 #include "lwip/sockets.h"
 #include "cJSON.h"
+#include "mbedtls/md.h"
 
 #define CIP_PORT          5570
 #define CIP_VERSION       "0.2"
 #define CIP_WATCHDOG_MS   300
 #define CIP_MAX_DATAGRAM  1024
+#define CIP_TAG_LEN       16
+
+/* Shared secret. Empty disables authentication, which is only reasonable on a
+ * wired network you control. With it set, every datagram carries a 16 byte
+ * HMAC-SHA256 prefix and anything that fails verification is dropped in
+ * silence: replying would confirm this node exists and is worth attacking. */
+#define CIP_SECRET        ""
 
 /* Declared characteristics. These must describe the physical device honestly:
  * the conductor dispatches every cue this far ahead, so a lie here makes the
@@ -60,6 +68,7 @@ static const char *TAG = "componium";
 static volatile int64_t s_last_heartbeat_us = 0;
 static volatile float   s_level = 0.0f;
 static volatile bool    s_safe = true;
+static volatile uint64_t s_highest_counter = 0;
 
 /* ---------------------------------------------------------------- output */
 
@@ -107,11 +116,35 @@ static void output_init(void)
 
 /* -------------------------------------------------------------- protocol */
 
+/* Prefix the tag on the way out. A node that verifies inbound traffic but
+ * sends its replies unauthenticated would be rejected by its own conductor,
+ * which is a confusing way to discover a half finished implementation. */
+static void send_raw(int sock, struct sockaddr_in *to, const uint8_t *body, size_t len)
+{
+    if (sizeof(CIP_SECRET) <= 1) {
+        sendto(sock, body, len, 0, (struct sockaddr *)to, sizeof(*to));
+        return;
+    }
+    uint8_t out[CIP_MAX_DATAGRAM];
+    if (len + CIP_TAG_LEN > sizeof(out)) {
+        return;
+    }
+    const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    uint8_t sum[32];
+    if (mbedtls_md_hmac(info, (const uint8_t *)CIP_SECRET, sizeof(CIP_SECRET) - 1,
+                        body, len, sum) != 0) {
+        return;
+    }
+    memcpy(out, sum, CIP_TAG_LEN);
+    memcpy(out + CIP_TAG_LEN, body, len);
+    sendto(sock, out, len + CIP_TAG_LEN, 0, (struct sockaddr *)to, sizeof(*to));
+}
+
 static void send_json(int sock, struct sockaddr_in *to, cJSON *msg)
 {
     char *text = cJSON_PrintUnformatted(msg);
     if (text) {
-        sendto(sock, text, strlen(text), 0, (struct sockaddr *)to, sizeof(*to));
+        send_raw(sock, to, (const uint8_t *)text, strlen(text));
         cJSON_free(text);
     }
 }
@@ -195,6 +228,22 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
         cJSON_Delete(root);
         return;
     }
+    /* Replay guard. An attacker who cannot forge a tag can still record a
+     * valid cue and send it again later; the counter is what stops that.
+     * Only meaningful when authentication is on. */
+    if (sizeof(CIP_SECRET) > 1) {
+        const cJSON *counter = cJSON_GetObjectItem(root, "n");
+        if (cJSON_IsNumber(counter)) {
+            uint64_t n = (uint64_t)counter->valuedouble;
+            if (n != 0 && n <= s_highest_counter) {
+                cJSON_Delete(root);
+                return;
+            }
+            if (n > s_highest_counter) {
+                s_highest_counter = n;
+            }
+        }
+    }
     const cJSON *type = cJSON_GetObjectItem(root, "t");
     if (!cJSON_IsString(type)) {
         cJSON_Delete(root);
@@ -240,6 +289,42 @@ static void watchdog_task(void *arg)
     }
 }
 
+/* ------------------------------------------------------------------ auth */
+
+/* Verify and strip the tag, in place. Returns the body length, or -1 when
+ * the datagram should be dropped.
+ *
+ * The tag covers the raw bytes rather than a canonical form of the JSON,
+ * precisely so that this function can be a hash and a comparison rather than
+ * a parser. Re-serialising a document to check a signature on a
+ * microcontroller would be slow and easy to get subtly wrong. */
+static int auth_unwrap(uint8_t *buf, int len)
+{
+    if (sizeof(CIP_SECRET) <= 1) {
+        return len;   /* authentication disabled */
+    }
+    if (len <= CIP_TAG_LEN) {
+        return -1;
+    }
+    const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    uint8_t sum[32];
+    if (mbedtls_md_hmac(info, (const uint8_t *)CIP_SECRET, sizeof(CIP_SECRET) - 1,
+                        buf + CIP_TAG_LEN, len - CIP_TAG_LEN, sum) != 0) {
+        return -1;
+    }
+    /* Constant time compare: a byte at a time with an accumulating OR, so
+     * that how long this takes says nothing about how much matched. */
+    uint8_t diff = 0;
+    for (int i = 0; i < CIP_TAG_LEN; i++) {
+        diff |= (uint8_t)(sum[i] ^ buf[i]);
+    }
+    if (diff != 0) {
+        return -1;
+    }
+    memmove(buf, buf + CIP_TAG_LEN, len - CIP_TAG_LEN);
+    return len - CIP_TAG_LEN;
+}
+
 /* ------------------------------------------------------------------ main */
 
 void componium_node_start(void)
@@ -272,6 +357,12 @@ void componium_node_start(void)
                            (struct sockaddr *)&from, &from_len);
         if (len < 0) {
             ESP_LOGW(TAG, "recvfrom: errno %d", errno);
+            continue;
+        }
+        len = auth_unwrap(buf, len);
+        if (len < 0) {
+            /* Dropped in silence. Logging every rejected datagram would let
+             * anyone on the network fill the log by spraying rubbish at us. */
             continue;
         }
         if (handle_curve(buf, len)) {

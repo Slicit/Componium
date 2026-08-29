@@ -110,6 +110,54 @@ significant digits, far more than any physical output resolves.
 The ordering principle: an instrument must be safe when the conductor is
 absent, malicious, or wrong.
 
+## Authentication
+
+Optional, off by default, and a shared secret when on.
+
+When a secret is configured, **every datagram carries a 16 byte HMAC-SHA256
+prefix** computed over the rest of the datagram:
+
+```
+byte 0..15   HMAC-SHA256(secret, body)[0:16]
+byte 16..    body: JSON control message, or a curve frame
+```
+
+The tag is a prefix on the raw bytes rather than a field inside the JSON, so
+verifying it is a hash and a comparison rather than a parse. That matters
+because the other implementation is C on a microcontroller, where
+canonicalising a document to check a signature would be slow and easy to get
+subtly wrong.
+
+**This is authentication, not encryption.** Anyone on the network can still see
+what the rig is doing. They cannot make it do anything. That is the right trade
+here: the content is a fan speed, and the risk is a stranger starting a fog
+machine.
+
+Control messages carry a monotonic counter `n`, and a node rejects any counter
+it has already seen. Without it, an attacker who cannot forge a tag can still
+record a genuine "gust at full intensity" and replay it whenever they like.
+
+Curve frames are authenticated but carry no counter. A replayed frame is
+superseded by the next genuine one 20 ms later, and counting every frame would
+mean dropping frames that arrived out of order, which UDP does routinely.
+
+A node configured with a secret **ignores unauthenticated traffic entirely**
+rather than refusing it politely. Replying at all would confirm the node exists
+and is worth attacking.
+
+Both ends must agree. In a rig file:
+
+```toml
+[[instrument]]
+id = "fog.left"
+driver = "cip"
+addr = "192.168.1.52:5570"
+secret = "something long and not guessable"
+```
+
+Leaving it out is reasonable on a wired network you control, and unwise on
+anything shared or wireless.
+
 ## Versioning
 
 A message whose `v` differs from the receiver's version is refused rather than
@@ -118,8 +166,8 @@ anything, including something dangerous.
 
 ## Open questions
 
-- **Authentication. There is none.** A LAN protocol that can start a fog
-  machine deserves at least a shared secret. This is a gap, not a decision.
+- Key distribution. The secret is configured by hand at both ends, which is
+  fine for one household and would not scale to anything larger.
 - Discovery: mDNS, or static addresses in the rig file? Currently static.
 - Per-instrument curve rates. A light is happy at 50 Hz; a motion platform may
   want more and a mister far less.

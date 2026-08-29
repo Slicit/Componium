@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/Slicit/Componium/internal/source"
-	"github.com/Slicit/Componium/internal/tune"
+	"github.com/Slicit/componium/internal/source"
+	"github.com/Slicit/componium/internal/tune"
 )
 
 func machineName() string {

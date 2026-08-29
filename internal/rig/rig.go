@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/Slicit/Componium/instruments/motion"
-	"github.com/Slicit/Componium/instruments/sacn"
-	"github.com/Slicit/Componium/instruments/virtual"
-	"github.com/Slicit/Componium/internal/cip"
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/instruments/motion"
+	"github.com/Slicit/componium/instruments/sacn"
+	"github.com/Slicit/componium/instruments/virtual"
+	"github.com/Slicit/componium/internal/cip"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 // Config is a rig file.
@@ -40,6 +40,8 @@ type InstConfig struct {
 
 	// Addr is where to reach the device, used by the sacn and cip drivers.
 	RemoteTimeout Duration `toml:"remote_timeout"`
+	// Secret authenticates CIP traffic. Both ends must agree.
+	Secret string `toml:"secret"`
 
 	// Motion fields, used when Driver is "motion".
 	Format string        `toml:"format"`
@@ -158,7 +160,7 @@ func (c *Config) Build() (*Built, error) {
 			if wait <= 0 {
 				wait = 2 * time.Second
 			}
-			c, err := cip.Dial(in.Addr, wait)
+			c, err := cip.Dial(in.Addr, wait, in.Secret)
 			if err != nil {
 				out.Close()
 				return nil, err

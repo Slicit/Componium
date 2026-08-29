@@ -3,8 +3,8 @@ package conductor
 import (
 	"time"
 
-	"github.com/Slicit/Componium/internal/clock"
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/internal/clock"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 // CurveTrack is a continuous channel to be sent to an instrument repeatedly.

@@ -55,6 +55,10 @@ type Message struct {
 	Version string `json:"v"`
 	Type    Type   `json:"t"`
 	Seq     uint32 `json:"seq,omitempty"`
+	// N is a monotonic counter, used to reject replayed control messages. It
+	// is only meaningful when a secret is configured: without one, an attacker
+	// can forge messages outright and a counter buys nothing.
+	N uint64 `json:"n,omitempty"`
 
 	// Hello
 	Manifest *Manifest `json:"manifest,omitempty"`

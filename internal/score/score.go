@@ -7,7 +7,7 @@ import (
 	"sort"
 
 	"github.com/BurntSushi/toml"
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 // Version is the score format this build writes and understands.

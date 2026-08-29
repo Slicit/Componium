@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Slicit/Componium/internal/score"
+	"github.com/Slicit/componium/internal/score"
 )
 
 //go:embed assets

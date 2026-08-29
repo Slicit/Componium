@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/Slicit/Componium/internal/studio"
+	"github.com/Slicit/componium/internal/studio"
 )
 
 func studioCmd(args []string) error {

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 // DefaultAckTimeout is how long the client waits for a node to acknowledge a
@@ -15,8 +15,8 @@ const DefaultAckTimeout = 40 * time.Millisecond
 
 // DefaultRetries is how many times a cue is retried before it is given up on.
 //
-// Three attempts at 40ms is 120ms in the worst case, which is well inside the
-// latency of any instrument slow enough to be reached over the network.
+// Three attempts at 40ms is 120ms in the worst case, well inside the latency of
+// any instrument slow enough to be reached over a network.
 const DefaultRetries = 3
 
 // Client is the conductor's side of a remote instrument.
@@ -30,9 +30,11 @@ type Client struct {
 
 	mu      sync.Mutex
 	seq     uint32
+	counter uint64
 	acks    map[uint32]chan struct{}
 	retries int
 	timeout time.Duration
+	auth    *Auth
 }
 
 // Dial connects to a node and waits for it to introduce itself.
@@ -40,7 +42,11 @@ type Client struct {
 // The manifest comes from the node rather than from local configuration,
 // because the node is the only thing that actually knows its own latency, and
 // a rig file that disagrees with the hardware is worse than no rig file.
-func Dial(addr string, wait time.Duration) (*Client, error) {
+//
+// secret may be empty, in which case traffic is unauthenticated. A node
+// configured with a secret will ignore an unauthenticated client entirely,
+// which presents as no hello arriving.
+func Dial(addr string, wait time.Duration, secret string) (*Client, error) {
 	conn, err := net.Dial("udp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("cip: dial %s: %w", addr, err)
@@ -48,12 +54,13 @@ func Dial(addr string, wait time.Duration) (*Client, error) {
 	c := &Client{
 		conn: conn, acks: map[uint32]chan struct{}{},
 		retries: DefaultRetries, timeout: DefaultAckTimeout,
+		auth: NewAuth(secret),
 	}
 
-	// Ask, rather than wait: a node that booted before the conductor should
-	// not have to keep shouting.
-	hello, _ := Encode(&Message{Type: TypeHello})
-	if _, err := conn.Write(hello); err != nil {
+	// Ask rather than wait: a node that booted before the conductor should not
+	// have to keep shouting.
+	hello, _ := Encode(&Message{Type: TypeHello, N: c.next()})
+	if err := c.send(hello); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -66,14 +73,18 @@ func Dial(addr string, wait time.Duration) (*Client, error) {
 			conn.Close()
 			return nil, fmt.Errorf("cip: no hello from %s within %v: %w", addr, wait, err)
 		}
-		m, err := Decode(buf[:n])
+		body, err := c.auth.Unwrap(buf[:n])
+		if err != nil {
+			continue
+		}
+		m, err := Decode(body)
 		if err != nil || m.Type != TypeHello || m.Manifest == nil {
 			continue
 		}
 		c.manifest = m.Manifest.toInstrument()
 		conn.SetReadDeadline(time.Time{})
-		welcome, _ := Encode(&Message{Type: TypeWelcome})
-		conn.Write(welcome)
+		welcome, _ := Encode(&Message{Type: TypeWelcome, N: c.next()})
+		c.send(welcome)
 		go c.readLoop()
 		return c, nil
 	}
@@ -95,6 +106,25 @@ func (c *Client) Manifest() instrument.Manifest { return c.manifest }
 
 func (c *Client) Close() error { return c.conn.Close() }
 
+// Authenticated reports whether traffic carries an authentication tag.
+func (c *Client) Authenticated() bool { return c.auth.Enabled() }
+
+// next returns the next replay counter. Only meaningful when authenticated.
+func (c *Client) next() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.auth == nil {
+		return 0
+	}
+	c.counter++
+	return c.counter
+}
+
+func (c *Client) send(body []byte) error {
+	_, err := c.conn.Write(c.auth.Wrap(body))
+	return err
+}
+
 // readLoop delivers acknowledgements to whoever is waiting for them.
 func (c *Client) readLoop() {
 	buf := make([]byte, 2048)
@@ -103,7 +133,11 @@ func (c *Client) readLoop() {
 		if err != nil {
 			return
 		}
-		m, err := Decode(buf[:n])
+		body, err := c.auth.Unwrap(buf[:n])
+		if err != nil {
+			continue
+		}
+		m, err := Decode(body)
 		if err != nil || m.Type != TypeAck {
 			continue
 		}
@@ -137,7 +171,7 @@ func (c *Client) Dispatch(d instrument.Dispatch) error {
 	}()
 
 	msg := &Message{
-		Type: TypeCue, Seq: seq,
+		Type: TypeCue, Seq: seq, N: c.next(),
 		Instrument: d.Cue.Instrument,
 		Action:     d.Cue.Action,
 		Params:     d.Cue.Params,
@@ -148,7 +182,7 @@ func (c *Client) Dispatch(d instrument.Dispatch) error {
 	}
 
 	for attempt := 0; attempt < c.retries; attempt++ {
-		if _, err := c.conn.Write(b); err != nil {
+		if err := c.send(b); err != nil {
 			return err
 		}
 		select {
@@ -162,22 +196,24 @@ func (c *Client) Dispatch(d instrument.Dispatch) error {
 }
 
 // SendCurve sends one curve frame, unacknowledged.
+//
+// Curve frames are authenticated but carry no replay counter. A replayed frame
+// is superseded by the next genuine one 20ms later, and giving every frame a
+// counter would mean the node dropping frames whenever one arrived out of
+// order, which UDP does routinely.
 func (c *Client) SendCurve(values []float32) error {
-	_, err := c.conn.Write(MarshalCurve(values))
-	return err
+	return c.send(MarshalCurve(values))
 }
 
 // Heartbeat tells the node the conductor is alive. A node that stops hearing
 // this drives itself safe without being asked, which is the whole point.
 func (c *Client) Heartbeat() error {
-	b, _ := Encode(&Message{Type: TypeHeartbeat})
-	_, err := c.conn.Write(b)
-	return err
+	b, _ := Encode(&Message{Type: TypeHeartbeat, N: c.next()})
+	return c.send(b)
 }
 
 // Safe orders an immediate return to the safe state.
 func (c *Client) Safe() error {
-	b, _ := Encode(&Message{Type: TypeSafe})
-	_, err := c.conn.Write(b)
-	return err
+	b, _ := Encode(&Message{Type: TypeSafe, N: c.next()})
+	return c.send(b)
 }

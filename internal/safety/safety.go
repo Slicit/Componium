@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 // DefaultTimeout is how long the supervisor waits without a heartbeat before

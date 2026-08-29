@@ -27,10 +27,11 @@ LOGBOOK/              project context, features, notes
 they are one module. `composer/`, `studio/` and `firmware/` are separate
 languages and carry their own toolchains.
 
-Note the module path matches the GitHub repository exactly, including the
-capital C. Go escapes uppercase in proxy paths (`github.com/!slicit/!componium`),
-which works but is ugly. Renaming the repository to lowercase would avoid it,
-and is easiest to do now rather than later.
+The module path is lowercase, `github.com/Slicit/componium`, which is what
+Go proxies and import lines want. GitHub repository names are case
+insensitive for fetching, so this resolves whether or not the repository
+itself has been renamed, and it avoids the `!componium` proxy escaping that
+an uppercase path produces.
 
 ## What goes in internal/ versus instruments/
 

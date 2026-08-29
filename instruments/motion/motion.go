@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 // Pose is where the platform should be.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 func TestPacketRoundTrips(t *testing.T) {

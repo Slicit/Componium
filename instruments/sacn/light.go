@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 // Mode is how a fixture's channels are laid out from its start address.

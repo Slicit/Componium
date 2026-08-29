@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 // guard is one instrument wrapped by the supervisor.

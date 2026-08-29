@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/Slicit/Componium/internal/cip"
+	"github.com/Slicit/componium/internal/cip"
 )
 
 // nodeCmd runs a software instrument node: everything the ESP32 firmware does,
@@ -20,6 +20,7 @@ import (
 func nodeCmd(args []string) error {
 	fs := flag.NewFlagSet("node", flag.ExitOnError)
 	id := fs.String("id", "wind.main", "instrument id this node answers to")
+	secret := fs.String("secret", "", "shared secret; when set, unauthenticated traffic is ignored")
 	kind := fs.String("kind", "wind", "instrument kind")
 	addr := fs.String("addr", fmt.Sprintf("0.0.0.0:%d", cip.Port), "address to listen on")
 	latency := fs.Duration("latency", 1200*time.Millisecond, "latency this node declares")
@@ -30,6 +31,7 @@ func nodeCmd(args []string) error {
 
 	n, err := cip.NewNode(cip.NodeConfig{
 		Addr:    *addr,
+		Secret:  *secret,
 		Timeout: *timeout,
 		Manifest: cip.Manifest{
 			ID: *id, Kind: *kind,

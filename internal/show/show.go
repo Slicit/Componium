@@ -12,9 +12,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Slicit/Componium/internal/clock"
-	"github.com/Slicit/Componium/internal/conductor"
-	"github.com/Slicit/Componium/internal/source"
+	"github.com/Slicit/componium/internal/clock"
+	"github.com/Slicit/componium/internal/conductor"
+	"github.com/Slicit/componium/internal/source"
 )
 
 // DefaultPollInterval is 5ms, or 200Hz.

@@ -17,8 +17,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Slicit/Componium/internal/clock"
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/internal/clock"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 // SkipReason says why a cue was not dispatched.

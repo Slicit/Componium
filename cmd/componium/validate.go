@@ -4,8 +4,8 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/Slicit/Componium/internal/rig"
-	"github.com/Slicit/Componium/internal/score"
+	"github.com/Slicit/componium/internal/rig"
+	"github.com/Slicit/componium/internal/score"
 )
 
 // validateCmd checks a score without playing it.

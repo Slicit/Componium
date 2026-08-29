@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Slicit/Componium/instruments/virtual"
-	"github.com/Slicit/Componium/internal/clock"
-	"github.com/Slicit/Componium/internal/conductor"
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/instruments/virtual"
+	"github.com/Slicit/componium/internal/clock"
+	"github.com/Slicit/componium/internal/conductor"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 func ramp(media time.Duration) map[string]float64 {

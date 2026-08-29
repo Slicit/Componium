@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 func listen(t *testing.T) (*net.UDPConn, string) {

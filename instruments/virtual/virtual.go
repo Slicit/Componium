@@ -10,7 +10,7 @@ package virtual
 import (
 	"sync"
 
-	"github.com/Slicit/Componium/internal/instrument"
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 // Instrument records dispatches instead of acting on them.

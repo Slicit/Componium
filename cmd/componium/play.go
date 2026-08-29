@@ -8,14 +8,14 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/Slicit/Componium/internal/clock"
-	"github.com/Slicit/Componium/internal/conductor"
-	"github.com/Slicit/Componium/internal/instrument"
-	"github.com/Slicit/Componium/internal/rig"
-	"github.com/Slicit/Componium/internal/safety"
-	"github.com/Slicit/Componium/internal/score"
-	"github.com/Slicit/Componium/internal/show"
-	"github.com/Slicit/Componium/internal/source"
+	"github.com/Slicit/componium/internal/clock"
+	"github.com/Slicit/componium/internal/conductor"
+	"github.com/Slicit/componium/internal/instrument"
+	"github.com/Slicit/componium/internal/rig"
+	"github.com/Slicit/componium/internal/safety"
+	"github.com/Slicit/componium/internal/score"
+	"github.com/Slicit/componium/internal/show"
+	"github.com/Slicit/componium/internal/source"
 )
 
 // logging wraps an instrument so that cue dispatches are visible. Curve

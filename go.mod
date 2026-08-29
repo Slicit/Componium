@@ -1,4 +1,4 @@
-module github.com/Slicit/Componium
+module github.com/Slicit/componium
 
 go 1.24
 

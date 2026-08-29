@@ -13,11 +13,11 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/Slicit/Componium/internal/clock"
-	"github.com/Slicit/Componium/internal/conductor"
-	"github.com/Slicit/Componium/internal/instrument"
-	"github.com/Slicit/Componium/internal/show"
-	"github.com/Slicit/Componium/internal/source"
+	"github.com/Slicit/componium/internal/clock"
+	"github.com/Slicit/componium/internal/conductor"
+	"github.com/Slicit/componium/internal/instrument"
+	"github.com/Slicit/componium/internal/show"
+	"github.com/Slicit/componium/internal/source"
 )
 
 func main() {

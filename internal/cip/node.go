@@ -14,6 +14,10 @@ type NodeConfig struct {
 	// Timeout is how long without a heartbeat before the node drives itself
 	// safe. Zero means 300ms, matching the safety supervisor.
 	Timeout time.Duration
+	// Secret enables authentication. When set, unauthenticated datagrams are
+	// ignored entirely: a node that requires a secret should be invisible to
+	// anyone who does not have it.
+	Secret string
 	// Addr is the UDP address to listen on. Zero port picks a free one.
 	Addr string
 }
@@ -36,7 +40,10 @@ type Node struct {
 	cues      int
 	curves    int
 	tripped   int
+	rejected  int
 	startedAt time.Time
+	auth      *Auth
+	replay    replayGuard
 }
 
 // NewNode binds a socket and prepares the node.
@@ -56,7 +63,8 @@ func NewNode(cfg NodeConfig) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	n := &Node{cfg: cfg, conn: conn, state: map[string]float64{}, startedAt: time.Now()}
+	n := &Node{cfg: cfg, conn: conn, state: map[string]float64{},
+		startedAt: time.Now(), auth: NewAuth(cfg.Secret)}
 	n.applySafe()
 	return n, nil
 }
@@ -114,6 +122,17 @@ func (n *Node) watchdog(ctx context.Context) {
 }
 
 func (n *Node) handle(b []byte, from *net.UDPAddr) {
+	// Verify before looking at anything. An unauthenticated datagram to a
+	// node that requires a secret is dropped in silence: replying at all
+	// would confirm the node exists and is worth attacking.
+	body, err := n.auth.Unwrap(b)
+	if err != nil {
+		n.mu.Lock()
+		n.rejected++
+		n.mu.Unlock()
+		return
+	}
+	b = body
 	// A curve frame is binary and has no envelope, so it is recognised first.
 	if values, err := UnmarshalCurve(b); err == nil {
 		n.mu.Lock()
@@ -130,6 +149,12 @@ func (n *Node) handle(b []byte, from *net.UDPAddr) {
 
 	m, err := Decode(b)
 	if err != nil {
+		return
+	}
+	if !n.acceptCounter(m.N) {
+		n.mu.Lock()
+		n.rejected++
+		n.mu.Unlock()
 		return
 	}
 	n.mu.Lock()
@@ -164,7 +189,7 @@ func (n *Node) send(m *Message, to *net.UDPAddr) {
 	if err != nil {
 		return
 	}
-	n.conn.WriteToUDP(b, to)
+	n.conn.WriteToUDP(n.auth.Wrap(b), to)
 }
 
 func (n *Node) applySafe() {
@@ -201,4 +226,26 @@ func (n *Node) String() string {
 	c, cv, t, s := n.Stats()
 	return fmt.Sprintf("node %s: %d cues, %d curve frames, %d watchdog trips, safe=%v",
 		n.cfg.Manifest.ID, c, cv, t, s)
+}
+
+// acceptCounter rejects replayed control messages.
+//
+// Inert when authentication is off, because a counter is meaningless against
+// an attacker who can simply forge the message outright.
+func (n *Node) acceptCounter(counter uint64) bool {
+	if n.auth == nil {
+		return true
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.replay.accept(counter)
+}
+
+// Rejected reports how many datagrams failed authentication or were replays.
+// A number climbing steadily means somebody is trying, or a rig has the wrong
+// secret configured.
+func (n *Node) Rejected() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.rejected
 }
