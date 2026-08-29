@@ -6,16 +6,12 @@
 # option permanently and irreversibly, which is exactly the kind of mistake a
 # human reviewer makes at 1am and cannot undo.
 #
-# SETUP:
-#
-#   Probably none. Signatures are stored in this repository, and the action's
-#   own documentation says PERSONAL_ACCESS_TOKEN is needed only when they
-#   live in a different one. Its environment variable table contradicts that
-#   and calls the token required, so if a run fails complaining about it,
-#   create a repository secret named PERSONAL_ACCESS_TOKEN holding a classic
-#   PAT with repo scope. Referencing a secret that does not exist is
-#   harmless: it substitutes to an empty string.
-#
+# SETUP: none. Verified on 2026-08-29 against pull request 1, which the gate
+# blocked with PERSONAL_ACCESS_TOKEN empty, posting the explanatory comment
+# and failing the check. The action's environment variable table calls that
+# token required; its setup section and example say it is needed only when
+# signatures live in a different repository, and the run settled it. Ours are
+# in this one.
 # Contributors sign by commenting on their own pull request. No forms.
 
 name: CLA
