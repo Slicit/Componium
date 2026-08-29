@@ -20,6 +20,7 @@ import {
   drawCollapsedEnvelope, drawCues, drawCurve, drawPlayhead, drawRibbon,
 } from '../render/lanes';
 import { dark } from './theme';
+import type { Editing } from './useEditing';
 
 const RULER_H = 26;
 const FONT = "'IBM Plex Sans', system-ui, sans-serif";
@@ -35,10 +36,11 @@ export interface TimelineProps {
   onSeek: (t: number) => void;
   /** Called whenever the view is panned or zoomed, so React can re-render. */
   onView: () => void;
+  edit: Editing;
 }
 
 export function Timeline(props: TimelineProps) {
-  const { score, rig, view, time, collapsed, order, onSeek, onView } = props;
+  const { score, rig, view, time, collapsed, order, onView, edit } = props;
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const size = useRef({ w: 0, h: 0 });
@@ -116,10 +118,10 @@ export function Timeline(props: TimelineProps) {
 
       switch (row.draw) {
         case 'cues':
-          drawCues(list, track, view, box, theme);
+          drawCues(list, track, view, box, theme, { selected: edit.selected });
           break;
         case 'curve':
-          drawCurve(list, track, row.channel!, view, box, theme);
+          drawCurve(list, track, row.channel!, view, box, theme, { selected: edit.selected });
           break;
         case 'ribbon':
           drawRibbon(list, track, channelsOf(track, rig), view, box, theme);
@@ -132,8 +134,26 @@ export function Timeline(props: TimelineProps) {
 
     drawPlayhead(list, time, view, { x: 0, y: 0, w, h }, theme);
 
+    /* The snap guide: a line at whatever the drag has locked on to, which is
+     * the only way to tell a snap from a coincidence. */
+    if (edit.guide !== null && view.intersects(edit.guide, edit.guide)) {
+      const gx = view.toX(edit.guide, w);
+      list.line({ x1: gx, y1: 0, x2: gx, y2: h, stroke: theme.event, lineWidth: 1, dash: [3, 3] });
+    }
+
+    if (edit.band) {
+      const bx = Math.min(edit.band.x1, edit.band.x2);
+      const by = Math.min(edit.band.y1, edit.band.y2);
+      list.rect({
+        x: bx, y: by,
+        w: Math.abs(edit.band.x2 - edit.band.x1),
+        h: Math.abs(edit.band.y2 - edit.band.y1),
+        fill: theme.event, stroke: theme.event, alpha: 0.18,
+      });
+    }
+
     paint(ctx, list, FONT, MONO);
-  }, [score, rig, view, time, lay, fps]);
+  }, [score, rig, view, time, lay, fps, edit.selected, edit.band, edit.guide, edit.version]);
 
   useEffect(() => { draw(); });
 
@@ -170,42 +190,26 @@ export function Timeline(props: TimelineProps) {
     onView();
   }, [view, onView]);
 
-  const pointer = useCallback((e: React.PointerEvent) => {
-    const host = wrap.current;
-    if (!host || e.button !== 0) return;
-    const box = host.getBoundingClientRect();
-    const x = e.clientX - box.left;
-    const y = e.clientY - box.top;
-
-    /* On the ruler, dragging scrubs. On a lane, a click seeks. Middle of a
-     * drag on a lane pans, which is what a hand tool would do. */
-    const onRuler = y < RULER_H;
-    const startX = e.clientX;
-    const startAt = view.start;
-    let moved = false;
-
-    const move = (ev: PointerEvent) => {
-      if (!moved && Math.abs(ev.clientX - startX) < 3) return;
-      moved = true;
-      if (onRuler) {
-        onSeek(view.fromX(ev.clientX - box.left, box.width));
-      } else {
-        const dt = ((ev.clientX - startX) / Math.max(1, box.width)) * view.span;
-        view.set(startAt - dt, view.span);
-        onView();
-      }
+  const geom = useCallback(() => {
+    const host = wrap.current!;
+    return {
+      rect: host.getBoundingClientRect(),
+      width: host.clientWidth,
+      rulerH: RULER_H,
+      layout: lay,
     };
-    const up = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      if (!moved) onSeek(view.fromX(x, box.width));
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-  }, [view, onSeek, onView]);
+  }, [lay]);
 
   return (
-    <div className="tl-surface" ref={wrap} onWheel={wheel} onPointerDown={pointer}>
+    <div
+      className="tl-surface"
+      ref={wrap}
+      style={{ cursor: edit.cursor }}
+      onWheel={wheel}
+      onPointerDown={(e) => edit.onPointerDown(e, geom())}
+      onPointerMove={(e) => edit.onPointerMove(e, geom())}
+      onDoubleClick={(e) => edit.onDoubleClick(e, geom())}
+    >
       <canvas ref={canvas} />
     </div>
   );

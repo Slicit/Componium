@@ -68,7 +68,7 @@ const HANDLE_THRESHOLD = 1 / 12;
  */
 export function drawCues(
   list: DrawList, track: Track, view: TimeView, box: LaneBox, theme: Theme,
-  opts: { selected?: Set<number>; hovered?: number | null } = {},
+  opts: { selected?: ReadonlySet<unknown> } = {},
 ): void {
   const cues = track.cues ?? [];
   const pad = 4;
@@ -90,7 +90,7 @@ export function drawCues(
     const h = Math.max(2, height * (0.18 + level * 0.82));
     const y = floor - h;
 
-    const selected = opts.selected?.has(i) ?? false;
+    const selected = opts.selected?.has(cue) ?? false;
     const tint = colourOf(cue.params) ?? theme.event;
 
     if (isSpan(cue)) {
@@ -142,7 +142,7 @@ export function drawCues(
  */
 export function drawCurve(
   list: DrawList, track: Track, channel: string, view: TimeView, box: LaneBox, theme: Theme,
-  opts: { selected?: Set<number>; showHandles?: boolean } = {},
+  opts: { selected?: ReadonlySet<unknown>; showHandles?: boolean } = {},
 ): void {
   const points = (track.points ?? []).filter((p) => channel in (p.value ?? {}));
   const colour = theme.channel[channel] ?? theme.event;
@@ -185,7 +185,7 @@ export function drawCurve(
       for (let i = visible.from; i <= visible.to; i++) {
         const p = points[i];
         const px = box.x + view.toX(p.t, box.w);
-        const sel = opts.selected?.has(i) ?? false;
+        const sel = opts.selected?.has(p) ?? false;
         list.dot({
           x: px, y: y(p.value[channel]), r: sel ? 5 : 3.6,
           fill: sel ? colour : theme.eventSoft, stroke: colour, lineWidth: 1.5,

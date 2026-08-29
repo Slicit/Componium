@@ -33,7 +33,10 @@ echo "syncing working tree to $BOX"
 #
 # Safe because the box tree is purely a mirror: everything worth keeping is
 # in git, and .git itself is never touched.
-ssh -n -i "$KEY" "$USER_AT" "cd $REMOTE_DIR && find . -path ./.git -prune -o -type f -print0 | xargs -0 -r rm -f"
+# node_modules is pruned along with .git: it is installed on the box, not
+# synced to it, and clearing it here means every commit is followed by a
+# reinstall before anything can be built or tested again.
+ssh -n -i "$KEY" "$USER_AT" "cd $REMOTE_DIR && find . -name node_modules -prune -o -path ./.git -prune -o -type f -print0 | xargs -0 -r rm -f"
 tar --exclude=.git --exclude=node_modules -cf - . \
   | ssh -i "$KEY" "$USER_AT" "tar -xf - -C $REMOTE_DIR"
 
