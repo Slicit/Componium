@@ -81,7 +81,11 @@ type Config struct {
 	// PollInterval is how often the caller expects to call Sample. It is used
 	// only as a floor on reported precision.
 	PollInterval time.Duration
-	// MaxAnchors caps the history kept for rate estimation. Zero means 32.
+	// MaxAnchors caps the history kept for rate estimation. Zero means 512.
+	//
+	// The count matters because it sets the baseline of the rate fit: at
+	// 24fps, 512 anchors span about 21 seconds. A short baseline makes the
+	// estimate jitter by thousands of ppm, when real pacing error is tens.
 	MaxAnchors int
 	// StallFrames is how many frame intervals of an unchanging position mean
 	// the player is paused rather than merely between frames. Zero means 3.
@@ -94,7 +98,7 @@ type Config struct {
 
 func (c Config) withDefaults() Config {
 	if c.MaxAnchors <= 0 {
-		c.MaxAnchors = 32
+		c.MaxAnchors = 512
 	}
 	if c.StallFrames <= 0 {
 		c.StallFrames = 3

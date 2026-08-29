@@ -1,5 +1,5 @@
 ---
-status: active
+status: shipped
 branch: feat-timing-core
 ---
 
@@ -318,6 +318,42 @@ rather than out of imagination:
 
 Ramp is declared in the manifest but not yet used. Latency compensation lands
 first; aligning the *peak* of a ramped effect needs the score format from M5.
+
+### 2026-08-29 · M2 delivered. The whole chain runs against a real player.
+
+```
+CUE  wind.main gust  cue at 3s  sent at 1.803s  1.197s early, precision 6.4ms
+```
+
+`componium rehearse` connects to mpv, derives the frame interval from the
+content, polls at 200 Hz, and dispatches cues through the conductor to a
+virtual instrument. Measured against a live player, not a simulation: cues land
+1.197 to 1.199 s early for a declared 1.2 s of latency, and reported precision
+settles at 6 to 8 ms.
+
+Running it found three defects that no test had:
+
+1. **Frame rate was unavailable at connect time.** mpv reports no
+   `container-fps` until it has loaded a file, so the first query came back
+   empty and the CLI fell back to assuming 24 fps. Fixed by retrying for up to
+   two seconds.
+2. **The rate estimate oscillated by thousands of ppm** while real pacing error
+   is tens. The default anchor history of 32 spans only 1.3 s at 24 fps, and a
+   short baseline makes a least squares slope jump around. Raised the default
+   to 512 anchors, about 21 s, after which the estimate settles to around 120
+   ppm and stays there.
+3. Status output using carriage returns interleaved illegibly with cue lines.
+   Plain lines, which also log properly.
+
+- **Decision:** `internal/show` is the only package that owns a goroutine, a
+  ticker, or the passage of time.
+- **Why:** The clock and the conductor are both passive so they can be tested
+  instantly. Something must still drive them, and confining that to one small
+  file means exactly one place is hard to test, rather than the timing logic
+  being hard to test everywhere.
+- **Impact:** `show.Run` is deliberately short. It reads wall time once per
+  iteration and uses the same value for the sample, the reading and the tick,
+  so all three agree on when the iteration happened.
 
 ## Links
 
