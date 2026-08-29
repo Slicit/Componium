@@ -26,6 +26,14 @@ if [ $# -eq 0 ]; then
 fi
 
 echo "syncing working tree to $BOX"
+# Clear the remote tree first. tar only adds and overwrites, so without
+# this a file deleted locally lives on forever on the box, and the commit
+# made there silently keeps it. That is how a deletion goes missing from a
+# commit that was supposed to contain it.
+#
+# Safe because the box tree is purely a mirror: everything worth keeping is
+# in git, and .git itself is never touched.
+ssh -n -i "$KEY" "$USER_AT" "cd $REMOTE_DIR && find . -path ./.git -prune -o -type f -print0 | xargs -0 -r rm -f"
 tar --exclude=.git --exclude=node_modules -cf - . \
   | ssh -i "$KEY" "$USER_AT" "tar -xf - -C $REMOTE_DIR"
 
@@ -33,11 +41,11 @@ echo "committing on the box"
 if [ "$1" = "-F" ]; then
   ssh -i "$KEY" "$USER_AT" "cd $REMOTE_DIR && git add -A && git commit -q -F -" < "$2"
 else
-  ssh -i "$KEY" "$USER_AT" "cd $REMOTE_DIR && git add -A && git commit -q -m \"$1\""
+  ssh -n -i "$KEY" "$USER_AT" "cd $REMOTE_DIR && git add -A && git commit -q -m \"$1\""
 fi
 
 echo "pushing"
-ssh -i "$KEY" "$USER_AT" "cd $REMOTE_DIR && git push -q origin main && git log --oneline -1"
+ssh -n -i "$KEY" "$USER_AT" "cd $REMOTE_DIR && git push -q origin main && git log --oneline -1"
 
 echo "bringing the laptop back in line"
 git fetch -q origin
