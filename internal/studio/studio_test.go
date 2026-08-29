@@ -467,3 +467,30 @@ func TestTheVersionIsStableAndShort(t *testing.T) {
 		t.Errorf("version %q is %d characters, want 12", first, len(first))
 	}
 }
+
+// The runner sets the working directory to the composer's own folder so its
+// sibling modules import. A relative composer path then resolves against that
+// folder and doubles, which presents as a file-not-found on a path with the
+// directory in it twice.
+func TestComposerPathIsMadeAbsolute(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "composer")
+	os.MkdirAll(sub, 0o755)
+	script := filepath.Join(sub, "compose.py")
+	os.WriteFile(script, []byte("print()"), 0o644)
+
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	os.Chdir(dir)
+
+	j := NewJobs("composer/compose.py", dir, dir)
+	if !filepath.IsAbs(j.composer) {
+		t.Errorf("composer path %q is relative", j.composer)
+	}
+	if !j.Available() {
+		t.Errorf("composer at %q was not found", j.composer)
+	}
+	if strings.Count(j.composer, "composer") > 1 {
+		t.Errorf("composer path %q contains its directory twice", j.composer)
+	}
+}

@@ -58,7 +58,20 @@ type Jobs struct {
 
 // NewJobs prepares a runner. composer is the path to compose.py, scores is the
 // directory generated scores are written to.
+// NewJobs prepares a runner. composer is the path to compose.py, scores is the
+// directory generated scores are written to.
+//
+// The composer path is made absolute here. It arrives relative when it was
+// found by guessing, and the runner sets the working directory to the
+// composer's own folder so its sibling modules import; a relative path then
+// resolves against that folder and doubles, which is a confusing way to be
+// told a file does not exist.
 func NewJobs(composer, scores, mediaDir string) *Jobs {
+	if composer != "" {
+		if abs, err := filepath.Abs(composer); err == nil {
+			composer = abs
+		}
+	}
 	return &Jobs{
 		composer: composer,
 		mediaDir: mediaDir,
