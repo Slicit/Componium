@@ -164,6 +164,75 @@ reports position in microseconds and may update more often than the HTTP
 interface. The HTTP path was measured first because it is the cross platform
 one, and Componium should not require D-Bus.
 
+### 2026-08-29 · Seek, pause and real load measured. The design holds.
+
+Three remaining unknowns, all closed on machine-02.
+
+**Host timer jitter** (`spikes/timer-jitter`, 200 Hz, 15 s). This is the floor
+on dispatch accuracy: clock precision is worthless if the scheduler wakes late.
+
+| | idle | 4 busy loops on 2 cores |
+|---|---|---|
+| mean lateness | 0.576 ms | 0.587 ms |
+| sd | 0.316 ms | 0.484 ms |
+| p99 | 1.158 ms | 3.069 ms |
+| max | 1.209 ms | 4.096 ms |
+
+The mean is a stable bias and barely moves under load. Only the tail degrades,
+and even fully saturated the worst case is 4.1 ms, a tenth of a frame.
+
+**Real decode load** (`spikes/clock-jitter`, 1080p24, 200 Hz). Every earlier
+number came from a 640x360 clip on an idle box, so this was the caveat most
+likely to bite.
+
+| | 1080p idle | 1080p plus saturated CPU |
+|---|---|---|
+| IPC round trip p50 | 52.9 us | 41.5 us |
+| position step | 41.00 ms | 41.00 ms |
+| residual sd | 12.19 ms | 12.21 ms |
+| residual max | 28.33 ms | 39.87 ms |
+
+Residual sd is unchanged from the 640x360 idle measurement of 12.2 ms.
+Quantisation dominates regardless of resolution or load, and the IPC stays in
+the tens of microseconds even with the box oversubscribed. Only the tail moves,
+to 39.87 ms, still just inside one frame.
+
+**Seek and pause** (`spikes/player-events`, 100 Hz, scripted).
+
+- A relative seek of +30 s was reflected in the reported position on the very
+  next sample, 10 ms later, as an exact 6.000 to 36.000 jump. An absolute seek
+  backwards behaved identically. No transient values, no unavailable window, no
+  overshoot. Seek detection is easy.
+- Pause freezes the position exactly. Media advanced 0.000 s across 2.990 s of
+  wall time. A clock that failed to notice would have been **2.99 seconds
+  wrong** by the end, which makes pause the single most destructive event for a
+  naive clock and also the easiest to detect.
+- The frame staircase is directly visible in the trace: position holds flat for
+  about four samples at 100 Hz, then steps by exactly 0.041 to 0.042 s. That is
+  the anchor edge, observed rather than inferred.
+
+**Error budget for the anchoring clock.** Anchor timestamp uncertainty is the
+polling interval plus the timer tail: 5 ms at 200 Hz plus 4.1 ms worst case
+under load, so about 9 ms. Against 41.7 ms for one frame at 24 fps, and against
+the 12.2 ms sd of a single naive sample. The approach is sound.
+
+- **Decision:** Discontinuity thresholds are expressed in frame intervals, not
+  in fixed milliseconds.
+- **Why:** `spikes/player-events` used a fixed 25 ms threshold and duly flagged
+  every normal 41.7 ms frame step as a discontinuity. At 24 fps a single frame
+  advance exceeds any fixed threshold tight enough to catch a small seek. The
+  comparison has to be against expected advance, in units of the content's own
+  frame interval.
+- **Impact:** `internal/clock` takes the frame interval as an input, derived
+  per score from the media rather than measured. Stall detection is media time
+  not advancing for more than about two frame intervals while wall time does;
+  seek detection is media advance differing from wall advance by more than a
+  few frame intervals.
+
+mpv can also push notifications via `observe_property`, which would remove the
+detection delay entirely. VLC has no equivalent, so polling based detection has
+to exist regardless. Push is an optimisation for one source, not the mechanism.
+
 ## Links
 
 - Branch: `feat-timing-core`
