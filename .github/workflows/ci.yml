@@ -77,6 +77,22 @@ jobs:
         working-directory: web
         run: npm test
 
+      - name: the committed bundle is current
+        # internal/studio/webdist is committed, the same bargain as vendoring
+        # three.js: `go build` alone keeps producing a working studio, and a
+        # Go contributor never needs npm. The whole cost of that is a bundle
+        # that can go stale, so this is the thing that stops it — rebuild and
+        # insist the result is what is checked in.
+        run: |
+          cd web && npm run build && cd ..
+          if ! git diff --quiet -- internal/studio/webdist; then
+            echo "internal/studio/webdist is out of date. Run:"
+            echo "    cd web && npm ci && npm run build"
+            echo "and commit the result. Changed:"
+            git diff --stat -- internal/studio/webdist
+            exit 1
+          fi
+
   line-endings:
     runs-on: ubuntu-latest
     steps:

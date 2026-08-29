@@ -45,6 +45,17 @@ const MIN_EVENT_W = 3;
 /** Above this many points per pixel, draw an envelope instead of a line. */
 const ENVELOPE_THRESHOLD = 1.5;
 
+/**
+ * Above this many points per pixel, draw the line but not its handles.
+ *
+ * Three bands, not two. A handle is a thing you take hold of, and drawing one
+ * every four pixels produces a chain of overlapping circles that hides the
+ * curve it is supposed to let you edit — visually it reads as noise, and none
+ * of them can be hit anyway. Roughly one every twelve pixels is the point
+ * where they are still individually grabbable.
+ */
+const HANDLE_THRESHOLD = 1 / 12;
+
 /* --- cue lanes ---------------------------------------------------------- */
 
 /**
@@ -169,7 +180,8 @@ export function drawCurve(
     if (pts.length >= 4) {
       list.path({ pts, stroke: colour, fill: colour, baseline: bottom, lineWidth: 1.6, alpha: 1 });
     }
-    if (opts.showHandles !== false) {
+    const visibleDensity = (visible.to - visible.from + 1) / Math.max(1, box.w);
+    if (opts.showHandles !== false && visibleDensity <= HANDLE_THRESHOLD) {
       for (let i = visible.from; i <= visible.to; i++) {
         const p = points[i];
         const px = box.x + view.toX(p.t, box.w);

@@ -150,14 +150,30 @@ describe('revealing the playhead', () => {
 describe('ruler ticks', () => {
   it('lands on values a person recognises, not on 3.7 second intervals', () => {
     const v = view().set(0, 60);
-    const t = ticks(v, 1200);
-    const steps = t.slice(1).map((x, i) => x.t - t[i].t);
+    const labelled = ticks(v, 1200).filter((x) => x.major);
+    const steps = labelled.slice(1).map((x, i) => x.t - labelled[i].t);
     for (const s of steps) expect([1, 2, 5, 10]).toContain(Math.round(s * 1000) / 1000);
+  });
+
+  /* Two labels across a whole timeline is a decorative ruler. Labels have to
+   * be dense enough to read a time off without counting minor ticks. */
+  it('labels often enough to be read', () => {
+    for (const span of [2, 30, 120, 888]) {
+      const v = view().set(0, Math.min(span, 888));
+      const labelled = ticks(v, 1200).filter((x) => x.major);
+      expect(labelled.length).toBeGreaterThanOrEqual(4);
+    }
+  });
+
+  it('puts minor ticks between the labels', () => {
+    const v = view().set(0, 60);
+    const all = ticks(v, 1200);
+    expect(all.length).toBeGreaterThan(all.filter((x) => x.major).length);
   });
 
   it('switches to frames when zoomed right in', () => {
     const v = view().set(10, 1);
-    const t = ticks(v, 1200);
+    const t = ticks(v, 1200).filter((x) => x.major);
     expect(t.length).toBeGreaterThan(2);
     const step = t[1].t - t[0].t;
     expect(step).toBeLessThan(0.5);
@@ -165,7 +181,7 @@ describe('ruler ticks', () => {
 
   it('switches to minutes when showing the whole film', () => {
     const v = view().fit();
-    const t = ticks(v, 1200);
+    const t = ticks(v, 1200).filter((x) => x.major);
     const step = t[1].t - t[0].t;
     expect(step).toBeGreaterThanOrEqual(60);
   });

@@ -224,14 +224,24 @@ export function ticks(view: TimeView, width: number, targetPx = 90): Tick[] {
     1, 2, 5, 10, 15, 30,
     60, 120, 300, 600, 900, 1800, 3600,
   ];
+  /* The ladder is picked for the *labels*, then subdivided.
+   *
+   * Picking it for the tick spacing and calling every fifth one major put the
+   * labels five times further apart than intended — two numbers across a whole
+   * timeline, which is a decorative ruler rather than a usable one. Labels want
+   * to land near `targetPx` apart; the minor ticks between them are what makes
+   * the spacing readable.
+   */
   const wanted = view.secondsPerPixel(width) * targetPx;
-  let step = ladder[ladder.length - 1];
+  let major = ladder[ladder.length - 1];
   for (const s of ladder) {
-    if (s >= wanted) { step = s; break; }
+    if (s >= wanted) { major = s; break; }
   }
-  /* Every fifth tick is major, except in seconds-and-up where the tens are the
-   * natural emphasis. */
-  const majorEvery = step < 1 ? 5 : step < 60 ? (step === 15 || step === 30 ? 2 : 5) : 5;
+  const majorEvery = 5;
+  /* Never subdivide below a frame: there is nothing between two frames to
+   * point at, and asking for it multiplies the tick count for no information. */
+  const step = Math.max(major / majorEvery, frame);
+  const per = Math.max(1, Math.round(major / step));
 
   const out: Tick[] = [];
   const first = Math.floor(view.start / step);
@@ -243,7 +253,7 @@ export function ticks(view: TimeView, width: number, targetPx = 90): Tick[] {
   for (let i = first; i <= last; i++) {
     const t = round6(i * step);
     if (t < 0 || t > view.duration) continue;
-    out.push({ t, major: i % majorEvery === 0 });
+    out.push({ t, major: i % per === 0 });
   }
   return out;
 }
