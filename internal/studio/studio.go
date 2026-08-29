@@ -13,9 +13,12 @@
 package studio
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -72,7 +75,14 @@ func (s *Server) Handler() http.Handler {
 		panic(err) // embedded at build time; cannot fail at runtime
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/", noCache(http.FileServer(http.FS(sub))))
+	files := noCache(http.FileServer(http.FS(sub)))
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+			s.servePage(w, sub)
+			return
+		}
+		files.ServeHTTP(w, r)
+	}))
 	mux.HandleFunc("/api/score", s.handleScore)
 	mux.HandleFunc("/api/rig", s.handleRig)
 	mux.HandleFunc("/media", s.handleMedia)
@@ -131,6 +141,53 @@ func playable(name string) bool {
 
 func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.mediaFiles())
+}
+
+// servePage stamps a content version onto every asset URL.
+//
+// Cache-Control alone was not enough. A browser that had already cached the
+// old scripts kept serving them from cache alongside a freshly fetched page,
+// which produced the worst possible combination: new HTML, old JavaScript,
+// and an application that failed silently. Changing the URL leaves the
+// browser no choice.
+func (s *Server) servePage(w http.ResponseWriter, sub fs.FS) {
+	page, err := fs.ReadFile(sub, "index.html")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	body := strings.ReplaceAll(string(page), "__V__", assetVersion(sub))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store, must-revalidate")
+	io.WriteString(w, body)
+}
+
+var versionOnce struct {
+	sync.Once
+	value string
+}
+
+// assetVersion is a short hash of every embedded asset, so any change to any
+// of them changes every asset URL. Computed once: the files cannot change
+// while the process runs.
+func assetVersion(sub fs.FS) string {
+	versionOnce.Do(func() {
+		h := sha256.New()
+		fs.WalkDir(sub, ".", func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			b, err := fs.ReadFile(sub, path)
+			if err != nil {
+				return nil
+			}
+			h.Write([]byte(path))
+			h.Write(b)
+			return nil
+		})
+		versionOnce.value = hex.EncodeToString(h.Sum(nil))[:12]
+	})
+	return versionOnce.value
 }
 
 // noCache stops a browser holding on to a stale page.

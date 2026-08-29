@@ -11,6 +11,11 @@
 
 * { box-sizing: border-box; }
 
+/* The hidden attribute has to win. A rule like `video { display: block }`
+   silently overrides it, which is how an empty video player came to sit
+   above a message saying no film was loaded. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);

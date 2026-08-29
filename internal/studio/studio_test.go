@@ -427,3 +427,43 @@ func TestAssetsAreNotCached(t *testing.T) {
 		}
 	}
 }
+
+// Cache-Control alone was not enough: a browser that had already cached the
+// old scripts kept serving them alongside a freshly fetched page, producing
+// new HTML with old JavaScript and an application that failed silently.
+func TestAssetUrlsCarryAContentVersion(t *testing.T) {
+	s, _ := newServer(t)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	body := rec.Body.String()
+	if strings.Contains(body, "__V__") {
+		t.Fatal("the version placeholder was served unsubstituted")
+	}
+	for _, asset := range []string{"app.js", "room.js", "state.js", "timeline.js", "style.css"} {
+		if !strings.Contains(body, asset+"?v=") {
+			t.Errorf("%s is referenced without a version, so it can be served stale", asset)
+		}
+	}
+}
+
+func TestTheVersionIsStableAndShort(t *testing.T) {
+	s, _ := newServer(t)
+	get := func() string {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		i := strings.Index(rec.Body.String(), "?v=")
+		if i < 0 {
+			t.Fatal("no version in the page")
+		}
+		rest := rec.Body.String()[i+3:]
+		return rest[:strings.IndexAny(rest, "\"'")]
+	}
+	first, second := get(), get()
+	if first != second {
+		t.Errorf("version changed between requests: %q then %q", first, second)
+	}
+	if len(first) != 12 {
+		t.Errorf("version %q is %d characters, want 12", first, len(first))
+	}
+}
