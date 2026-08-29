@@ -44,7 +44,10 @@ jobs:
           path-to-signatures: signatures/version1/cla.json
           path-to-document: https://github.com/Slicit/componium/blob/main/CLA/icla.txt
           branch: main
-          allowlist: dependabot[bot]
+          # The copyright holder cannot meaningfully sign an agreement granting
+          # rights to themselves, and a gate that blocks the maintainer's own
+          # pull requests forever is an operational annoyance with no upside.
+          allowlist: Slicit,dependabot[bot]
           custom-notsigned-prcomment: >
             Thank you for the pull request. Before it can be merged you need to
             sign the Contributor License Agreement, which is
