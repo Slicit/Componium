@@ -205,7 +205,7 @@ func (c *Conductor) Tick(wall time.Time, r clock.Reading) {
 	// cursor into the schedule has to move with it. Without this, seeking
 	// backwards would fire nothing ever again, and seeking forwards would dump
 	// every intervening cue at once.
-	if c.haveLast && (r.Media < c.lastMedia || r.Media-c.lastMedia > seekTolerance) {
+	if c.haveLast && (c.lastMedia-r.Media > backwardTolerance || r.Media-c.lastMedia > seekTolerance) {
 		c.resync(wall, r)
 	}
 	c.lastMedia = r.Media
@@ -222,6 +222,18 @@ func (c *Conductor) Tick(wall time.Time, r clock.Reading) {
 // is treated as a seek rather than as a slow tick. Generous, because a
 // stuttering caller should not be mistaken for a seek.
 const seekTolerance = 2 * time.Second
+
+// backwardTolerance is how far media time may go *backwards* between ticks
+// without being treated as a seek.
+//
+// It cannot be zero. The clock predicts forward from its last anchor, so
+// when the next anchor lands it can sit a fraction of a millisecond behind
+// the prediction, and media time steps back by that much. Treating every
+// backwards step as a seek made a running span stop 364ms after it started,
+// which is how this was found.
+//
+// A real seek moves seconds. Clock jitter moves microseconds.
+const backwardTolerance = 250 * time.Millisecond
 
 func (c *Conductor) fire(s scheduled, wall time.Time, r clock.Reading) {
 	// A stop is never refused for imprecision. Declining to end an effect
@@ -298,7 +310,7 @@ func (c *Conductor) resync(wall time.Time, r clock.Reading) {
 	// Seeking backwards can land before a span that is still running, leaving
 	// nothing ahead to stop it either. Anything still marked running after the
 	// cursor has moved is ended now.
-	if media < c.lastMedia {
+	if c.lastMedia-media > backwardTolerance {
 		c.stopEverything(wall, r)
 	}
 }

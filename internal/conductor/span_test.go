@@ -218,3 +218,71 @@ func TestUnlimitedInstrumentNeedsNoDuration(t *testing.T) {
 		t.Fatalf("a light with no declared limit was refused: %v", err)
 	}
 }
+
+// The clock predicts forward from its last anchor, so when the next anchor
+// lands it can sit a fraction of a millisecond behind the prediction and media
+// time steps backwards. Treating that as a seek stopped a running span 364ms
+// after it started, on a real player, which is how this was found.
+func TestTinyBackwardClockJitterIsNotASeek(t *testing.T) {
+	f := fogger(0, time.Minute)
+	c := conductor.New()
+	c.Register(f)
+	c.Load([]instrument.Cue{{
+		At: time.Second, Instrument: "fog.left", Action: "burst",
+		Params: map[string]float64{"output": 1}, Hold: 10 * time.Second,
+	}})
+
+	// Play into the span.
+	play(c, 0, 2*time.Second, time.Millisecond)
+	if c.Running() != 1 {
+		t.Fatal("the span did not start")
+	}
+
+	// Now jitter: forward, back a hair, forward again, exactly as an anchor
+	// landing behind a prediction looks.
+	media := 2 * time.Second
+	for i := 0; i < 200; i++ {
+		media += 5 * time.Millisecond
+		jittered := media
+		if i%3 == 0 {
+			jittered -= 300 * time.Microsecond
+		}
+		c.Tick(origin.Add(media), clock.Reading{
+			Media: jittered, Rate: 1, Precision: time.Millisecond,
+			State: clock.StatePlaying, Anchored: true,
+		})
+	}
+
+	if c.Running() != 1 {
+		t.Error("the span was stopped by sub-millisecond clock jitter")
+	}
+	for _, a := range actions(f) {
+		if a == instrument.ActionStop {
+			t.Fatalf("a stop was dispatched during jitter: %v", actions(f))
+		}
+	}
+}
+
+// A real seek still has to be caught, or the tolerance is useless.
+func TestARealBackwardSeekIsStillDetected(t *testing.T) {
+	f := fogger(0, time.Minute)
+	c := conductor.New()
+	c.Register(f)
+	c.Load([]instrument.Cue{{
+		At: 10 * time.Second, Instrument: "fog.left", Action: "burst",
+		Params: map[string]float64{"output": 1}, Hold: 30 * time.Second,
+	}})
+
+	play(c, 0, 12*time.Second, time.Millisecond)
+	if c.Running() != 1 {
+		t.Fatal("the span did not start")
+	}
+	// Two seconds backwards is a seek by any reading.
+	c.Tick(origin.Add(13*time.Second), clock.Reading{
+		Media: 10 * time.Second, Rate: 1, Precision: time.Millisecond,
+		State: clock.StatePlaying, Anchored: true,
+	})
+	if c.Running() != 0 {
+		t.Error("a two second backward seek did not stop the span")
+	}
+}
