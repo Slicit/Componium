@@ -13,6 +13,10 @@ import { Timeline, TrackHeads } from './ui/Timeline';
 import { Overview } from './ui/Overview';
 import { useEditing } from './ui/useEditing';
 import { History } from './core/history';
+import { Menu } from './ui/Menu';
+import { menuFor } from './ui/menuItems';
+import { copy, nudge, paste, splitCue, duplicateCues, type Clip } from './core/edits';
+import type { Cue, Point } from './core/score';
 
 interface Film { name: string; size: number; preview?: boolean }
 
@@ -33,6 +37,10 @@ export function App() {
   const video = useRef<HTMLVideoElement>(null);
   const history = useRef(new History()).current;
   const [saving, setSaving] = useState<string | null>(null);
+  const [clipboard, setClipboard] = useState<Clip | null>(null);
+  /* Shuttle speed, in the J/K/L sense: negative is backwards, and repeated
+   * presses multiply rather than step, which is what makes it a shuttle. */
+  const [shuttle, setShuttle] = useState(0);
   /* useEditing needs to seek, seek needs the view, and the view is built
    * below. A ref breaks the cycle without either of them knowing about the
    * other's lifetime. */
@@ -141,6 +149,9 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+      /* Nothing to act on before the score arrives, and every branch below
+       * assumes there is one. */
+      if (!score) return;
 
       const mod = e.metaKey || e.ctrlKey;
       if (mod && (e.key === 'z' || e.key === 'Z')) {
@@ -155,6 +166,43 @@ export function App() {
       }
       if (mod && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); edit.selectAll(); return; }
       if (mod && (e.key === 's' || e.key === 'S')) { e.preventDefault(); void save(); return; }
+      if (mod && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault();
+        setClipboard(copy(score, edit.selected));
+        return;
+      }
+      if (mod && (e.key === 'x' || e.key === 'X')) {
+        e.preventDefault();
+        setClipboard(copy(score, edit.selected));
+        edit.deleteSelection();
+        return;
+      }
+      if (mod && (e.key === 'v' || e.key === 'V')) {
+        e.preventDefault();
+        /* Paste into the track the selection came from, at the playhead. With
+         * nothing selected there is no destination to infer, and guessing one
+         * would drop events into a track nobody was looking at. */
+        if (!clipboard) return;
+        const target = (score.tracks ?? []).find((t) =>
+          (t.cues ?? []).some((c) => edit.selected.has(c))
+          || (t.points ?? []).some((p) => edit.selected.has(p)))
+          ?? (score.tracks ?? []).find((t) =>
+            clipboard.points.length ? t.type === 'curve' : t.type !== 'curve');
+        if (!target) return;
+        const cmd = paste(clipboard, target, time, score, rig);
+        if (cmd) { history.run(cmd); history.seal(); onView(); }
+        return;
+      }
+      if (mod && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault();
+        for (const t of score.tracks ?? []) {
+          const cues = (t.cues ?? []).filter((c) => edit.selected.has(c));
+          if (!cues.length) continue;
+          const cmd = duplicateCues(t, cues);
+          if (cmd) { history.run(cmd); history.seal(); onView(); }
+        }
+        return;
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); edit.deleteSelection(); return; }
       if (e.key === 'Escape') { edit.clearSelection(); return; }
 
@@ -175,6 +223,50 @@ export function App() {
           break;
         case 'Home': e.preventDefault(); seek(0); break;
         case 'End': e.preventDefault(); seek(duration); break;
+
+        /* J K L: an editor's hands go here before anywhere else. Repeated
+         * presses multiply the speed, K stops, and pressing the opposite
+         * direction returns to single speed rather than subtracting — which
+         * is how every editor since tape has behaved. */
+        case 'j': case 'J':
+          e.preventDefault();
+          setShuttle((s) => (s < 0 ? s * 2 : -1));
+          break;
+        case 'k': case 'K':
+          e.preventDefault();
+          setShuttle(0);
+          video.current?.pause();
+          break;
+        case 'l': case 'L':
+          e.preventDefault();
+          setShuttle((s) => (s > 0 ? s * 2 : 1));
+          break;
+
+        case ',': {
+          e.preventDefault();
+          const cmd = nudge(score, edit.selected, -1 / fps);
+          if (cmd) { history.run(cmd); history.seal(); onView(); }
+          break;
+        }
+        case '.': {
+          e.preventDefault();
+          const cmd = nudge(score, edit.selected, 1 / fps);
+          if (cmd) { history.run(cmd); history.seal(); onView(); }
+          break;
+        }
+        case 's': case 'S': {
+          e.preventDefault();
+          /* Split whatever span the playhead is inside, in any selected
+           * track — the closest thing to an editor's blade tool. */
+          for (const t of score.tracks ?? []) {
+            for (const c of [...(t.cues ?? [])]) {
+              if (!edit.selected.has(c)) continue;
+              const cmd = splitCue(t, c, time);
+              if (cmd) { history.run(cmd); history.seal(); onView(); }
+            }
+          }
+          break;
+        }
         case '+': case '=': view.zoomAt(view.fractionOf(time), 0.6); onView(); break;
         case '-': case '_': view.zoomAt(view.fractionOf(time), 1 / 0.6); onView(); break;
         case 'f': case 'F': view.fit(); onView(); break;
@@ -184,7 +276,38 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [time, fps, duration, seek, view, onView, history, edit, save]);
+  }, [time, fps, duration, seek, view, onView, history, edit, save, score, rig, clipboard]);
+
+  /* The shuttle itself. Runs the transport at a multiple of speed when the
+   * video can do it, and moves the playhead directly when there is no film —
+   * so J and L work against a score alone, which is most of the time here. */
+  useEffect(() => {
+    if (!shuttle) {
+      if (video.current) video.current.playbackRate = 1;
+      return;
+    }
+    const v = video.current;
+    if (v && Number.isFinite(v.duration) && shuttle > 0) {
+      v.playbackRate = Math.min(16, shuttle);
+      void v.play();
+      return;
+    }
+    /* Backwards, or no film: step the clock ourselves. Browsers cannot play a
+     * video backwards at all, so this is not a shortcut, it is the only way. */
+    let last = performance.now();
+    let raf = 0;
+    const step = (now: number) => {
+      const dt = (now - last) / 1000;
+      last = now;
+      seekRef.current(clamp(time + dt * shuttle, 0, duration));
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+    // `time` is deliberately out of the deps: including it restarts the loop
+    // on every frame, which is a stutter rather than a shuttle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shuttle, duration]);
 
   /* --- arrangement --- */
 
@@ -290,6 +413,25 @@ export function App() {
         <div className="tl-under">
           <Overview score={score} rig={rig} view={view} time={time} onView={onView} />
         </div>
+        {edit.menu && (
+          <Menu
+            x={edit.menu.x}
+            y={edit.menu.y}
+            onClose={edit.closeMenu}
+            items={menuFor({
+              hit: edit.menu.hit,
+              score, rig, history, time, fps,
+              selected: edit.selected,
+              clipboard,
+              setClipboard,
+              setSelected: (s: Set<Cue | Point>) => edit.setSelected(s),
+              changed: onView,
+              seek,
+              zoomTo: (a, b) => { view.zoomTo(a, b); onView(); },
+              toggleCollapse,
+            })}
+          />
+        )}
         <p className="legend dim small">
           wheel scrolls · ⇧/⌘ wheel zooms · drag the ruler to scrub · drag the strip below to move
           · <kbd>←</kbd><kbd>→</kbd> frame · <kbd>F</kbd> fit
@@ -298,6 +440,11 @@ export function App() {
           a point to remove it · drag empty space to select a range
           · <kbd>⌥</kbd> suspends snapping · <kbd>⇧</kbd> while dragging a point locks its time
           · <kbd>⌘Z</kbd> undo · <kbd>⌫</kbd> delete · <kbd>⌘S</kbd> save
+          <br />
+          right click anything for what you can do to it
+          · <kbd>J</kbd><kbd>K</kbd><kbd>L</kbd> shuttle · <kbd>S</kbd> split at the playhead
+          · <kbd>,</kbd><kbd>.</kbd> nudge a frame · <kbd>⌘C</kbd><kbd>⌘X</kbd><kbd>⌘V</kbd> · <kbd>⌘D</kbd> duplicate
+          {shuttle !== 0 && <strong className="shuttle"> shuttle {shuttle > 0 ? '▶' : '◀'} {Math.abs(shuttle)}×</strong>}
         </p>
       </section>
     </div>

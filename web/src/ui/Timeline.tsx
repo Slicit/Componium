@@ -209,6 +209,7 @@ export function Timeline(props: TimelineProps) {
       onPointerDown={(e) => edit.onPointerDown(e, geom())}
       onPointerMove={(e) => edit.onPointerMove(e, geom())}
       onDoubleClick={(e) => edit.onDoubleClick(e, geom())}
+      onContextMenu={(e) => edit.onContextMenu(e, geom())}
     >
       <canvas ref={canvas} />
     </div>

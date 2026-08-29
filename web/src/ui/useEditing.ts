@@ -38,6 +38,10 @@ export interface Editing {
   onPointerDown: (e: React.PointerEvent, geom: Geometry) => void;
   onPointerMove: (e: React.PointerEvent, geom: Geometry) => void;
   onDoubleClick: (e: React.MouseEvent, geom: Geometry) => void;
+  onContextMenu: (e: React.MouseEvent, geom: Geometry) => void;
+  menu: { x: number; y: number; hit: Hit } | null;
+  closeMenu: () => void;
+  setSelected: (s: Selected) => void;
   deleteSelection: () => void;
   clearSelection: () => void;
   selectAll: () => void;
@@ -65,6 +69,7 @@ export function useEditing(opts: {
   const [band, setBand] = useState<Band | null>(null);
   const [guide, setGuide] = useState<number | null>(null);
   const [cursor, setCursor] = useState('crosshair');
+  const [menu, setMenu] = useState<{ x: number; y: number; hit: Hit } | null>(null);
   const [version, setVersion] = useState(0);
   const gesture = useRef(0);
 
@@ -356,10 +361,26 @@ export function useEditing(opts: {
     setSelected(all);
   }, [score]);
 
+  /* Right-click selects what is under it first — unless it is already part of
+   * the selection, in which case the selection stands. So a menu never acts on
+   * something other than what was pointed at, and never destroys a
+   * multi-selection you right-clicked in order to use. */
+  const onContextMenu = useCallback((e: React.MouseEvent, geom: Geometry) => {
+    e.preventDefault();
+    const x = e.clientX - geom.rect.left;
+    const y = e.clientY - geom.rect.top;
+    const hit = hitTest(context(geom), x, y);
+    if (hit.k === 'cue' && !selected.has(hit.cue)) setSelected(new Set([hit.cue]));
+    if (hit.k === 'point' && !selected.has(hit.point)) setSelected(new Set([hit.point]));
+    setMenu({ x: e.clientX, y: e.clientY, hit });
+  }, [context, selected]);
+
+  const closeMenu = useCallback(() => setMenu(null), []);
+
   return {
-    selected, band, guide, cursor, version,
-    onPointerDown, onPointerMove, onDoubleClick,
-    deleteSelection, clearSelection, selectAll,
+    selected, band, guide, cursor, version, menu,
+    onPointerDown, onPointerMove, onDoubleClick, onContextMenu, closeMenu,
+    deleteSelection, clearSelection, selectAll, setSelected,
   };
 }
 

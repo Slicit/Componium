@@ -27,6 +27,7 @@ export interface MovePoint {
 }
 
 export type Command =
+  | { k: 'batch'; label: string; cmds: Command[] }
   | { k: 'moveCues'; label: string; items: MoveCue[] }
   | { k: 'resizeCues'; label: string; items: ResizeCue[] }
   | { k: 'movePoints'; label: string; items: MovePoint[] }
@@ -60,6 +61,9 @@ export function withOrphans(track: Track, points: Point[]): Point[] {
 
 export function apply(cmd: Command): void {
   switch (cmd.k) {
+    case 'batch':
+      for (const c of cmd.cmds) apply(c);
+      break;
     case 'moveCues':
       for (const it of cmd.items) it.cue.t = it.to;
       for (const t of tracksOf(cmd.items)) normalise(t);
@@ -99,6 +103,12 @@ export function apply(cmd: Command): void {
 
 export function revert(cmd: Command): void {
   switch (cmd.k) {
+    case 'batch':
+      /* Backwards. A batch that removed a span and inserted two halves must
+       * put the halves back before restoring the original, or the two undo
+       * steps fight over the same array. */
+      for (let i = cmd.cmds.length - 1; i >= 0; i--) revert(cmd.cmds[i]);
+      break;
     case 'moveCues':
       for (const it of cmd.items) it.cue.t = it.from;
       for (const t of tracksOf(cmd.items)) normalise(t);
@@ -230,6 +240,11 @@ function mergeInto(top: Command, next: Command): Command {
 
 /* --- constructors ------------------------------------------------------- */
 
+/** Several edits that undo as one. */
+export function batch(label: string, cmds: Command[]): Command {
+  return { k: 'batch', label, cmds };
+}
+
 export function moveCues(items: MoveCue[]): Command {
   return {
     k: 'moveCues',
@@ -238,11 +253,19 @@ export function moveCues(items: MoveCue[]): Command {
   };
 }
 
-export function resizeCues(items: ResizeCue[]): Command {
+/**
+ * Change how long spans last.
+ *
+ * `min` is the floor a drag may not go below, so trimming cannot collapse a
+ * span into something that can never fire. Deliberately turning a span into an
+ * instant passes zero, because that is a different intent from a drag that
+ * went too far and should not be silently prevented.
+ */
+export function resizeCues(items: ResizeCue[], min = 0.02): Command {
   return {
     k: 'resizeCues',
     label: 'Change length',
-    items: items.map((i) => ({ ...i, to: round3(Math.max(0.02, i.to)) })),
+    items: items.map((i) => ({ ...i, to: round3(Math.max(min, i.to)) })),
   };
 }
 
