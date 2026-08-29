@@ -19,3 +19,9 @@ build/
 *.mp4
 
 .DS_Store
+
+# Go writes main-package executables into the working directory, so a casual
+# `go build ./...` drops binaries in the repo root. Prefer `go vet ./...` to
+# check, or `go build -o bin/ ./...`.
+/componium
+/clock-jitter
