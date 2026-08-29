@@ -119,11 +119,9 @@ class Room {
     for (const [id, device] of this.devices) {
       const off = this.muted.has(id);
       device.node.classList.toggle("muted", off);
-      const s = state[id];
-      const level = (!off && s && s.active) ? s.level : 0;
+      const { level, params } = deviceState(state, id, this.muted);
       device.node.classList.toggle('on', level > 0.02);
 
-      const params = (s && s.params) || {};
       if (device.kind === 'light') {
         const colour = cssColour(params);
         device.dot.style.color = colour;
@@ -146,9 +144,7 @@ class Room {
       }
     }
 
-    const motion = state['motion.platform'] || findKind(state, 'motion');
-    const heave = motion && motion.params ? (motion.params.heave || 0) : 0;
-    this.seat.style.transform = this.seatTransform(heave * 0.5);
+    this.seat.style.transform = this.seatTransform(seatPose(state).heave * 0.5);
 
     if (ambient) {
       this.screen.style.background =
@@ -166,6 +162,41 @@ function findKind(state, kind) {
   return null;
 }
 
+/* What one device is doing, as both room views read it.
+ *
+ * Shared rather than duplicated on purpose. The flat view and the 3D view have
+ * to agree about what "muted" and "active" mean, and the cheapest way to
+ * guarantee that is to give them one function instead of two that look alike
+ * today and drift apart in a month. A muted device is level 0, not hidden: it
+ * still occupies its place in the room, it is just silent.
+ */
+function deviceState(state, id, muted) {
+  const s = state[id];
+  const off = muted ? muted.has(id) : false;
+  return {
+    level: (!off && s && s.active) ? s.level : 0,
+    params: (s && s.params) || {},
+    muted: off,
+  };
+}
+
+/* Where the seat is, in metres and radians.
+ *
+ * The platform reports six axes and the room only shows what a seat can
+ * actually do. Translations are scaled down hard: a rig with 90mm of heave
+ * would be invisible at room scale, and the point of the view is to read the
+ * motion, not to measure it. This is a preview, and it says so.
+ */
+function seatPose(state) {
+  const motion = state['motion.platform'] || findKind(state, 'motion');
+  const p = (motion && motion.params) || {};
+  const n = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
+  return {
+    surge: n(p.surge), sway: n(p.sway), heave: n(p.heave),
+    roll: n(p.roll), pitch: n(p.pitch), yaw: n(p.yaw),
+  };
+}
+
 function cssColour(params) {
   const to255 = (v) => Math.round(Math.max(0, Math.min(1, v || 0)) * 255);
   if ('r' in params || 'g' in params || 'b' in params) {
@@ -176,7 +207,7 @@ function cssColour(params) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { cssColour, PX_PER_M };
+  module.exports = { cssColour, deviceState, seatPose, PX_PER_M };
 }
 
 Room.prototype.setMuted = function (muted) {

@@ -37,7 +37,12 @@
     </div>
 
     <div class="pane">
-      <h2>Room</h2>
+      <h2>Room
+        <span class="viewtoggle">
+          <button id="room-3d" class="seg" type="button">3D</button><button id="room-flat" class="seg" type="button">Flat</button>
+        </span>
+        <span id="room-note" class="muted small"></span>
+      </h2>
       <div id="room" class="room-host"></div>
       <div id="active" class="active"></div>
     </div>
@@ -72,5 +77,19 @@
 <script src="timeline.js?v=__V__"></script>
 <script src="library.js?v=__V__"></script>
 <script src="app.js?v=__V__"></script>
+
+<!-- The 3D room is the one part of the studio that needs modules, because
+     three.js only ships as one. It loads last and deferred: if it fails, is
+     blocked, or finds no GPU, the flat room built by app.js is already on the
+     page and stays there. Nothing above this line knows three.js exists. -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js?v=__V__",
+    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js?v=__V__"
+  }
+}
+</script>
+<script type="module" src="room3d.js?v=__V__"></script>
 </body>
 </html>

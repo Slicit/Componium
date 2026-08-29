@@ -32,6 +32,55 @@ function toggleMuted(id, off) {
   applyMuted();
 }
 
+/* --- which room is on screen ------------------------------------------
+ *
+ * Two implementations of one interface: Room draws in CSS and always works,
+ * Room3D draws in WebGL and appears only once its module has loaded and found
+ * a GPU. Swapping is a matter of building the other one into the same host and
+ * handing it the same instruments and mutes, because they take the same four
+ * calls. The choice is remembered, and it is a preference rather than a
+ * capability: asking for 3D on a machine that cannot do it gets the flat view
+ * and a note saying why, not an empty box.
+ */
+let roomKind = null;
+
+function preferredRoom() {
+  try {
+    return localStorage.getItem('componium.room') || '3d';
+  } catch (err) {
+    return '3d';
+  }
+}
+
+function useRoomView(want) {
+  const kind = (want === '3d' && globalThis.Room3D) ? '3d' : 'flat';
+  if (room && kind === roomKind) return;
+
+  /* Hand back the WebGL context before taking another. Browsers cap how many
+   * a page may hold, and toggling without this eventually blanks the canvas. */
+  if (room && room.dispose) room.dispose();
+
+  room = kind === '3d' ? new globalThis.Room3D(el('room')) : new Room(el('room'));
+  roomKind = kind;
+  room.setInstruments((rig && rig.instruments) || []);
+  room.setMuted(muted);
+
+  try { localStorage.setItem('componium.room', want); } catch (err) { /* private mode */ }
+  paintRoomToggle(want);
+}
+
+function paintRoomToggle(want) {
+  const a = el('room-3d');
+  const b = el('room-flat');
+  if (a && a.classList) a.classList.toggle('on', roomKind === '3d');
+  if (b && b.classList) b.classList.toggle('on', roomKind === 'flat');
+  const note = el('room-note');
+  if (!note) return;
+  note.textContent = (want === '3d' && roomKind === 'flat')
+    ? 'no WebGL here, showing the flat room'
+    : '';
+}
+
 /* Solo is a toggle, not a mode. Pressing it on the only audible track
  * restores everything, so the same button gets you in and out. */
 function soloOnly(id) {
@@ -154,8 +203,7 @@ async function load() {
   el('rigname').textContent = rig.name || '';
   el('status').textContent = 'loaded';
 
-  room = new Room(el('room'));
-  room.setInstruments(rig.instruments || []);
+  useRoomView(preferredRoom());
 
   timeline = new Timeline(el('timeline'), {
     onSeek: function (t) { transport.currentTime = t; },
@@ -256,6 +304,16 @@ function parseTime(text) {
 }
 
 el('save').addEventListener('click', save);
+
+el('room-3d').addEventListener('click', function () { useRoomView('3d'); });
+el('room-flat').addEventListener('click', function () { useRoomView('flat'); });
+
+/* room3d.js is a module and therefore always arrives after this script has
+ * run. Whichever order it lands in relative to load(), the flat room is on
+ * screen first and this upgrades it in place. */
+window.addEventListener('componium-room3d', function () {
+  if (room && preferredRoom() === '3d') useRoomView('3d');
+});
 
 el('play').addEventListener('click', function () {
   if (transport.paused) transport.play(); else transport.pause();
