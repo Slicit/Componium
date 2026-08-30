@@ -85,6 +85,15 @@ func (j *Jobs) runAnalyse(film string) error {
 		}
 		length := info.Duration
 		if limit > 0 && limit < length {
+			// Scale the size down with the length. planChunks divides one by
+			// the other to find the bitrate, and handing it the whole file's
+			// size against a fraction of the film makes that fraction look
+			// eight times denser than it is — so a fifteen minute run of a
+			// feature planned as three five minute chunks instead of one.
+			// Harmless, and wrong for a reason worth not leaving in place.
+			if info.Duration > 0 {
+				size = int64(float64(size) * (limit / info.Duration))
+			}
 			length = limit
 		}
 		chunks = planChunks(size, time.Duration(length*float64(time.Second)))
@@ -115,7 +124,10 @@ func (j *Jobs) runAnalyse(film string) error {
 		for i := start; i < len(chunks); i++ {
 			began := time.Now()
 			j.markChunk(film, i, JobRunning, "")
-			err := j.runChunk(ctx, film, source, chunks[i], len(chunks), peak)
+			// Only the last chunk of a run that reaches the film's own end is
+			// open ended. Under a limit, every chunk has a far edge.
+			openEnded := i == len(chunks)-1 && (limit <= 0 || limit >= info.Duration)
+			err := j.runChunk(ctx, film, source, chunks[i], len(chunks), peak, openEnded)
 			if err != nil {
 				j.markChunk(film, i, JobFailed, err.Error())
 				return fmt.Errorf("chunk %d of %d (%s to %s): %w",
@@ -133,8 +145,16 @@ func (j *Jobs) runAnalyse(film string) error {
 }
 
 // runChunk analyses one range and writes its partial score.
+// runChunk analyses one range and writes its partial score.
+//
+// openEnded says this chunk runs to the end of the film, in which case it is
+// left without a --to: the end came from ffprobe, and asking for a range that
+// stops a frame short of the duration would leave the tail analysed by nobody.
+// A chunk that is merely last in a shortened run is not open ended, and saying
+// otherwise sends it decoding to the end of the film — measured at chunk three
+// of a fifteen minute run reading an hour and three quarters it had no use for.
 func (j *Jobs) runChunk(ctx context.Context, film, source string, c Chunk,
-	total int, peak float64) error {
+	total int, peak float64, openEnded bool) error {
 
 	partial := j.partialPath(film, c.Index)
 	if err := os.MkdirAll(filepath.Dir(partial), 0o755); err != nil {
@@ -166,10 +186,7 @@ func (j *Jobs) runChunk(ctx context.Context, film, source string, c Chunk,
 		"--from", strconv.FormatFloat(c.From, 'f', 3, 64),
 		"--audio-peak", strconv.FormatFloat(peak, 'f', 6, 64),
 	}...)
-	// The last chunk is left open ended. Its end came from ffprobe, and
-	// asking for a range that stops a frame short of the duration would leave
-	// the tail of the film analysed by nobody.
-	if c.Index < total-1 {
+	if !openEnded {
 		args = append(args, "--to", strconv.FormatFloat(c.To, 'f', 3, 64))
 	}
 

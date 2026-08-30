@@ -125,6 +125,14 @@ services:
       - -media=/media
       - -scores=/scores
       - -addr=0.0.0.0:8722
+    # The vision seam, off unless a command is named. Analysis works without
+    # it; naming one turns keyframe labelling on for every film analysed here.
+    environment:
+      COMPONIUM_VLM_COMMAND: ${COMPONIUM_VLM_COMMAND:-}
+      COMPONIUM_VLM_FRAMES: ${COMPONIUM_VLM_FRAMES:-}
+      COMPONIUM_VLM_HOST: ${COMPONIUM_VLM_HOST:-}
+      COMPONIUM_VLM_MODEL: ${COMPONIUM_VLM_MODEL:-}
+      COMPONIUM_VLM_API: ${COMPONIUM_VLM_API:-}
     volumes:
       - ${COMPONIUM_MEDIA:-./media}:/media
       - ./demo-rig.toml:/opt/componium/deploy-rig.toml:ro
