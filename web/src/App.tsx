@@ -58,7 +58,32 @@ export function App() {
    * tree per event. This counter is what tells React something changed. */
   const [, bump] = useState(0);
   const onView = useCallback(() => bump((n) => n + 1), []);
-  const video = useRef<HTMLVideoElement>(null);
+  /* Written by the callback ref below, so the element type has to admit
+   * null. A RefObject React fills in is read only to us. */
+  const video = useRef<HTMLVideoElement | null>(null);
+  /* The same element, as state, so the room can be handed it.
+   *
+   * A ref alone cannot do this: it is populated during commit and never
+   * re-renders anything, so a room reading `video.current` would see null on
+   * the render that matters and never look again. A callback ref is React
+   * telling us the element exists, which is the only reliable moment. */
+  const [picture, setPicture] = useState<HTMLVideoElement | null>(null);
+  const holdVideo = useCallback((el: HTMLVideoElement | null) => {
+    video.current = el;
+    setPicture(el);
+  }, []);
+  /* Off unless asked for. The screen in the room previews the ambient layer;
+   * a film on it is a different thing to look at, and a gimmick until judged
+   * otherwise, so it is opt in and it is remembered. */
+  const [onScreen, setOnScreen] = useState(() => {
+    try { return localStorage.getItem('componium.roomPicture') === 'on'; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('componium.roomPicture', onScreen ? 'on' : 'off');
+    } catch { /* private mode */ }
+  }, [onScreen]);
   const history = useRef(new History()).current;
   const [saving, setSaving] = useState<string | null>(null);
   const [clipboard, setClipboard] = useState<Clip | null>(null);
@@ -605,7 +630,7 @@ export function App() {
         <div className="stage-film">
         {playable ? (
           <video
-            ref={video}
+            ref={holdVideo}
             src={'/media?file=' + encodeURIComponent(film)}
             controls
             preload="metadata"
@@ -644,6 +669,11 @@ export function App() {
                 <input type="range" min={0} max={100} value={brightness}
                   onChange={(e) => setBrightness(Number(e.target.value))} />
               </label>
+              <label className="room-toggle" title="Show the film itself on the television in the room, instead of the ambient colour it is driving. The glow behind the panel keeps showing the ambient layer either way.">
+                <input type="checkbox" checked={onScreen}
+                  onChange={(e) => setOnScreen(e.target.checked)} />
+                <span className="dim small">picture</span>
+              </label>
             </div>
             {/* Eight columns of room against four of controls, side by side.
                 Stacked, the panels pushed the room up and everything scrolled
@@ -661,6 +691,7 @@ export function App() {
               view={views.camera}
               onView={views.onCamera}
               revision={history.version}
+              picture={onScreen ? picture : null}
             />
             </div>
             {split.force && (

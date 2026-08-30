@@ -19,6 +19,7 @@
  */
 
 import * as THREE from 'three';
+import { containScale, aspectOf, SCREEN_ASPECT } from '../../core/picture';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { deviceState, seatPose, cssColour } from './readings';
@@ -333,6 +334,10 @@ export class Room3D {
   constructor(host) {
     this.host = host;
     this.devices = new Map();
+    /* The film on the television, when someone has asked for it. Null is the
+     * normal state: the screen's job is to preview the ambient layer. */
+    this.picture = null;
+    this.pictureTexture = null;
     this.muted = new Set();
     this.forced = new Map();
     this.lights = 0;
@@ -530,6 +535,38 @@ export class Room3D {
     this.seatRest = SEAT_Z;
   }
 
+  /**
+   * Show a film on the screen, or stop showing one.
+   *
+   * Takes the video element the picture pane is already using rather than
+   * making a second one. There is only one film, one decode and one clock;
+   * two would drift apart the moment either was scrubbed, and the drift would
+   * be worst exactly where the room is most useful — on a cue you are trying
+   * to place against a frame.
+   *
+   * Passing null puts the screen back to being the ambient preview.
+   */
+  setPicture(video) {
+    if (this.picture === video) return;
+    if (this.pictureTexture) {
+      this.pictureTexture.dispose();
+      this.pictureTexture = null;
+    }
+    this.picture = video || null;
+    const material = this.screen.material;
+    if (!this.picture) {
+      material.map = null;
+      material.needsUpdate = true;
+      this.screen.scale.set(1, 1, 1);
+      return;
+    }
+    const texture = new THREE.VideoTexture(this.picture);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    this.pictureTexture = texture;
+    material.map = texture;
+    material.needsUpdate = true;
+  }
+
   setMuted(muted) {
     this.muted = muted;
   }
@@ -658,6 +695,18 @@ export class Room3D {
     this.seat.position.set(pose.sway * 0.5, pose.heave * 0.5, this.seatRest + pose.surge * 0.5);
     this.seat.rotation.set(pose.pitch * 0.6, pose.yaw * 0.6, pose.roll * 0.6);
 
+    /* The picture, if there is one.
+     *
+     * needsUpdate is set here rather than left to VideoTexture's own frame
+     * callback because the room is most often looked at while the film is
+     * paused and being scrubbed a frame at a time, which is the case that
+     * callback is worst at. An upload a frame is cheap next to the scene. */
+    if (this.picture && this.pictureTexture) {
+      if (this.picture.readyState >= 2) this.pictureTexture.needsUpdate = true;
+      const fit = containScale(SCREEN_ASPECT, aspectOf(this.picture));
+      this.screen.scale.set(fit.x, fit.y, 1);
+    }
+
     if (ambient) {
       /* Both of these have a floor, and the floor is not cosmetic.
        *
@@ -668,8 +717,16 @@ export class Room3D {
        * the couch is doing. A real television is never truly black either. So
        * the wash bottoms out somewhere dim rather than at nothing. */
       const c = new THREE.Color(ambient.colour);
-      this.screen.material.color.copy(c)
-        .multiplyScalar(0.35 + ambient.level * 0.65).addScalar(0.09);
+      /* With a film on it the screen carries its own light and must not be
+       * tinted by the layer it is no longer previewing — a white multiplier
+       * leaves the frame as shot. The glow behind the panel keeps doing the
+       * ambient job, so the room still shows what the soft layer is up to. */
+      if (this.picture) {
+        this.screen.material.color.setScalar(1);
+      } else {
+        this.screen.material.color.copy(c)
+          .multiplyScalar(0.35 + ambient.level * 0.65).addScalar(0.09);
+      }
       this.screenGlow.color.copy(c).addScalar(0.18);
       this.screenGlow.intensity = 9 + ambient.level * 30;
     }
@@ -762,6 +819,7 @@ export class Room3D {
     if (this.controls) this.controls.dispose();
     for (const [, d] of this.devices) disposeTree(d.group);
     disposeTree(this.scene);
+    if (this.pictureTexture) this.pictureTexture.dispose();
     if (this.environment) this.environment.texture.dispose();
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode) {

@@ -24,6 +24,7 @@ const updates: unknown[] = [];
 vi.mock('./Room3D.js', () => {
   class FakeRoom {
     setInstruments() {}
+    setPicture() {}
     setMuted() {}
     setForced() {}
     setBrightness() {}

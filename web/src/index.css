@@ -462,6 +462,11 @@ button:hover { border-color: #3a4553; }
 .lumen { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .lumen input[type=range] { width: 96px; accent-color: #7fa8d8; }
 
+/* The picture switch rides along after the light slider, which is the element
+   carrying the margin that pushes both to the right of the bar. */
+.room-toggle { display: inline-flex; align-items: center; gap: 6px; }
+.room-toggle input[type=checkbox] { accent-color: #7fa8d8; margin: 0; }
+
 .room-host {
   height: 300px;
   border: 1px solid var(--line);

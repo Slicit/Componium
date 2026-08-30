@@ -18,6 +18,7 @@ import { evaluate } from '../../core/state';
 
 interface RoomHandle {
   setInstruments(instruments: unknown[]): void;
+  setPicture(video: HTMLVideoElement | null): void;
   setMuted(muted: Set<string>): void;
   setForced(forced: Map<string, number>): void;
   setBrightness(v: number): void;
@@ -46,6 +47,15 @@ export function Room(props: {
   /** Called as the camera moves, so the arrangement can remember it. */
   onView?: (view: CameraView) => void;
   /**
+   * The film to show on the television in the room, or null for none.
+   *
+   * The very element the picture pane is playing, not a copy: one film, one
+   * decode, one clock. Two would drift the moment either was scrubbed, and
+   * the drift would be worst exactly where the room earns its keep — placing
+   * a cue against a frame.
+   */
+  picture?: HTMLVideoElement | null;
+  /**
    * Bumped whenever the score is edited.
    *
    * Not decoration. Commands mutate the score in place — they hold references
@@ -57,7 +67,8 @@ export function Room(props: {
    */
   revision?: number;
 }) {
-  const { score, rig, time, muted, forced, brightness, view, onView, revision } = props;
+  const { score, rig, time, muted, forced, brightness, view, onView, revision, picture } =
+    props;
   const host = useRef<HTMLDivElement>(null);
   const room = useRef<RoomHandle | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
@@ -104,6 +115,12 @@ export function Room(props: {
     if (status !== 'ready') return;
     room.current?.setView(view ?? null);
   }, [view, status]);
+
+  /* Keyed on the element itself, so it is applied whenever React mounts the
+   * video — which happens after this component exists, once a film is picked.
+   * Reaching into a ref from an effect keyed on anything else is how the
+   * playhead once stopped following the picture. */
+  useEffect(() => { room.current?.setPicture(picture ?? null); }, [picture, status]);
 
   useEffect(() => { room.current?.setMuted(muted); }, [muted, status]);
   useEffect(() => { room.current?.setForced(forced); }, [forced, status]);
