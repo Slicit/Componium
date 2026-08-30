@@ -118,7 +118,7 @@ def _with_time(item, t: float):
     return (t,) + tuple(item[1:])
 
 
-def place(tracks, span: Span):
+def place(tracks, span: Span, duration: float = 0.0):
     """Move a chunk's tracks into the film's own time, dropping the lead in.
 
     Returns new tracks; the input is left alone. Cues and points are handled
@@ -167,6 +167,18 @@ def place(tracks, span: Span):
                 # Nothing at all inside the range, but the curve still has a
                 # value there. One point is what says so.
                 kept.append(_with_time(before, round(span.start, 4)))
+            if hold and len(kept) == 1:
+                # A curve of one point is not a curve, and the score format
+                # says so: a single point is ambiguous between a level and an
+                # instant, so it is refused. That is easy to hit here — a
+                # chunk over a stretch the film spends perfectly still holds
+                # one value and changes nothing — and it would fail at the
+                # merge, after the work was done. So the far edge of the range
+                # repeats the value, which is what a flat curve looks like
+                # written down.
+                far = span.end if span.end > 0.0 else duration
+                if far > span.start:
+                    kept.append(_with_time(kept[0], round(far, 4)))
             moved[field] = kept
         if any(moved.get(f) for f in ("cues", "points")):
             out.append(moved)

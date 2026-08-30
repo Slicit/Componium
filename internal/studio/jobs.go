@@ -57,6 +57,13 @@ type Job struct {
 	Error    string   `json:"error,omitempty"`
 	Started  string   `json:"started,omitempty"`
 	Seconds  float64  `json:"seconds,omitempty"`
+	// Chunks is the analysis broken into ranges, and how far each got.
+	//
+	// On the job rather than beside it because it is persisted with the job,
+	// and it is persisted because the thing it protects against is the studio
+	// stopping. Empty for a prepare, and for an analysis that has not been
+	// planned yet.
+	Chunks []Chunk `json:"chunks,omitempty"`
 }
 
 // jobKey identifies a job. Kind is part of it because a film can legitimately
@@ -178,6 +185,16 @@ func (j *Jobs) load() {
 			job.State = JobInterrupted
 			job.Label = "interrupted by a restart"
 		}
+		// A chunk that was mid-flight is not running any more either, and
+		// leaving it saying so puts a spinner in the library against nothing.
+		// The state it goes to matters less than it being honest: anything
+		// other than done is redone, so this changes what is displayed and not
+		// what is worked on.
+		for i := range job.Chunks {
+			if job.Chunks[i].State == JobRunning || job.Chunks[i].State == JobQueued {
+				job.Chunks[i].State = JobInterrupted
+			}
+		}
 		j.jobs[k] = job
 	}
 }
@@ -219,6 +236,14 @@ func (j *Jobs) Enqueue(kind JobKind, film string) *Job {
 		}
 	}
 	job := &Job{Kind: kind, Film: film, State: JobQueued, Label: "waiting"}
+	// Carry the chunk record over from the previous attempt. Queueing a film
+	// again is how you resume it, so a fresh job that dropped the record of
+	// what was already finished would make resuming mean starting over — the
+	// finished pieces would still be on disk, and would still be redone.
+	// Reset is the way to discard them, and it is the only way.
+	if existing, ok := j.jobs[key]; ok {
+		job.Chunks = existing.Chunks
+	}
 	j.jobs[key] = job
 	j.queue = append(j.queue, key)
 	j.save()
@@ -325,61 +350,6 @@ func (j *Jobs) run(kind JobKind, film string) {
 }
 
 // runAnalyse runs the composer over one film, parsing its progress as it goes.
-func (j *Jobs) runAnalyse(film string) error {
-	out := j.ScorePath(film)
-	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-		return err
-	}
-
-	// A generous ceiling rather than none. A wedged ffmpeg would otherwise
-	// hold the single worker forever and every other film behind it.
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Hour)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, j.python, j.composer,
-		filepath.Join(j.mediaDir, film),
-		"-o", out,
-		"--motion-id", "motion.platform",
-	)
-	cmd.Dir = filepath.Dir(j.composer)
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	var lastLines []string
-	scanner := bufio.NewScanner(stderr)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if fraction, label, ok := parseProgress(line); ok {
-			j.update(JobAnalyse, film, false, func(job *Job) {
-				job.Progress = fraction
-				job.Label = label
-			})
-			continue
-		}
-		// Keep the tail, so a failure can say what the composer was
-		// complaining about rather than just that it failed.
-		lastLines = append(lastLines, line)
-		if len(lastLines) > 6 {
-			lastLines = lastLines[1:]
-		}
-	}
-
-	if err := cmd.Wait(); err != nil {
-		detail := strings.TrimSpace(strings.Join(lastLines, "; "))
-		if detail == "" {
-			detail = err.Error()
-		}
-		return fmt.Errorf("%s", detail)
-	}
-	return nil
-}
-
 // runPrepare writes a browser-playable copy of one film.
 func (j *Jobs) runPrepare(film string) error {
 	if !ffmpegAvailable() {

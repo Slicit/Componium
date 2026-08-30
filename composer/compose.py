@@ -530,7 +530,7 @@ def build(args) -> str:
     # Everything above counted from the start of what was decoded. Move it
     # into the film's own clock and drop the lead in, so a partial score is a
     # short score rather than a score that needs correcting.
-    tracks = span_mod.place(tracks, span)
+    tracks = span_mod.place(tracks, span, film_duration)
     calm = span_mod.place_regions(calm, span)
     if not tracks:
         sys.exit("nothing extracted; is the input a playable file?")
@@ -543,7 +543,13 @@ def build(args) -> str:
         # least reliable number it has.
         "duration": film_duration or (len(frames) / args.fps),
         "fps": args.media_fps,
-        "hash": "" if args.no_hash else file_hash(args.input, args.hash_mb),
+        # Hashed from the film, which is not always the file being read.
+        # A prepared copy decodes five times faster and is what the studio
+        # plays, so it is what gets analysed — but the score binds to the film
+        # the viewer actually has, or regenerating a preview would silently
+        # unbind every score made from it.
+        "hash": "" if args.no_hash else file_hash(
+            getattr(args, "hash_file", "") or args.input, args.hash_mb),
     }
     progress(1.0, "writing the score")
     return render(meta, tracks, calm)
@@ -583,6 +589,9 @@ def main(argv=None):
     p.add_argument("--hash-mb", type=int, default=64,
                    help="megabytes to hash, 0 for the whole file (default 64)")
     p.add_argument("--no-hash", action="store_true")
+    p.add_argument("--hash-file", default="",
+                   help="hash this file instead of the input, for when the input "
+                        "is a prepared copy and the score should bind to the film")
     p.add_argument("--no-subtitles", action="store_true",
                    help="do not mine the subtitle track for effect cues")
     p.add_argument("--subtitle-stream", type=int, default=0,

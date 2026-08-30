@@ -33,3 +33,6 @@ node_modules/
 
 # Per box paths, not the same on any two machines.
 deploy/.env
+
+# Scratch commit message, never committed.
+.commitmsg

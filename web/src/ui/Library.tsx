@@ -9,6 +9,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const POLL_MS = 700;
 
+interface Chunk {
+  index: number;
+  from: number;
+  to: number;
+  state: 'queued' | 'running' | 'done' | 'failed';
+  error?: string;
+  seconds?: number;
+}
+
 interface Job {
   kind: string;
   state: 'queued' | 'running' | 'done' | 'failed' | 'interrupted';
@@ -16,7 +25,19 @@ interface Job {
   label: string;
   error?: string;
   seconds?: number;
+  /* The analysis broken into ranges. Absent until a film has been planned,
+   * and the whole reason an interrupted feature is worth resuming rather than
+   * starting again. */
+  chunks?: Chunk[];
 }
+
+/** How many pieces of this film are finished and will not be redone. */
+const done = (job?: Job) => (job?.chunks ?? []).filter((c) => c.state === 'done').length;
+
+/** Is there finished work here worth continuing from. */
+const resumable = (job?: Job) =>
+  !!job && job.state !== 'running' && job.state !== 'queued' && done(job) > 0
+  && done(job) < (job.chunks?.length ?? 0);
 
 interface Entry {
   film: string;
@@ -101,6 +122,18 @@ export function Library(props: { onOpen: (film: string) => void }) {
     xhr.send(f);
   };
 
+  /* Reset is asked about rather than done, because the thing it discards is
+   * the expensive thing: on a feature, the finished pieces can be an hour of
+   * work that nothing else in the studio can get back. */
+  const reset = async (e: Entry) => {
+    const n = (e.job?.chunks ?? []).filter((c) => c.state === 'done').length;
+    const what = n > 0
+      ? `Throw away ${n} finished piece${n === 1 ? '' : 's'} of ${e.film} and analyse it again from the start?`
+      : `Start the analysis of ${e.film} again from nothing?`;
+    if (!window.confirm(what)) return;
+    await post('/api/build?reset=1&file=' + encodeURIComponent(e.film));
+  };
+
   const remove = async (e: Entry) => {
     const what = e.hasScore
       ? `Delete ${e.film} and its score? This cannot be undone.`
@@ -172,7 +205,18 @@ export function Library(props: { onOpen: (film: string) => void }) {
               <button
                 disabled={!!(e.job && (e.job.state === 'queued' || e.job.state === 'running'))}
                 onClick={() => post('/api/build?file=' + encodeURIComponent(e.film))}
-              >{e.hasScore ? 'Rebuild' : 'Analyse'}</button>
+                title={resumable(e.job)
+                  ? `Continue from piece ${done(e.job)} of ${e.job!.chunks!.length}. ` +
+                    'The finished pieces are kept.'
+                  : 'Analyse the whole film, in pieces that can be resumed'}
+              >{resumable(e.job) ? 'Resume' : e.hasScore ? 'Rebuild' : 'Analyse'}</button>
+            )}
+            {data.canBuild && (e.job?.chunks?.length ?? 0) > 0
+              && e.job?.state !== 'running' && e.job?.state !== 'queued' && (
+              <button
+                onClick={() => reset(e)}
+                title="Throw away every finished piece and analyse the film again from nothing"
+              >Reset</button>
             )}
             {data.canPrepare && !e.preview && (
               <button
@@ -203,15 +247,29 @@ function status(e: Entry) {
   }
   if (j?.state === 'failed') {
     /* The composer's own last words rather than a generic failure: knowing it
-     * was ffmpeg that objected is most of the diagnosis. */
-    return <span className="failed small">failed: {j.error ?? 'unknown'}</span>;
+     * was ffmpeg that objected is most of the diagnosis. And which piece it
+     * got to, because that is what Resume will start from. */
+    const kept = (j.chunks ?? []).filter((c) => c.state === 'done').length;
+    return (
+      <span className="failed small">
+        failed: {j.error ?? 'unknown'}
+        {kept > 0 && ` — ${kept} of ${j.chunks!.length} pieces finished and kept`}
+      </span>
+    );
   }
   if (j?.state === 'interrupted') {
     /* Say it was killed rather than saying nothing. Silence reads as "it never
-     * started", which is the opposite of the truth. */
+     * started", which is the opposite of the truth. And say how much survived,
+     * because "stopped at 60%" and "stopped at 60%, and 60% of it is kept" are
+     * very different pieces of news. */
+    const kept = (j.chunks ?? []).filter((c) => c.state === 'done').length;
+    const all = j.chunks?.length ?? 0;
     return (
       <span className="dim small">
-        analysis stopped at {Math.round((j.progress ?? 0) * 100)}% when the studio restarted
+        analysis stopped when the studio restarted
+        {all > 0
+          ? ` — ${kept} of ${all} pieces finished and kept`
+          : ` at ${Math.round((j.progress ?? 0) * 100)}%`}
       </span>
     );
   }

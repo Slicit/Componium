@@ -112,10 +112,14 @@ class TestPlace(unittest.TestCase):
         span = Span(start=0, end=100)
         tracks = [{
             "instrument": "a", "type": "curve",
-            "points": [(50.0, {}), (150.0, {})],
+            "points": [(50.0, {"i": 0.3}), (150.0, {"i": 0.9})],
         }]
         out = place(tracks, span)
-        self.assertEqual([p[0] for p in out[0]["points"]], [50.0])
+        # The 150s point is gone. What remains is padded to the range end,
+        # because one point is not a curve — and the padding carries the
+        # surviving value, not the dropped one.
+        self.assertEqual(out[0]["points"],
+                         [(50.0, {"i": 0.3}), (100.0, {"i": 0.3})])
 
     def test_whole_film_is_left_exactly_as_it_was(self):
         tracks = [{"instrument": "a", "type": "curve", "points": [(1.0, {})]}]
@@ -140,9 +144,36 @@ class TestPlace(unittest.TestCase):
                          [(600.0, {'i': 0.4}), (658.0, {'i': 0.9})])
 
     def test_a_curve_with_nothing_inside_the_range_still_says_its_value(self):
+        """And says it twice, because one point is not a curve.
+
+        The score format refuses a single point curve, so emitting one here
+        would fail at the merge, after the work was done. A stretch the film
+        spends perfectly still is exactly the case that produces it.
+        """
         span = Span(start=600, end=900, warmup=2)
         tracks = [{'instrument': 'a', 'type': 'curve', 'points': [(0.0, {'i': 0.4})]}]
+        self.assertEqual(place(tracks, span)[0]['points'],
+                         [(600.0, {'i': 0.4}), (900.0, {'i': 0.4})])
+
+    def test_the_last_chunk_pads_to_the_films_end(self):
+        # An open ended range has no end of its own to pad to, so it is given
+        # the film's.
+        span = Span(start=600, warmup=2)
+        tracks = [{'instrument': 'a', 'type': 'curve', 'points': [(0.0, {'i': 0.4})]}]
+        self.assertEqual(place(tracks, span, duration=888.0)[0]['points'],
+                         [(600.0, {'i': 0.4}), (888.0, {'i': 0.4})])
+
+    def test_a_lone_point_with_nowhere_to_pad_to_is_left_alone(self):
+        # Rather than inventing a second point before the first one.
+        span = Span(start=600, warmup=2)
+        tracks = [{'instrument': 'a', 'type': 'curve', 'points': [(0.0, {'i': 0.4})]}]
         self.assertEqual(place(tracks, span)[0]['points'], [(600.0, {'i': 0.4})])
+
+    def test_a_cue_track_of_one_is_not_padded(self):
+        # One event is a perfectly good cue track; only curves need two.
+        span = Span(start=600, end=900, warmup=0)
+        tracks = [{'instrument': 'w', 'type': 'cue', 'cues': [{'t': 10.0, 'action': 'gust'}]}]
+        self.assertEqual(len(place(tracks, span)[0]['cues']), 1)
 
     def test_a_cue_is_never_moved_to_the_boundary(self):
         """Moving an event to the boundary reports something that did not
@@ -155,13 +186,16 @@ class TestPlace(unittest.TestCase):
         }]
         self.assertEqual(place(tracks, span), [])
 
-    def test_a_curve_already_starting_at_the_boundary_gains_nothing(self):
+    def test_a_curve_already_starting_at_the_boundary_holds_nothing(self):
+        # A point already landing on the boundary is the value there, so the
+        # carried-in 0.4 must not displace it. The second point is the pad.
         span = Span(start=600, end=900, warmup=2)
         tracks = [{
             'instrument': 'a', 'type': 'curve',
             'points': [(0.0, {'i': 0.4}), (2.0, {'i': 0.7})],
         }]
-        self.assertEqual(place(tracks, span)[0]['points'], [(600.0, {'i': 0.7})])
+        self.assertEqual(place(tracks, span)[0]['points'],
+                         [(600.0, {'i': 0.7}), (900.0, {'i': 0.7})])
 
 
 class TestPlaceRegions(unittest.TestCase):

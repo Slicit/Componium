@@ -775,6 +775,18 @@ func (s *Server) handleBuild(w http.ResponseWriter, r *http.Request) {
 	// Same rule as serving media: only a name that appeared in the listing.
 	for _, f := range files {
 		if f.Name == want {
+			// Reset throws away the finished pieces so the run starts from
+			// nothing. It is a separate request rather than a flag on this
+			// one because a rebuild that quietly discarded twenty minutes of
+			// finished work would be the single most expensive misclick in
+			// the studio. Without it, a rebuild resumes.
+			if r.URL.Query().Get("reset") == "1" {
+				if err := s.jobs.ResetAnalysis(want); err != nil {
+					writeJSON(w, http.StatusInternalServerError,
+						map[string]string{"error": err.Error()})
+					return
+				}
+			}
 			writeJSON(w, http.StatusOK, s.jobs.Enqueue(JobAnalyse, want))
 			return
 		}
