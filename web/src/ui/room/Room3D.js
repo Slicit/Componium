@@ -20,6 +20,7 @@
 
 import * as THREE from 'three';
 import { containScale, aspectOf, SCREEN_ASPECT } from '../../core/picture';
+import { repeatForAspect } from '../../core/tiling';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
@@ -80,6 +81,72 @@ function surface(colour, roughness, metalness, envIntensity) {
     metalness: metalness === undefined ? 0.05 : metalness,
     envMapIntensity: envIntensity === undefined ? 1 : envIntensity,
   });
+}
+
+/* --- surfaces the room is made of -------------------------------------- */
+
+/* Served from the binary alongside everything else, so a room that renders at
+ * all renders dressed. They are small on purpose - the largest is 133KB - and
+ * they are photographs of materials rather than seamless tiles, so they are
+ * repeated at a size where the join is not what the eye goes to.
+ */
+const TEXTURE_PATH = '/textures/';
+
+/* How many times a material repeats across a metre.
+ *
+ * Set from what the photograph actually shows rather than from what looks
+ * neat in a UV editor: the knit is a close up of maybe twenty centimetres of
+ * fabric, so five to the metre puts it back at roughly life size. These are
+ * the numbers to move if a surface reads too coarse or too busy.
+ */
+/* How wide the projected frame is before it is thrown across the room.
+ *
+ * This is the blur. Sixty four pixels magnified over several metres keeps the
+ * shape of the picture and loses everything else, which is what light spilling
+ * off a screen actually looks like. Raise it for a sharper projection; it is
+ * the only knob that matters here.
+ */
+const THROW_WIDTH = 64;
+
+/* The panel photograph, in pixels. Here because the wall repeat is worked out
+ * from it and a repeat that has drifted from the file it describes is a
+ * stretched wall that nothing reports. */
+const PANEL_W = 464;
+const PANEL_H = 1024;
+
+const FABRIC_PER_METRE = 5;
+const CARPET_PER_METRE = 2;
+
+function texture(name, repeatX, repeatY) {
+  const t = new THREE.TextureLoader().load(TEXTURE_PATH + name);
+  /* Colour maps are authored in sRGB and have to say so, or every surface in
+   * the room comes out washed out in a way that looks like a lighting bug. */
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.RepeatWrapping;
+  /* Clamped by three to whatever the card can do. These are seen at a glancing
+   * angle across a floor, which is the case anisotropy exists for. */
+  t.anisotropy = 16;
+  if (repeatX !== undefined) {
+    t.repeat.set(repeatX, repeatY === undefined ? repeatX : repeatY);
+  }
+  return t;
+}
+
+/* A piece of furniture keeps the weave at life size whatever size it is.
+ *
+ * UVs on a box run 0 to 1 per face however big the face is, so one material
+ * across a couch would put the same number of stitches on a 2.7m seat and a
+ * 0.28m arm - and the arm would look like it was knitted by a giant. Each
+ * piece gets its own copy of the map, scaled to the piece.
+ */
+function upholster(material, w, h, d) {
+  if (!material.map) return material;
+  const m = material.clone();
+  m.map = material.map.clone();
+  m.map.repeat.set(w * FABRIC_PER_METRE, Math.max(h, d) * FABRIC_PER_METRE);
+  m.map.needsUpdate = true;
+  return m;
 }
 
 function box(w, h, d, material) {
@@ -328,6 +395,8 @@ export class Room3D {
     this.picture = null;
     this.pictureTexture = null;
     this.projectorTexture = null;
+    this.throwCanvas = null;
+    this.throwContext = null;
     /* What each consumer of the film has asked for, which is what applyFilm
      * reads to decide whether a texture has to exist at all. */
     this.wantScreen = null;
@@ -423,10 +492,16 @@ export class Room3D {
     /* One inside-out box is the whole room. BackSide means the camera sees the
      * far walls and never the near ones, so the room is never occluded by the
      * wall you are looking through. */
+    /* Every wall but the one behind the television, which gets its own panel
+     * below because it is a different material and a different problem. */
+    this.textures = [];
+    const walls = texture('walls.jpg', 3, 3);
+    this.textures.push(walls);
     const shell = box(ROOM_W, ROOM_H, ROOM_D, new THREE.MeshStandardMaterial({
       color: 0x3b424e, roughness: 0.86, metalness: 0.02,
       side: THREE.BackSide, envMapIntensity: 0.55,
     }));
+    shell.material.map = walls;
     shell.receiveShadow = true;
     place(shell, 0, ROOM_H / 2, ROOM_D / 2);
     scene.add(shell);
@@ -435,20 +510,59 @@ export class Room3D {
      * the walls into mirrors. A faint reflection is most of what stops a room
      * looking like a cardboard box, and it is also where a light cue shows up
      * second, after the wall it is pointed at. */
+    const floorMap = texture('floor.jpg',
+                            ROOM_W * CARPET_PER_METRE, ROOM_D * CARPET_PER_METRE);
+    this.textures.push(floorMap);
+    const floorMaterial = surface(0xffffff, 0.72, 0.02, 1.0);
+    floorMaterial.map = floorMap;
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(ROOM_W, ROOM_D),
-      surface(0x3b4250, 0.36, 0.22, 1.15)
+      floorMaterial
     );
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
     place(floor, 0, 0.002, ROOM_D / 2);
     scene.add(floor);
 
-    const rug = new THREE.Mesh(new THREE.PlaneGeometry(3.7, 2.7), surface(0x3b3340, 0.97, 0));
+    const rugMap = texture('rug.jpg');
+    rugMap.center.set(0.5, 0.5);
+    rugMap.rotation = Math.PI / 2;
+    rugMap.wrapS = THREE.ClampToEdgeWrapping;
+    rugMap.wrapT = THREE.ClampToEdgeWrapping;
+    this.textures.push(rugMap);
+    const rugMaterial = surface(0xffffff, 0.95, 0);
+    rugMaterial.map = rugMap;
+    /* 3.7 by 2.52 rather than 2.7: the photograph is 512 by 752, and turned on
+     * its side that is 1.47 to 1. Cutting the rug to the pattern keeps the
+     * shapes round; stretching the pattern to the rug would oval them. */
+    const rug = new THREE.Mesh(new THREE.PlaneGeometry(3.7, 2.52), rugMaterial);
     rug.rotation.x = -Math.PI / 2;
     rug.receiveShadow = true;
     place(rug, 0, 0.006, 2.5);
     scene.add(rug);
+
+    /* The wall behind the television, as its own surface.
+     *
+     * Its own plane rather than a face of the shell, because it is the one
+     * wall made of something else and a box carries one material.
+     *
+     * It tiles at the photograph's own shape instead of being stretched to
+     * the wall. The panel is 464 by 1024, so at full room height one tile is
+     * 1.36m wide and the wall takes 3.7 of them - which puts each slat at
+     * about ten centimetres, which is what a slat is. Stretched to the wall
+     * instead, the slats would come out a third of a metre across and stop
+     * reading as slats at all. */
+    const slats = texture('slats.jpg');
+    const tiled = repeatForAspect(ROOM_W, ROOM_H, PANEL_W, PANEL_H);
+    slats.repeat.set(tiled.x, tiled.y);
+    this.textures.push(slats);
+    const panelMaterial = surface(0xffffff, 0.55, 0.02, 1.0);
+    panelMaterial.map = slats;
+    const panel = new THREE.Mesh(
+      new THREE.PlaneGeometry(ROOM_W, ROOM_H), panelMaterial);
+    panel.receiveShadow = true;
+    place(panel, 0, ROOM_H / 2, 0.012);
+    scene.add(panel);
 
     /* Bright enough to read the room at a glance, which is the whole job.
      *
@@ -551,13 +665,16 @@ export class Room3D {
      * decay is 1 rather than the physical 2: a projected image that falls off
      * with the square of distance is bright on the couch and gone by the
      * floor, which reads as a lamp rather than as a picture. */
-    const projector = new THREE.SpotLight(0xffffff, 0, 0, 0.55, 0.35, 1);
+    const projector = new THREE.SpotLight(0xffffff, 0, 0, 0.55, 0.5, 1);
     projector.position.set(0, 1.62, 0.2);
     projector.target.position.set(0, 0.35, SEAT_Z);
     /* map is disabled outright unless the light casts a shadow: three samples
      * it through the shadow camera, so the two are one feature. */
     projector.castShadow = true;
-    projector.shadow.mapSize.set(2048, 2048);
+    /* 1024 rather than 2048: what this map masks is a sixty four pixel image
+     * thrown across a room, and a crisp edge on a soft picture would look
+     * stranger than the soft edge does. */
+    projector.shadow.mapSize.set(1024, 1024);
     projector.shadow.camera.near = 0.2;
     projector.shadow.camera.far = ROOM_D + 1;
     projector.shadow.bias = -0.0012;
@@ -588,18 +705,29 @@ export class Room3D {
      * Cushions are separate pieces mostly so the shape survives being tilted —
      * a single slab reads as a crate the moment the platform rolls. */
     const couch = new THREE.Group();
-    const fabric = surface(0x474252, 0.92, 0.02, 0.7);
-    const fabricLight = surface(0x554f61, 0.92, 0.02, 0.7);
+    const knit = texture('sofa.jpg');
+    this.textures.push(knit);
+    const fabric = surface(0xffffff, 0.92, 0.02, 0.7);
+    fabric.map = knit;
+    /* The cushions catch a little more light than the frame, which is what
+     * stops a one colour couch reading as one lump. Same weave, lifted. */
+    const fabricLight = surface(0xc8c8c8, 0.92, 0.02, 0.7);
+    fabricLight.map = knit;
     const leg = surface(0x23262d, 0.3, 0.65, 1.2);
 
-    couch.add(place(softBox(2.7, 0.34, 1.08, fabric, 0.07), 0, 0.34, 0));
+    couch.add(place(softBox(2.7, 0.34, 1.08,
+      upholster(fabric, 2.7, 0.34, 1.08), 0.07), 0, 0.34, 0));
     for (const x of [-0.66, 0.66]) {
-      couch.add(place(softBox(1.28, 0.2, 0.98, fabricLight, 0.06), x, 0.58, -0.02));
-      couch.add(place(softBox(1.24, 0.58, 0.19, fabricLight, 0.06), x, 0.82, 0.44));
+      couch.add(place(softBox(1.28, 0.2, 0.98,
+        upholster(fabricLight, 1.28, 0.2, 0.98), 0.06), x, 0.58, -0.02));
+      couch.add(place(softBox(1.24, 0.58, 0.19,
+        upholster(fabricLight, 1.24, 0.58, 0.19), 0.06), x, 0.82, 0.44));
     }
-    couch.add(place(softBox(2.7, 0.8, 0.24, fabric, 0.07), 0, 0.76, 0.54));
+    couch.add(place(softBox(2.7, 0.8, 0.24,
+      upholster(fabric, 2.7, 0.8, 0.24), 0.07), 0, 0.76, 0.54));
     for (const x of [-1.34, 1.34]) {
-      couch.add(place(softBox(0.28, 0.34, 1.08, fabric, 0.08), x, 0.66, 0));
+      couch.add(place(softBox(0.28, 0.34, 1.08,
+        upholster(fabric, 0.28, 0.34, 1.08), 0.08), x, 0.66, 0));
     }
     for (const x of [-1.2, 1.2]) {
       for (const z of [-0.44, 0.44]) {
@@ -657,7 +785,13 @@ export class Room3D {
       this.releaseFilm();
       this.picture = video;
     }
-    if (video && !this.pictureTexture) {
+
+    /* The film at full size, for the screen only.
+     *
+     * This is the expensive one: a 1920 wide upload and a fresh mip chain
+     * every time the film advances. The projector does not use it and must
+     * not cause it. */
+    if (video && this.wantScreen && !this.pictureTexture) {
       const texture = new THREE.VideoTexture(video);
       texture.colorSpace = THREE.SRGBColorSpace;
       /* VideoTexture turns mipmaps off, which is right for its usual job of
@@ -675,21 +809,45 @@ export class Room3D {
       texture.magFilter = THREE.LinearFilter;
       texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
       this.pictureTexture = texture;
-
-      /* The projection is mirrored, and this is what unmirrors it.
-       *
-       * The light looks back down the room, so world x runs the opposite way
-       * through its projection than it does across the screen, and text in the
-       * picture would come out reversed. A clone shares the Source with the
-       * texture above, so the video is still uploaded once; only the sampling
-       * differs. */
-      const thrown = this.pictureTexture.clone();
-      thrown.repeat.x = -1;
-      thrown.offset.x = 1;
-      thrown.needsUpdate = true;
-      this.projectorTexture = thrown;
+    } else if (this.pictureTexture && !(video && this.wantScreen)) {
+      this.pictureTexture.dispose();
+      this.pictureTexture = null;
     }
-    if (!video) this.releaseFilm();
+
+    /* What the projector throws is a small, soft copy of its own.
+     *
+     * A projection sampled from a full size frame comes out sharp, and a sharp
+     * picture lying across the floor reads as a second television rather than
+     * as light coming off the first one. Sixty four pixels magnified over a
+     * room keeps the shape of the frame and loses everything else, which is
+     * what a screen actually puts into a room.
+     *
+     * The canvas is also where the mirror is undone: the light looks back down
+     * the room, so world x runs the opposite way through its projection than
+     * across the screen, and text came out reversed. A negative scale is one
+     * line and needs no second texture kept in agreement with the first. */
+    if (video && this.wantProjection && !this.projectorTexture) {
+      const canvas = document.createElement('canvas');
+      canvas.width = THROW_WIDTH;
+      canvas.height = Math.round(THROW_WIDTH * 9 / 16);
+      const context = canvas.getContext('2d');
+      context.scale(-1, 1);
+      context.translate(-canvas.width, 0);
+      this.throwCanvas = canvas;
+      this.throwContext = context;
+
+      const thrown = new THREE.CanvasTexture(canvas);
+      thrown.colorSpace = THREE.SRGBColorSpace;
+      thrown.minFilter = THREE.LinearFilter;
+      thrown.magFilter = THREE.LinearFilter;
+      thrown.generateMipmaps = false;
+      this.projectorTexture = thrown;
+    } else if (this.projectorTexture && !(video && this.wantProjection)) {
+      this.projectorTexture.dispose();
+      this.projectorTexture = null;
+      this.throwCanvas = null;
+      this.throwContext = null;
+    }
 
     const material = this.screen.material;
     if (this.wantScreen && this.pictureTexture) {
@@ -725,6 +883,8 @@ export class Room3D {
       this.projectorTexture.dispose();
       this.projectorTexture = null;
     }
+    this.throwCanvas = null;
+    this.throwContext = null;
     if (this.pictureTexture) {
       this.pictureTexture.dispose();
       this.pictureTexture = null;
@@ -874,6 +1034,19 @@ export class Room3D {
       this.screen.scale.set(fit.x, fit.y, 1);
     }
 
+    /* The projected copy, redrawn from the film.
+     *
+     * Every frame, because it is a draw of a decoded video into a canvas 64
+     * pixels wide and the alternative - working out whether the film has
+     * advanced - costs more thought than the draw does. Nothing happens at all
+     * when the projector is off. */
+    if (this.projector.visible && this.throwContext && this.picture
+        && this.picture.readyState >= 2) {
+      const c = this.throwCanvas;
+      this.throwContext.drawImage(this.picture, 0, 0, c.width, c.height);
+      this.projectorTexture.needsUpdate = true;
+    }
+
     if (ambient) {
       /* Both of these have a floor, and the floor is not cosmetic.
        *
@@ -983,6 +1156,7 @@ export class Room3D {
 
   dispose() {
     this.running = false;
+    for (const t of this.textures || []) t.dispose();
     if (this.controls) this.controls.dispose();
     for (const [, d] of this.devices) disposeTree(d.group);
     disposeTree(this.scene);
