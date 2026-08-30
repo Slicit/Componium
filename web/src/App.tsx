@@ -645,6 +645,12 @@ export function App() {
                   onChange={(e) => setBrightness(Number(e.target.value))} />
               </label>
             </div>
+            {/* Eight columns of room against four of controls, side by side.
+                Stacked, the panels pushed the room up and everything scrolled
+                against everything else; beside it, each has a column of its
+                own and neither moves when the other grows. */}
+            <div className={'room-split' + (split.force ? '' : ' alone')}>
+            <div className="room-view">
             <Room
               score={score}
               rig={rig}
@@ -656,8 +662,9 @@ export function App() {
               onView={views.onCamera}
               revision={history.version}
             />
+            </div>
             {split.force && (
-              <div className="room-panels">
+              <aside className="room-side">
                 <Effects
                   instrument={target?.instrument ?? null}
                   kind={targetKind}
@@ -668,8 +675,9 @@ export function App() {
                   onPreview={preview}
                 />
                 <Force rig={rig} forced={forced} onChange={setForced} />
-              </div>
+              </aside>
             )}
+            </div>
           </div>
         )}
       </div>
