@@ -33,6 +33,11 @@ import urllib.error
 import urllib.request
 
 HOST = os.environ.get("COMPONIUM_VLM_HOST", "http://gaming.home:14242").rstrip("/")
+# Which server is on the other end. Ollama and an OpenAI compatible server
+# differ in the shape of the request and in nothing that matters here, so the
+# prompt, the vocabulary and the parser are shared and only the envelope
+# changes. vLLM speaks the OpenAI shape.
+API = os.environ.get("COMPONIUM_VLM_API", "ollama").strip().lower()
 MODEL = os.environ.get("COMPONIUM_VLM_MODEL", "qwen3-vl:8b")
 DEBUG = bool(os.environ.get("COMPONIUM_VLM_DEBUG"))
 TIMEOUT = float(os.environ.get("COMPONIUM_VLM_TIMEOUT", "120"))
@@ -139,6 +144,9 @@ def ask(image_path: str) -> str:
     Measured over the same frames: 2.5 to 4.3 seconds each and one silent
     failure in five, against 0.5 to 1.4 seconds and none.
     """
+    if API in ("openai", "vllm"):
+        return ask_openai(image_path)
+
     body = json.dumps({
         "model": MODEL,
         "stream": False,
@@ -160,6 +168,43 @@ def ask(image_path: str) -> str:
     # "EFFECTS:" the parser looks for. Put it back rather than teaching the
     # parser about a special first line.
     return "EFFECTS:" + reply
+
+
+def ask_openai(image_path: str) -> str:
+    """The same question, in the shape vLLM and friends expect.
+
+    Two differences worth naming. The image travels as a data URI inside the
+    message rather than as a separate array, and there is no prefill: the
+    OpenAI chat shape has no way to begin the assistant's turn, so the answer
+    is not started for it.
+
+    That matters because prefilling is what stopped qwen3-vl reasoning itself
+    out of an answer. A model that does not reason before replying does not
+    need it — but if one does, this is where it will show, as an empty reply
+    with a stop reason of length.
+    """
+    body = json.dumps({
+        "model": MODEL,
+        "temperature": 0,
+        "max_tokens": 60,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": PROMPT},
+                {"type": "image_url",
+                 "image_url": {"url": "data:image/jpeg;base64," + encode(image_path)}},
+            ],
+        }],
+    }).encode()
+    req = urllib.request.Request(
+        HOST + "/v1/chat/completions", data=body,
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        payload = json.loads(r.read())
+    choices = payload.get("choices") or []
+    if not choices:
+        return ""
+    return choices[0].get("message", {}).get("content", "") or ""
 
 
 def parse(reply: str) -> list[str]:
