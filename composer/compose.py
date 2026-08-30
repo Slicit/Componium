@@ -417,24 +417,40 @@ def build(args) -> str:
                f"{timecode(span.end) if span.end else 'the end'}"
                f" ({span.lead:.0f}s lead in)\n")
 
-    # One grayscale pass and one colour pass. Everything below is derived from
-    # those two, rather than decoding the film once per feature.
-    progress(0.05, "decoding frames")
-    frames = analysis.analyse(args.input, args.fps, span=span)
-    progress(0.45, "decoding colour")
-    colour_raw = list(analysis.colour_frames(args.input, args.fps, span=span))
-    colours = [analysis.mean_colour(f) for f in colour_raw]
-    report(f"{len(frames)} frames analysed at {args.fps} Hz\n")
+    # One decode, every stream.
+    #
+    # Each of these used to read the film for itself, and each read cost the
+    # same: measured on a three minute film, grayscale took 9.9 seconds, colour
+    # 10.4, luma 10.8 and scene detection 9.8 — for output of 64x36, 8x8, 1x1
+    # and nothing at all. What costs is decoding, and the film was decoded five
+    # times over. Shared, the same five became 13.0.
+    flash_fps = args.flash_fps or (args.media_fps or 24.0)
+    progress(0.05, "reading the film")
+    decoded = analysis.decode(
+        args.input, args.fps, flash_fps=flash_fps, span=span,
+        scene_threshold=args.scene_threshold, want_scenes=not args.no_scenes)
 
-    progress(0.55, "detecting scene cuts")
-    cuts = [] if args.no_scenes else scenes.detect(
-        args.input, args.scene_threshold, span=span)
-    progress(0.62, "estimating camera movement")
-    movements = motion_est.track(frames, width=analysis.GRAY_W)
-    speed = motion_est.speed_series(movements, args.fps)
-    progress(0.72, "reading low frequency audio")
-    env = lfe_envelope(args.input, args.fps, span=span,
-                       peak=getattr(args, "audio_peak", 0.0) or 0.0)
+    try:
+        progress(0.45, "measuring the frames")
+        frames = [analysis.features(f) for f in decoded.gray()]
+        colour_raw = list(decoded.colour())
+        colours = [analysis.mean_colour(f) for f in colour_raw]
+        report(f"{len(frames)} frames analysed at {args.fps} Hz\n")
+
+        cuts = decoded.cuts()
+        progress(0.62, "estimating camera movement")
+        movements = motion_est.track(frames, width=analysis.GRAY_W)
+        speed = motion_est.speed_series(movements, args.fps)
+        progress(0.72, "reading low frequency audio")
+        env = rms_windows(decoded.audio(), int(LFE_RATE / args.fps),
+                          getattr(args, "audio_peak", 0.0) or 0.0)
+        lumas = [analysis.Luma(v) for v in decoded.luma()]
+        flash_colours = [analysis.mean_colour(f) for f in decoded.flash_colour()]
+    finally:
+        # The temporary streams are large and the analysis is long; holding
+        # them past the point they are read would mean a feature keeping a
+        # gigabyte of raw frames alive for no reason.
+        decoded.close()
 
     # --- what the film is doing, before deciding what to play ----------------
     progress(0.80, "finding calm")
@@ -471,11 +487,6 @@ def build(args) -> str:
     # fall between samples: a lightning strike lasts about 150ms, and 4 Hz
     # misses four out of five. One byte per frame makes 24 Hz free.
     progress(0.86, "finding flashes")
-    flash_fps = args.flash_fps or (args.media_fps or 24.0)
-    lumas = [analysis.Luma(v)
-             for v in analysis.luma_series(args.input, flash_fps, span=span)]
-    flash_colours = [analysis.mean_colour(f)
-                     for f in analysis.colour_frames(args.input, flash_fps, span=span)]
     add_cues(args.light_event_id, light.flashes(lumas, flash_colours, flash_fps))
 
     # --- shake ---------------------------------------------------------------
