@@ -562,6 +562,20 @@ export class Room3D {
     }
     const texture = new THREE.VideoTexture(this.picture);
     texture.colorSpace = THREE.SRGBColorSpace;
+    /* VideoTexture turns mipmaps off, which is right for its usual job of
+     * filling the viewport and wrong here. The screen is a few hundred pixels
+     * of canvas showing a frame 1920 wide, so a drawn pixel covers around five
+     * texels, and taking four of them is what makes fine detail crawl as the
+     * camera moves. The renderer's own anti-aliasing cannot help: it samples
+     * geometry edges, not the inside of a texture.
+     *
+     * Anisotropy is the half that matters when the screen is seen from a seat
+     * rather than square on, and it does nothing without the mip chain to
+     * sample along — the two go together or neither is worth setting. */
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     this.pictureTexture = texture;
     material.map = texture;
     material.needsUpdate = true;
@@ -697,12 +711,14 @@ export class Room3D {
 
     /* The picture, if there is one.
      *
-     * needsUpdate is set here rather than left to VideoTexture's own frame
-     * callback because the room is most often looked at while the film is
-     * paused and being scrubbed a frame at a time, which is the case that
-     * callback is worst at. An upload a frame is cheap next to the scene. */
+     * Only the fit is maintained here. Marking the texture dirty is
+     * VideoTexture's own job and it already does it properly: it registers
+     * requestVideoFrameCallback, which fires on every presented frame
+     * including a seek completed while paused, and falls back to readyState
+     * where that callback does not exist. Marking it again every render
+     * uploaded an unchanged frame sixty times a second, and now that there is
+     * a mip chain it would rebuild that too. */
     if (this.picture && this.pictureTexture) {
-      if (this.picture.readyState >= 2) this.pictureTexture.needsUpdate = true;
       const fit = containScale(SCREEN_ASPECT, aspectOf(this.picture));
       this.screen.scale.set(fit.x, fit.y, 1);
     }
