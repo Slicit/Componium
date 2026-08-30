@@ -293,12 +293,15 @@ def render(meta, tracks, calm=()) -> str:
                     row += f", params = {{ {params} }}"
                 if cue.get("duration"):
                     row += f', duration = "{cue["duration"]:.1f}s"'
-                row += " },"
                 if cue.get("source"):
-                    # The source is whatever nominated this cue: a subtitle, a
-                    # luminance rise, a camera movement. It goes in the file so
-                    # a reviewer can judge the cue without rerunning anything.
-                    lines.append(f'  # {cue["source"]}')
+                    # A field rather than a comment. The source says what
+                    # proposed the cue, and a reviewer wants it — but comments
+                    # do not survive being read and written again, which a
+                    # chunked analysis does on every merge, so it was reliably
+                    # lost on exactly the films long enough to need it.
+                    said = str(cue["source"]).replace('', ' ').replace('"', "'")
+                    row += f', source = "{said}"'
+                row += " },"
                 lines.append(row)
             lines.append("]")
         else:

@@ -109,6 +109,18 @@ type CueSpec struct {
 	Params            map[string]float64 `toml:"params"`
 	Duration          Span               `toml:"duration"`
 	RequiredPrecision Span               `toml:"required_precision"`
+	// Source is what proposed this cue: a subtitle, a vision model, a
+	// luminance rise. Advisory, and the conductor ignores it.
+	//
+	// A field rather than the comment it used to be, for two reasons. A
+	// reviewer judging whether a cue belongs wants to know whether a model
+	// guessed it or the audio measured it, and comments do not survive being
+	// read and written again — which a chunked analysis does on every merge,
+	// so the attribution was reliably lost on exactly the films long enough
+	// to need it. And remapping needs it: rebuilding the cues a vision pass
+	// proposed, without touching the ones the signals found, is only possible
+	// if a cue says which it was.
+	Source string `toml:"source,omitempty"`
 }
 
 // Point is one sample in a curve track.

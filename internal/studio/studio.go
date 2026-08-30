@@ -607,7 +607,7 @@ func toWire(sc *score.Score, path string) wireScore {
 		for _, c := range t.Cues {
 			wt.Cues = append(wt.Cues, wireCue{
 				T: c.T.Duration().Seconds(), Action: c.Action, Params: c.Params,
-				Duration: c.Duration.Duration().Seconds(),
+				Duration: c.Duration.Duration().Seconds(), Source: c.Source,
 			})
 		}
 		for _, p := range t.Points {
@@ -633,6 +633,9 @@ func fromWire(in *wireScore, prev *score.Score) *score.Score {
 				T:      score.Timecode(seconds(c.T)),
 				Action: c.Action, Params: c.Params,
 				Duration: score.Span(seconds(c.Duration)),
+				// Carried back, so editing a score in the studio does not
+				// quietly strip what proposed each cue.
+				Source: c.Source,
 			})
 		}
 		for _, p := range t.Points {
