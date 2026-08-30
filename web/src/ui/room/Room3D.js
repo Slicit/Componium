@@ -62,10 +62,14 @@ const AMBIENT_STRIP_LENGTH = 4.6;
  * room on a particular screen, and the honest way to pick it is to let it be
  * picked.
  *
- * The default lands at a third of this, which is a wash you notice without it
- * competing with the cues the room exists to show.
+ * Sized against the room rather than picked. A rectangle emits pi times its
+ * luminance times its area, so at the default these two strips come to roughly
+ * what the pair of ceiling lamps put out — which is the point: with the light
+ * slider down the wash should be what is lighting the room, not a tint on a
+ * room lit by something else. The top of the slider is well past that, because
+ * having somewhere to go is the whole reason it is a slider.
  */
-const AMBIENT_WASH_MAX = 120;
+const AMBIENT_WASH_MAX = 600;
 const AMBIENT_WASH_DEFAULT = 0.3;
 
 /* A recessed lamp lit, and the same lamp dark. Its lens is drawn unlit, so
@@ -297,10 +301,10 @@ const BUILDERS = {
        * and it holds that colour while the light slider moves everything
        * around it, the way a real fixture does. */
       const strip = new THREE.Mesh(
-        new THREE.BoxGeometry(0.05, 0.014, AMBIENT_STRIP_LENGTH),
+        new THREE.BoxGeometry(0.055, 0.022, AMBIENT_STRIP_LENGTH),
         new THREE.MeshBasicMaterial({ color: 0x0b0c0e, toneMapped: false })
       );
-      place(strip, x, ROOM_H - 0.045, AMBIENT_STRIP_Z);
+      place(strip, x, ROOM_H - 0.055, AMBIENT_STRIP_Z);
       group.add(strip);
       strips.push(strip);
 
