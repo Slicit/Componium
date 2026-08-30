@@ -22,6 +22,7 @@ import * as THREE from 'three';
 import { containScale, aspectOf, SCREEN_ASPECT } from '../../core/picture';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { deviceState, seatPose, cssColour } from './readings';
 
 const ROOM_W = 5.0;
@@ -72,20 +73,6 @@ function softSprite() {
   return texture;
 }
 
-/* Additive and depth-write off: the cones and particles are volumes of light,
- * not surfaces. Writing depth would let one invisible cone punch a hole in the
- * one behind it. */
-function glowMaterial(colour, opacity) {
-  return new THREE.MeshBasicMaterial({
-    color: colour,
-    transparent: true,
-    opacity: opacity,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-  });
-}
-
 function surface(colour, roughness, metalness, envIntensity) {
   return new THREE.MeshStandardMaterial({
     color: colour,
@@ -97,6 +84,25 @@ function surface(colour, roughness, metalness, envIntensity) {
 
 function box(w, h, d, material) {
   return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+}
+
+/* The same thing with the edges taken off, for anything upholstered.
+ *
+ * A cushion with a hard 90 degree edge reads as a crate however it is
+ * coloured, because nothing soft in the world has one. The fillet is small —
+ * this is still a legibility model, not furniture — but it is what makes the
+ * couch stop looking like packing material.
+ *
+ * The radius is clamped to the piece rather than fixed. An arm 0.28 across
+ * cannot carry the fillet a seat base 1.08 deep can, and a radius past half
+ * the smallest dimension folds the geometry through itself.
+ */
+const EDGE_RADIUS = 0.05;
+
+function softBox(w, h, d, material, radius) {
+  const want = radius === undefined ? EDGE_RADIUS : radius;
+  const r = Math.min(want, Math.min(w, h, d) * 0.32);
+  return new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, r), material);
 }
 
 function place(mesh, x, y, z) {
@@ -134,12 +140,6 @@ const BUILDERS = {
     halo.scale.setScalar(0.25);
     group.add(halo);
 
-    /* A wide soft cone, so a wall washer reads as throwing light somewhere
-     * rather than floating. */
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.75, 1.9, 24, 1, true), glowMaterial(colour, 0));
-    cone.position.y = -0.95;
-    group.add(cone);
-
     let light = null;
     return {
       group: group,
@@ -147,12 +147,10 @@ const BUILDERS = {
       apply(level, params) {
         const c = new THREE.Color(colourOf(params));
         halo.material.color.copy(c);
-        cone.material.color.copy(c);
         /* The bulb never goes fully black: an off lamp is still a lamp, and a
          * device you cannot see is a device you cannot click. */
         bulb.material.color.copy(c).multiplyScalar(0.3 + level * 0.7).addScalar(0.1);
         halo.material.opacity = level * 0.3;
-        cone.material.opacity = level * 0.2;
         halo.scale.setScalar(0.2 + level * 0.8);
         if (light) {
           light.color.copy(c).addScalar(0.05);
@@ -165,25 +163,16 @@ const BUILDERS = {
 
   wind() {
     const group = new THREE.Group();
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.62, 2.6, 28, 1, true), glowMaterial(0xa8dcff, 0));
-    /* ConeGeometry points up the y axis with its apex at the top. Rotating by
-     * -90° about x aims it down -z, and the group is then turned to face the
-     * couch, so the apex sits at the fan and the mouth opens toward it. */
-    cone.rotation.x = -Math.PI / 2;
-    cone.position.z = 1.3;
-    group.add(cone);
-
     const streaks = particles(110, 0xbfe6ff, 0.075, 0.5, 0.5, 1.4);
     group.add(streaks.points);
 
     return {
       group: group,
       apply(level, params, dt) {
-        cone.material.opacity = level * 0.26;
-        cone.scale.set(0.7 + level * 0.5, 1, 0.55 + level * 1.0);
         streaks.material.opacity = level * 0.85;
-        /* Speed reads as speed. The stream is what tells you whether this is a
-         * breeze or a gust, and a static cone tells you neither. */
+        /* Speed reads as speed, and it is now the only thing that does: the
+         * cone that used to sit over this stream was a translucent shape
+         * hanging in the room, and it read as an object rather than as air. */
         streaks.drift(dt, 0, 0, 1.4 + level * 8.0, 2.6);
       },
     };
@@ -505,9 +494,10 @@ export class Room3D {
     place(stand, 0, 0, 0.38);
     scene.add(stand);
 
-    /* The couch, and the thing that moves. Built from boxes rather than a
-     * loaded model: a mesh file is a binary asset with a licence, a download
-     * and a loader, and the point of this view is legibility, not upholstery.
+    /* The couch, and the thing that moves. Built from rounded boxes rather
+     * than a loaded model: a mesh file is a binary asset with a licence, a
+     * download and a loader, and the point of this view is legibility, not
+     * upholstery.
      * Cushions are separate pieces mostly so the shape survives being tilted —
      * a single slab reads as a crate the moment the platform rolls. */
     const couch = new THREE.Group();
@@ -515,18 +505,18 @@ export class Room3D {
     const fabricLight = surface(0x554f61, 0.92, 0.02, 0.7);
     const leg = surface(0x23262d, 0.3, 0.65, 1.2);
 
-    couch.add(place(box(2.7, 0.34, 1.08, fabric), 0, 0.34, 0));
+    couch.add(place(softBox(2.7, 0.34, 1.08, fabric, 0.07), 0, 0.34, 0));
     for (const x of [-0.66, 0.66]) {
-      couch.add(place(box(1.28, 0.2, 0.98, fabricLight), x, 0.58, -0.02));
-      couch.add(place(box(1.24, 0.58, 0.19, fabricLight), x, 0.82, 0.44));
+      couch.add(place(softBox(1.28, 0.2, 0.98, fabricLight, 0.06), x, 0.58, -0.02));
+      couch.add(place(softBox(1.24, 0.58, 0.19, fabricLight, 0.06), x, 0.82, 0.44));
     }
-    couch.add(place(box(2.7, 0.8, 0.24, fabric), 0, 0.76, 0.54));
+    couch.add(place(softBox(2.7, 0.8, 0.24, fabric, 0.07), 0, 0.76, 0.54));
     for (const x of [-1.34, 1.34]) {
-      couch.add(place(box(0.28, 0.34, 1.08, fabric), x, 0.66, 0));
+      couch.add(place(softBox(0.28, 0.34, 1.08, fabric, 0.08), x, 0.66, 0));
     }
     for (const x of [-1.2, 1.2]) {
       for (const z of [-0.44, 0.44]) {
-        couch.add(place(box(0.07, 0.17, 0.07, leg), x, 0.085, z));
+        couch.add(place(softBox(0.07, 0.17, 0.07, leg, 0.02), x, 0.085, z));
       }
     }
     place(couch, 0, 0, SEAT_Z);
@@ -556,6 +546,8 @@ export class Room3D {
     const material = this.screen.material;
     if (!this.picture) {
       material.map = null;
+      /* Back to being a surface in the room, and lit like one. */
+      material.toneMapped = true;
       material.needsUpdate = true;
       this.screen.scale.set(1, 1, 1);
       return;
@@ -577,6 +569,15 @@ export class Room3D {
     texture.magFilter = THREE.LinearFilter;
     texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     this.pictureTexture = texture;
+    /* The film is a source image, not a surface in the room.
+     *
+     * The light slider moves toneMappingExposure, which belongs to the
+     * renderer and so reaches everything drawn — the screen with it, which
+     * meant turning the room down dimmed the film. Tone mapping also applies
+     * the ACES curve, which lifts and desaturates. Opting this one material
+     * out leaves the frame exactly as the picture pane shows it, and leaves
+     * the slider doing its actual job on the room. */
+    material.toneMapped = false;
     material.map = texture;
     material.needsUpdate = true;
   }
