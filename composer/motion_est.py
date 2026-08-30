@@ -211,42 +211,115 @@ def washout(values, window: int):
     return [v - s for v, s in zip(values, slow)]
 
 
+def split(values, window: int):
+    """Separate a signal into what it does slowly and what it does quickly.
+
+    The two halves add back to the original exactly, which is the property the
+    whole thing rests on: nothing is invented and nothing is lost, the movement
+    is only sent to two different places.
+
+    They go to different places because a platform can hold a tilt forever and
+    cannot hold a shift at all. Gravity does the work of a sustained tilt; a
+    sustained shift runs out of rail.
+    """
+    if window < 2 or len(values) < window:
+        return [0.0] * len(values), list(values)
+    slow = smooth(values, window)
+    return slow, [v - s for v, s in zip(values, slow)]
+
+
+def limit_return(values, fps: float, rate: float):
+    """Cap how fast a tilt may travel back toward neutral.
+
+    Asymmetric on purpose. Going out is the effect and should be as quick as
+    the film is; coming back is bookkeeping and should not be felt at all.
+    Below roughly three degrees a second the vestibular system cannot tell a
+    tilt returning from a tilt being held, which is the entire reason a
+    platform can pretend to sustain an acceleration — so the return has to stay
+    under that or the audience feels the machine reset itself.
+
+    The rate is in units of full travel per second, because the composer does
+    not know how many degrees the rig has. A quarter of full travel a second is
+    about three and a half degrees on a rig with fifteen degrees of pitch.
+    """
+    if rate <= 0 or fps <= 0 or not values:
+        return list(values)
+    step = rate / fps
+    out = [values[0]]
+    for now in values[1:]:
+        prev = out[-1]
+        if abs(now) < abs(prev) and abs(prev) - abs(now) > step:
+            now = prev - step if prev > 0 else prev + step
+        out.append(now)
+    return out
+
+
 def pose_series(movements, fps: float, width: int = 64, height: int = 36,
-                washout_seconds: float = 4.0, gain: float = 1.0):
+                washout_seconds: float = 4.0, gain: float = 1.0,
+                tilt_rate: float = 0.25):
     """Turn apparent camera movement into 6DOF pose.
 
     The mapping is deliberately literal about what can and cannot be known:
 
-      yaw    <- horizontal movement. A pan *is* a yaw.
-      pitch  <- vertical movement. A tilt is a pitch.
-      heave  <- vertical movement again, because a fall reads the same way and
-                a seat dropping is the effect people actually want from it.
+      pitch  <- vertical movement, the slow part of it. A shot that sinks
+                over six seconds tilts the seat over those six seconds and
+                stays there.
+      heave  <- vertical movement, the quick part. A fall reads the same way
+                and a seat dropping is the effect people actually want.
+      yaw    <- horizontal movement, the quick part. A snap pan is felt.
       surge  <- overall speed, as a forward push during fast movement.
 
       sway and roll are left at zero. Nothing in a single projection pair
       distinguishes a lateral track from a pan, or tells you about roll at all,
       and inventing them would be making things up.
 
-    Everything is washed out and scaled to a unit range. The instrument clamps
-    to the rig's declared travel afterwards, so these are intentions rather
-    than commands.
+    The split by speed is the whole of it. Washing everything out, as this used
+    to, means a movement slower than the washout window is not slowed down but
+    deleted: a six second plunge reached seven per cent of full travel at the
+    moment the camera had fully plunged, and a twelve second one fared no
+    better. Sending the slow half to a tilt instead costs no travel — gravity
+    holds a tilt indefinitely — and the same six second plunge now arrives at
+    full tilt in six seconds and stays there.
+
+    Everything is scaled to a unit range. The instrument clamps to the rig's
+    declared travel afterwards, so these are intentions rather than commands.
     """
     if not movements:
         return []
 
     win = max(2, int(washout_seconds * fps))
-    dxs = washout([m.dx for m in movements], win)
-    dys = washout([m.dy for m in movements], win)
+    slow_dy, fast_dy = split([m.dy for m in movements], win)
+    _, fast_dx = split([m.dx for m in movements], win)
     speeds = smooth([m.speed for m in movements], max(2, int(fps)))
 
+    # The tilt path needs its own calibration, and using the shift path-s was
+    # worth measuring: it left a real sustained plunge at a tenth of full
+    # travel.
+    #
+    # The shift path divides by half a frame because a jump of half a frame
+    # between two samples is as violent as anything gets. The tilt path is fed
+    # an average instead, so the same divisor asks for an average of half a
+    # frame per sample sustained across the whole window, which is not a camera
+    # move, it is a cut. Full tilt is instead a move that carries the frame by
+    # its own height over the window: sustained, unmistakable, and reachable.
+    tilt_scale = max(1e-6, float(height) / max(2.0, washout_seconds * fps))
+
     peak_speed = max(speeds) if speeds else 0.0
+
+    # A tilt is held, so it is the one thing that has to be let go of gently —
+    # and the cap belongs here, on the tilt itself, where a rate of a quarter
+    # means a quarter of full travel a second. Applied to the pixels upstream
+    # it silently meant something else the moment the tilt scale changed.
+    tilts = limit_return(
+        [clamp(v / tilt_scale * gain) for v in slow_dy], fps, tilt_rate)
+
     out = []
     for i in range(len(movements)):
         # Normalised by half the frame, so a movement of half a frame per
         # sample is full deflection. Anything faster is already extreme.
-        yaw = clamp(dxs[i] / (width / 2.0) * gain)
-        pitch = clamp(dys[i] / (height / 2.0) * gain)
-        heave = clamp(-dys[i] / (height / 2.0) * gain)
+        yaw = clamp(fast_dx[i] / (width / 2.0) * gain)
+        pitch = tilts[i]
+        heave = clamp(-fast_dy[i] / (height / 2.0) * gain)
         surge = clamp((speeds[i] / peak_speed) * gain) if peak_speed > 0 else 0.0
         out.append({
             "surge": round(surge * 0.6, 4),
