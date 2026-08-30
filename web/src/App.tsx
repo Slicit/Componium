@@ -23,6 +23,10 @@ import { useViewport } from './ui/useViewport';
 import { Viewports } from './ui/Viewports';
 import { filmForScore } from './core/film';
 import { useVersions } from './ui/useVersions';
+import { Effects } from './ui/Effects';
+import { insertPreset } from './core/edits';
+import { channelsOf, kindOf } from './core/score';
+import type { Preset } from './core/presets';
 import { canCollapse } from './core/layout';
 import { menuFor } from './ui/menuItems';
 import { addTrack, copy, missingInstruments, nudge, paste, splitCue, duplicateCues, type Clip } from './core/edits';
@@ -152,6 +156,34 @@ export function App() {
   }, [film, history, onView]);
 
   const versions = useVersions(film, openVersion);
+
+  /* The track the effects library is talking about: whatever was last touched
+   * in the timeline. Deliberately the focus rather than the selection — you
+   * pick a track by clicking in it, and requiring something to be selected
+   * first would mean selecting a point in order to be offered a shape that
+   * replaces it. */
+  const target = (edit.focus && score?.tracks?.[edit.focus.track]) || null;
+  const targetKind = target ? kindOf(target.instrument, rig) : '';
+
+  /* Previewing drives the room through the same force map the sliders use, so
+   * the room has one idea of "this device is at this level regardless of the
+   * score" rather than two that have to agree. */
+  const preview = useCallback((instrument: string, level: number | null) => {
+    setForced((was) => {
+      const next = new Map(was);
+      if (level === null) next.delete(instrument); else next.set(instrument, level);
+      return next;
+    });
+  }, []);
+
+  const insert = useCallback((preset: Preset) => {
+    if (!target || !score) return;
+    const cmd = insertPreset(target, preset, time, channelsOf(target, rig));
+    if (!cmd) return;
+    history.run(cmd);
+    history.seal();
+    onView();
+  }, [target, score, rig, time, history, onView]);
 
   const openFilm = useCallback(async (name: string) => {
     setFilm(name);
@@ -624,7 +656,20 @@ export function App() {
               onView={views.onCamera}
               revision={history.version}
             />
-            {split.force && <Force rig={rig} forced={forced} onChange={setForced} />}
+            {split.force && (
+              <div className="room-panels">
+                <Effects
+                  instrument={target?.instrument ?? null}
+                  kind={targetKind}
+                  at={time}
+                  fps={fps}
+                  canInsert={!!target}
+                  onInsert={insert}
+                  onPreview={preview}
+                />
+                <Force rig={rig} forced={forced} onChange={setForced} />
+              </div>
+            )}
           </div>
         )}
       </div>

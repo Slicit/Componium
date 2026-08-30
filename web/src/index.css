@@ -733,3 +733,43 @@ button:hover { border-color: #3a4553; }
   .lib-row { grid-template-columns: minmax(0, 1fr) var(--lib-actions); }
   .lib-status { display: none; }
 }
+
+/* --- the effects library --- */
+
+.room-panels { display: flex; flex-direction: column; min-height: 0; flex: 0 0 auto; max-height: 55%; }
+.fx { display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--line); }
+.fx-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; padding: 6px 0 4px;
+}
+.fx-head strong { font-weight: 500; color: var(--fg, #d7dee6); }
+.fx-at { font-variant-numeric: tabular-nums; }
+.fx-note { margin: 0; padding: 8px 0; }
+.fx-list { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 2px; }
+.fx-row { display: flex; }
+.fx-pick {
+  display: grid;
+  grid-template-columns: 54px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  background: none;
+  font-size: 12px;
+}
+.fx-pick:hover { border-color: var(--line); }
+.fx-row.on .fx-pick { border-color: var(--accent); background: #141b24; }
+.fx-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-secs { font-variant-numeric: tabular-nums; }
+/* The thumbnail is the shape it will insert, drawn from the same nodes. */
+.fx-shape { display: block; overflow: visible; }
+.fx-shape path { fill: none; stroke: var(--accent); stroke-width: 1.3; }
+.fx-shape .fx-base { stroke: var(--line); stroke-width: 1; }
+.fx-foot {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 0 3px; border-top: 1px solid var(--line);
+}
+.fx-hint { flex: 1 1 auto; line-height: 1.35; }
+.fx-insert { white-space: nowrap; }

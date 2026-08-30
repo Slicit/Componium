@@ -127,7 +127,16 @@ export function useEditing(opts: {
     } else if (!additive) {
       picked = new Set();
       setSelected(picked);
-      setFocus(null);
+      /* Clicking empty space in a lane still says which track you are working
+       * in, even though it selects nothing.
+       *
+       * Focus used to be cleared here, so a track with nothing on it could
+       * never become the thing being worked on — which is exactly backwards
+       * for authoring: an empty track is the one you most need to point at,
+       * and you had to select a point that was not there in order to do it.
+       * The effects library reads this to know what it is offering shapes for.
+       */
+      setFocus('row' in hit && hit.row ? { track: hit.row.track } : null);
     }
 
     if (hit.k === 'cue') {

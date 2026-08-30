@@ -6,7 +6,8 @@
  * are, and rules are testable in node.
  */
 
-import { batch, insertCues, insertPoints, movePoints, moveCues, removeCues, resizeCues, type Command } from './history';
+import { batch, insertCues, insertPoints, movePoints, moveCues, removeCues, removePoints, resizeCues, type Command } from './history';
+import { build, type Preset } from './presets';
 import { clamp, clamp01, round3, type Seconds } from './time';
 import { cueEnd, isHSI, isSpan, valueAt, channelsOf, type Cue, type Instrument, type Point, type Rig, type Score, type Track } from './score';
 
@@ -275,4 +276,45 @@ export function removeTrack(score: Score, track: Track): Command {
     track,
     at: (score.tracks ?? []).indexOf(track),
   };
+}
+
+/* --- the effects library ------------------------------------------------- */
+
+/**
+ * Drop a preset onto a track at a moment.
+ *
+ * Whatever already occupies the span is removed first. The alternative is to
+ * interleave the new shape with the old points, which produces a curve that is
+ * neither of them and that nobody asked for — and since the whole thing is one
+ * undoable command, replacing is the option a person can take back.
+ *
+ * What lands is ordinary points and ordinary cues. Nothing marks them as
+ * having come from a preset, because nothing should: the shape is a starting
+ * point and the moment it is inserted it belongs to the score.
+ */
+export function insertPreset(
+  track: Track,
+  preset: Preset,
+  at: Seconds,
+  channels: readonly string[],
+  opts: { seconds?: number; scale?: number } = {},
+): Command | null {
+  const made = build(preset, at, channels, opts);
+  const cmds: Command[] = [];
+
+  if (made.cues?.length) {
+    const clashing = (track.cues ?? []).filter((c) => c.t >= made.from && c.t <= made.to);
+    if (clashing.length) cmds.push(removeCues(track, clashing));
+    cmds.push(insertCues(track, made.cues));
+  } else if (made.points?.length) {
+    const clashing = (track.points ?? []).filter((p) => p.t >= made.from && p.t <= made.to);
+    /* Left alone when clearing the span would empty the track: the format
+     * refuses a curve of one point, and a preset that replaced everything
+     * would be inserting its own shape into a score that no longer parses. */
+    if (clashing.length) cmds.push(removePoints(track, clashing));
+    cmds.push(insertPoints(track, made.points));
+  }
+
+  if (!cmds.length) return null;
+  return batch('Insert ' + preset.name, cmds);
 }
