@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { ALL, DEFAULT_PAGE_SIZE, PAGE_SIZES, matches, paginate } from '../core/paging';
+import { Steps, type Step } from './Steps';
 
 const POLL_MS = 700;
 
@@ -31,6 +32,10 @@ interface Job {
    * and the whole reason an interrupted feature is worth resuming rather than
    * starting again. */
   chunks?: Chunk[];
+  /* What this run did and what each part cost. An analysis is several passes
+   * with very different costs, so which part took the time is the question
+   * actually asked. */
+  steps?: Step[];
 }
 
 /** How many pieces of this film are finished and will not be redone. */
@@ -78,6 +83,9 @@ export function Library(props: { onOpen: (film: string) => void }) {
   const polling = useRef(false);
   const file = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
+  /* Which film's steps are open. One at a time: a page of ten expanded runs
+   * is a wall, and comparing two is done in the version picker anyway. */
+  const [open, setOpen] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   /* The page size is remembered and the filter is not. One is how you like to
    * work; the other is what you were looking for a minute ago, and having it
@@ -298,6 +306,15 @@ export function Library(props: { onOpen: (film: string) => void }) {
                 >Prepare</button>
               )}
             </span>
+            <span className="slot">
+              {(e.job?.steps?.length ?? 0) > 0 && (
+                <button
+                  onClick={() => setOpen(open === e.film ? null : e.film)}
+                  aria-expanded={open === e.film}
+                  title="What this run did, and how long each part took"
+                >{open === e.film ? 'hide' : 'steps'}</button>
+              )}
+            </span>
             <span className="slot slot-icon">
               {data.canUpload && (
                 <button
@@ -309,6 +326,11 @@ export function Library(props: { onOpen: (film: string) => void }) {
               )}
             </span>
           </div>
+          {open === e.film && e.job?.steps && (
+            <div className="lib-steps">
+              <Steps steps={e.job.steps} />
+            </div>
+          )}
         </div>
       ))}
 

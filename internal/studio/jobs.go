@@ -75,6 +75,10 @@ type Job struct {
 	// away what it said last time. Off unless asked: it is minutes of a GPU,
 	// and the answer does not change when a threshold does.
 	LookAgain bool `json:"lookAgain,omitempty"`
+	// Steps is what this run did, in order, with what each part cost. An
+	// analysis is several passes now and they differ by orders of magnitude,
+	// so "it took nineteen minutes" is not the useful sentence.
+	Steps []Step `json:"steps,omitempty"`
 }
 
 // jobKey identifies a job. Kind is part of it because a film can legitimately

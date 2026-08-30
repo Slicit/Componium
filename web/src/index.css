@@ -807,3 +807,34 @@ button:hover { border-color: #3a4553; }
   .room-split { grid-template-columns: 1fr; }
   .room-side { border-left: none; padding-left: 0; border-top: 1px solid var(--line); padding-top: 8px; max-height: 45%; }
 }
+
+/* --- what a run did --- */
+
+.lib-steps {
+  grid-column: 1 / -1;
+  padding: 6px 0 10px 0;
+  border-top: 1px dashed var(--line);
+  margin-top: 4px;
+}
+.steps { display: flex; flex-direction: column; gap: 2px; }
+.step {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 120px 56px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.step-at { font-variant-numeric: tabular-nums; }
+.step-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step-secs { text-align: right; font-variant-numeric: tabular-nums; }
+/* Bars are drawn against the longest step, not the total: the question is
+   which one was slow, and a step worth 2% of a run is invisible otherwise. */
+.step-bar { height: 6px; background: #141b24; border-radius: 3px; overflow: hidden; }
+.step-fill { display: block; height: 100%; background: var(--accent); opacity: 0.75; }
+.step.running .step-fill { opacity: 0.35; }
+.step.failed .step-fill { background: var(--warn); }
+.step.failed .step-name { color: var(--warn); }
+.step-total { border-top: 1px solid var(--line); margin-top: 3px; padding-top: 3px; }
+.step-total .step-secs { font-variant-numeric: tabular-nums; }
+.step-notes { margin: 6px 0 0; padding-left: 16px; line-height: 1.5; }
+.step-notes strong { font-weight: 500; }

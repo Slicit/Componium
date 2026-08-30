@@ -807,6 +807,8 @@ func (s *Server) handleVersions(w http.ResponseWriter, r *http.Request) {
 			"cues":     v.Cues,
 			"points":   v.Points,
 			"tracks":   v.Tracks,
+			"steps":    v.Steps,
+			"seconds":  Elapsed(v.Steps),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"film": film, "versions": out})

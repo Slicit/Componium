@@ -63,9 +63,13 @@ func (j *Jobs) runAnalyse(film string) error {
 		return err
 	}
 
+	j.clearSteps(film)
+	j.beginStep(film, "preparing")
+
 	source := j.analysisSource(film)
 	info, err := probe(source)
 	if err != nil {
+		j.endSteps(film, JobFailed, err.Error())
 		return err
 	}
 
@@ -117,6 +121,9 @@ func (j *Jobs) runAnalyse(film string) error {
 		j.update(JobAnalyse, film, false, func(job *Job) {
 			job.Label = "reusing what the model already saw"
 		})
+		j.noteStep(film, "reusing what the model already saw")
+	} else if os.Getenv("COMPONIUM_VLM_COMMAND") != "" {
+		j.noteStep(film, "the model will look at this film")
 	}
 
 	start := resumeAt(chunks)
@@ -126,13 +133,16 @@ func (j *Jobs) runAnalyse(film string) error {
 				job.Label = fmt.Sprintf("resuming at chunk %d of %d", start+1, len(chunks))
 			})
 		}
+		j.beginStep(film, "measuring the audio")
 		peak, err := j.audioPeak(ctx, source)
 		if err != nil {
+			j.endSteps(film, JobFailed, err.Error())
 			return err
 		}
 
 		for i := start; i < len(chunks); i++ {
 			began := time.Now()
+			j.beginStep(film, fmt.Sprintf("analysing %d of %d", i+1, len(chunks)))
 			j.markChunk(film, i, JobRunning, "")
 			// Only the last chunk of a run that reaches the film's own end is
 			// open ended. Under a limit, every chunk has a far edge.
@@ -141,6 +151,7 @@ func (j *Jobs) runAnalyse(film string) error {
 				openEnded, look)
 			if err != nil {
 				j.markChunk(film, i, JobFailed, err.Error())
+				j.endSteps(film, JobFailed, err.Error())
 				return fmt.Errorf("chunk %d of %d (%s to %s): %w",
 					i+1, len(chunks), clock(chunks[i].From), clock(chunks[i].To), err)
 			}
@@ -152,7 +163,9 @@ func (j *Jobs) runAnalyse(film string) error {
 		job.Progress = 0.99
 		job.Label = "joining the pieces"
 	})
+	j.beginStep(film, "joining the pieces")
 	if err := j.mergePartials(film, out, j.note(len(chunks))); err != nil {
+		j.endSteps(film, JobFailed, err.Error())
 		return err
 	}
 
@@ -160,6 +173,7 @@ func (j *Jobs) runAnalyse(film string) error {
 		// The labels only exist inside the vision pass, so a rebuild that
 		// skipped it has no vision cues at all until the kept description is
 		// applied to it.
+		j.beginStep(film, "applying what the model saw")
 		remapCtx, stopRemap := context.WithTimeout(context.Background(), calmTimeout)
 		if said, err := j.runRemap(remapCtx, film, out); err != nil {
 			j.update(JobAnalyse, film, false, func(job *Job) {
@@ -177,17 +191,23 @@ func (j *Jobs) runAnalyse(film string) error {
 	j.update(JobAnalyse, film, false, func(job *Job) {
 		job.Label = "finding the quiet parts"
 	})
+	j.beginStep(film, "finding the quiet parts")
 	calmCtx, stop := context.WithTimeout(context.Background(), calmTimeout)
 	defer stop()
 	if said, err := j.runCalm(calmCtx, film, out); err != nil {
 		j.update(JobAnalyse, film, false, func(job *Job) {
 			job.Label = "scored, but not quieted: " + err.Error()
 		})
+		j.endSteps(film, JobFailed, err.Error())
+		return nil
 	} else if said != "" {
 		j.update(JobAnalyse, film, true, func(job *Job) {
 			job.Label = said
 		})
+		j.endSteps(film, "", said)
+		return nil
 	}
+	j.endSteps(film, "", "")
 	return nil
 }
 

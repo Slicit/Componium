@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import type { Step } from './Steps';
 
 export interface Version {
   id: string;
@@ -18,6 +19,11 @@ export interface Version {
   complete: boolean;
   cues: number;
   points: number;
+  /* What the run that made this score did. Kept with the version because the
+   * job is overwritten by the next run, and "why was that one slower" is a
+   * question asked afterwards. */
+  steps?: Step[];
+  seconds?: number;
 }
 
 export interface Versions {

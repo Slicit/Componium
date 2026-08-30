@@ -51,6 +51,11 @@ type Version struct {
 	// versions to compare, not by anything that has to parse it.
 	Note   string        `json:"note,omitempty"`
 	Tracks []TrackSummary `json:"tracks,omitempty"`
+	// Steps is what the run that made this score did, and what each part of
+	// it cost. Kept with the version rather than only on the job, because the
+	// job is overwritten by the next run and the question "why was that one
+	// slower" is asked afterwards.
+	Steps []Step `json:"steps,omitempty"`
 	Cues   int            `json:"cues"`
 	Points int            `json:"points"`
 }
@@ -147,6 +152,7 @@ const completeSlack = 60.0
 // score is the product and the history is a convenience — so the caller is
 // expected to log the error and carry on.
 func (j *Jobs) Keep(film string, sc *score.Score, note string) (Version, error) {
+	steps := j.stepsOf(film)
 	dir := j.historyDir(film)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Version{}, err
@@ -166,6 +172,7 @@ func (j *Jobs) Keep(film string, sc *score.Score, note string) (Version, error) 
 		return Version{}, err
 	}
 	v := summarise(sc, id, note)
+	v.Steps = steps
 	body, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return v, err
