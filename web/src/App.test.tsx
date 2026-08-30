@@ -175,3 +175,85 @@ describe('the timeline itself', () => {
     expect((screen.getByRole('button', { name: 'Saved' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
+
+describe('the inspector', () => {
+  /* Dragging finds a shape; a typed field pins it down. Both belong in an
+   * editor, and neither should need a mode to be chosen first. */
+  it('opens on a plain click and shows the values', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelectorAll('.tl-name').length).toBe(2));
+
+    const surface = document.querySelector('.tl-surface') as HTMLElement;
+    Object.defineProperty(surface, 'clientWidth', { configurable: true, value: 1000 });
+    surface.getBoundingClientRect = () => ({
+      left: 0, top: 0, width: 1000, height: 300, right: 1000, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+    });
+
+    /* The gust runs 10s to 14s of a 120s film, on the first lane, which the
+     * default view shows a tenth of — so fit first, then aim at 12s. */
+    fireEvent.keyDown(window, { key: 'f' });
+    fireEvent.pointerDown(surface, { clientX: 100, clientY: 26 + 20, button: 0 });
+    fireEvent.pointerUp(window, { clientX: 100, clientY: 26 + 20 });
+
+    await waitFor(() => expect(document.querySelector('.insp')).not.toBeNull());
+    expect(document.querySelector('.insp-what')!.textContent).toBe('wind.main');
+    const labels = Array.from(document.querySelectorAll('.insp-label')).map((l) => l.textContent);
+    expect(labels).toContain('Time');
+    expect(labels).toContain('Length');
+    expect(labels).toContain('intensity');
+  });
+
+  it('closes again', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelectorAll('.tl-name').length).toBe(2));
+    const surface = document.querySelector('.tl-surface') as HTMLElement;
+    Object.defineProperty(surface, 'clientWidth', { configurable: true, value: 1000 });
+    surface.getBoundingClientRect = () => ({
+      left: 0, top: 0, width: 1000, height: 300, right: 1000, bottom: 300, x: 0, y: 0, toJSON: () => ({}),
+    });
+    fireEvent.keyDown(window, { key: 'f' });
+    fireEvent.pointerDown(surface, { clientX: 100, clientY: 46, button: 0 });
+    fireEvent.pointerUp(window, { clientX: 100, clientY: 46 });
+    await waitFor(() => expect(document.querySelector('.insp')).not.toBeNull());
+
+    fireEvent.click(document.querySelector('.insp-close')!);
+    await waitFor(() => expect(document.querySelector('.insp')).toBeNull());
+  });
+});
+
+describe('arranging the tracks', () => {
+  it('reorders by dragging one group onto another', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelectorAll('.tl-name').length).toBe(2));
+    const names = () => Array.from(document.querySelectorAll('.tl-name')).map((n) => n.textContent);
+    expect(names()).toEqual(['wind.main', 'light.ambient']);
+
+    const heads = document.querySelectorAll('.tl-head.is-head');
+    const wind = heads[0];
+    const light = heads[1];
+    const data = { effectAllowed: '', dropEffect: '', setData: () => {}, getData: () => 'wind.main' };
+
+    fireEvent.dragStart(wind, { dataTransfer: data });
+    fireEvent.dragOver(light, { dataTransfer: data });
+    fireEvent.drop(light, { dataTransfer: data });
+
+    await waitFor(() => expect(names()).toEqual(['light.ambient', 'wind.main']));
+  });
+
+  it('saves the arrangement beside the score rather than in it', async () => {
+    render(<App />);
+    await waitFor(() => expect(document.querySelectorAll('.tl-name').length).toBe(2));
+    const heads = document.querySelectorAll('.tl-head.is-head');
+    const data = { effectAllowed: '', dropEffect: '', setData: () => {}, getData: () => 'wind.main' };
+    fireEvent.dragStart(heads[0], { dataTransfer: data });
+    fireEvent.drop(heads[1], { dataTransfer: data });
+
+    await waitFor(() => {
+      const puts = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+        .filter((c) => c[0] === '/api/layout' && (c[1] as RequestInit | undefined)?.method === 'PUT');
+      expect(puts.length).toBeGreaterThan(0);
+      const body = JSON.parse((puts[0][1] as RequestInit).body as string);
+      expect(body.order).toEqual(['light.ambient', 'wind.main']);
+    }, { timeout: 2000 });
+  });
+});

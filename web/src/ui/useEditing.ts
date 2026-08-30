@@ -40,6 +40,9 @@ export interface Editing {
   onDoubleClick: (e: React.MouseEvent, geom: Geometry) => void;
   onContextMenu: (e: React.MouseEvent, geom: Geometry) => void;
   menu: { x: number; y: number; hit: Hit } | null;
+  /** What a plain click landed on, for the inspector. Null when nothing is. */
+  focus: { track: number; cue?: Cue; point?: Point; channel?: string } | null;
+  clearFocus: () => void;
   closeMenu: () => void;
   setSelected: (s: Selected) => void;
   deleteSelection: () => void;
@@ -70,6 +73,7 @@ export function useEditing(opts: {
   const [guide, setGuide] = useState<number | null>(null);
   const [cursor, setCursor] = useState('crosshair');
   const [menu, setMenu] = useState<{ x: number; y: number; hit: Hit } | null>(null);
+  const [focus, setFocus] = useState<Editing['focus']>(null);
   const [version, setVersion] = useState(0);
   const gesture = useRef(0);
 
@@ -114,9 +118,16 @@ export function useEditing(opts: {
         picked = new Set([item]);
       }
       setSelected(picked);
+      /* A plain click opens the inspector on what was clicked. Dragging is how
+       * you find a shape and a typed field is how you pin it down; both want
+       * to be available without choosing a mode first. */
+      setFocus(hit.k === 'cue'
+        ? { track: hit.row.track, cue: hit.cue }
+        : { track: hit.row.track, point: hit.point, channel: hit.channel });
     } else if (!additive) {
       picked = new Set();
       setSelected(picked);
+      setFocus(null);
     }
 
     if (hit.k === 'cue') {
@@ -376,9 +387,10 @@ export function useEditing(opts: {
   }, [context, selected]);
 
   const closeMenu = useCallback(() => setMenu(null), []);
+  const clearFocus = useCallback(() => setFocus(null), []);
 
   return {
-    selected, band, guide, cursor, version, menu,
+    selected, band, guide, cursor, version, menu, focus, clearFocus,
     onPointerDown, onPointerMove, onDoubleClick, onContextMenu, closeMenu,
     deleteSelection, clearSelection, selectAll, setSelected,
   };

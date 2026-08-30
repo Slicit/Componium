@@ -158,6 +158,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/library", s.handleLibrary)
 	mux.HandleFunc("/api/build", s.handleBuild)
 	mux.HandleFunc("/api/prepare", s.handlePrepare)
+	mux.HandleFunc("/api/layout", s.handleLayout)
 	// The rebuilt studio, alongside the original rather than instead of it.
 	mux.Handle("/v2/", s.handleWeb())
 	mux.Handle("/v2", http.RedirectHandler("/v2/", http.StatusFound))

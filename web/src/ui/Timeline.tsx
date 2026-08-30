@@ -10,7 +10,7 @@
  * from the renderer, and what the numbers mean comes from the view model.
  */
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TimeView, ticks } from '../core/view';
 import { canCollapse, layout, summaryLabel, type Layout } from '../core/layout';
 import { timecode } from '../core/time';
@@ -233,11 +233,17 @@ export function TrackHeads(props: {
   order: string[];
   onToggleCollapse: (instrument: string) => void;
   onMove: (instrument: string, by: number) => void;
+  /** Drop `instrument` before `before`, or at the end when it is null. */
+  onMoveTo: (instrument: string, before: string | null) => void;
   /** Null when the rig has nothing left to add. */
   onAddTrack: ((e: React.MouseEvent) => void) | null;
   revision: number;
 }) {
-  const { score, rig, collapsed, order, onToggleCollapse, onMove, onAddTrack, revision } = props;
+  const { score, rig, collapsed, order, onToggleCollapse, onMove, onMoveTo, onAddTrack, revision } = props;
+  /* Which group is being carried, and which one it would land in front of.
+   * Held here rather than in the app: it is entirely about this column. */
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
   const lay = useMemo(
     () => layout(score.tracks ?? [], { collapsed, rig, order }),
     [score, collapsed, rig, order, revision],
@@ -248,8 +254,35 @@ export function TrackHeads(props: {
       {lay.rows.map((row, i) => (
         <div
           key={row.instrument + '/' + (row.channel ?? '') + i}
-          className={'tl-head' + (row.head ? ' is-head' : '')}
+          className={'tl-head'
+            + (row.head ? ' is-head' : '')
+            + (dragging === row.instrument ? ' is-dragging' : '')
+            + (over === row.instrument && row.head ? ' is-over' : '')}
           style={{ height: row.h }}
+          /* Only the row carrying the name is a handle: dragging a channel
+             lane would be ambiguous about what is being moved. */
+          draggable={row.head}
+          onDragStart={(e) => {
+            if (!row.head) return;
+            setDragging(row.instrument);
+            e.dataTransfer.effectAllowed = 'move';
+            /* Firefox refuses to start a drag without data on it. */
+            e.dataTransfer.setData('text/plain', row.instrument);
+          }}
+          onDragEnd={() => { setDragging(null); setOver(null); }}
+          onDragOver={(e) => {
+            if (!dragging || dragging === row.instrument) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            setOver(row.instrument);
+          }}
+          onDrop={(e) => {
+            if (!dragging || dragging === row.instrument) return;
+            e.preventDefault();
+            onMoveTo(dragging, row.instrument);
+            setDragging(null);
+            setOver(null);
+          }}
         >
           {row.head ? (
             <>

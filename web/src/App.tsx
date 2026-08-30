@@ -14,6 +14,7 @@ import { Overview } from './ui/Overview';
 import { useEditing } from './ui/useEditing';
 import { History } from './core/history';
 import { Menu } from './ui/Menu';
+import { Inspector } from './ui/Inspector';
 import { canCollapse } from './core/layout';
 import { menuFor } from './ui/menuItems';
 import { addTrack, copy, missingInstruments, nudge, paste, splitCue, duplicateCues, type Clip } from './core/edits';
@@ -74,11 +75,24 @@ export function App() {
         setScore(s);
         setRig(r);
         setFilms(m ?? []);
+        void loadLayout();
       } catch (e) {
         if (!gone) setError(e instanceof Error ? e.message : String(e));
       }
     })();
     return () => { gone = true; };
+  }, []);
+
+  /* The arrangement lives beside the score, not in it. Loaded whenever the
+   * open score changes, saved whenever it is rearranged. */
+  const loadLayout = useCallback(async () => {
+    try {
+      const res = await fetch('/api/layout');
+      if (!res.ok) return;
+      const l = await res.json();
+      setOrder(Array.isArray(l.order) ? l.order : []);
+      setCollapsed(new Set(Array.isArray(l.collapsed) ? l.collapsed : []));
+    } catch { /* an arrangement is a convenience, never a blocker */ }
   }, []);
 
   const openFilm = useCallback(async (name: string) => {
@@ -91,7 +105,8 @@ export function App() {
     }
     setScore(await res.json());
     setTime(0);
-  }, []);
+    void loadLayout();
+  }, [loadLayout]);
 
   /* --- transport --- */
 
@@ -332,6 +347,45 @@ export function App() {
     });
   }, []);
 
+  /* Saved on a timer rather than on every drag: reordering is a burst of small
+   * changes and each one would otherwise be a request. */
+  useEffect(() => {
+    if (!order.length && !collapsed.size) return;
+    const id = setTimeout(() => {
+      void fetch('/api/layout', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ order, collapsed: [...collapsed] }),
+      }).catch(() => { /* losing an arrangement is not worth an error */ });
+    }, 600);
+    return () => clearTimeout(id);
+  }, [order, collapsed]);
+
+  /** Put an instrument at a position, for a drag rather than a nudge. */
+  const moveTo = useCallback((instrument: string, before: string | null) => {
+    setOrder((prev) => {
+      const ids = prev.length ? [...prev] : (score?.tracks ?? []).map((t) => t.instrument);
+      const from = ids.indexOf(instrument);
+      if (from < 0) return prev;
+
+      /* The target's index is taken *before* the removal, and reused after it.
+       *
+       * Looking it up afterwards is the obvious version and it cannot move a
+       * track downwards at all: removing wind from [wind, light] leaves
+       * [light], indexOf(light) is 0, and inserting there puts wind back
+       * exactly where it started. Because the removal shifts everything after
+       * it down by one, the pre-removal index lands the dragged track *after*
+       * the target when moving down and *before* it when moving up — which is
+       * what dropping onto something means in both directions.
+       */
+      let at = before === null ? ids.length : ids.indexOf(before);
+      if (at < 0) at = ids.length;
+      ids.splice(from, 1);
+      ids.splice(at, 0, instrument);
+      return ids;
+    });
+  }, [score]);
+
   const move = useCallback((instrument: string, by: number) => {
     setOrder((prev) => {
       const ids = prev.length ? [...prev] : (score?.tracks ?? []).map((t) => t.instrument);
@@ -412,6 +466,7 @@ export function App() {
             order={order}
             onToggleCollapse={toggleCollapse}
             onMove={move}
+            onMoveTo={moveTo}
             revision={history.version}
             onAddTrack={missingInstruments(score, rig).length
               ? (e) => setAddMenu({ x: e.clientX, y: e.clientY })
@@ -475,6 +530,20 @@ export function App() {
             })}
           />
         )}
+        <Inspector
+          score={score}
+          history={history}
+          fps={fps}
+          selection={edit.focus ? {
+            track: score.tracks[edit.focus.track],
+            cue: edit.focus.cue,
+            point: edit.focus.point,
+            channel: edit.focus.channel,
+          } : null}
+          onChanged={onView}
+          onSeek={seek}
+          onClose={edit.clearFocus}
+        />
         <p className="legend dim small">
           wheel scrolls · ⇧/⌘ wheel zooms · drag the ruler to scrub · drag the strip below to move
           · <kbd>←</kbd><kbd>→</kbd> frame · <kbd>F</kbd> fit
