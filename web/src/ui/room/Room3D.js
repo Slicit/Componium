@@ -187,11 +187,17 @@ const BUILDERS = {
     const group = new THREE.Group();
     const colour = 0xffffff;
 
-    const bulb = new THREE.Mesh(
-      new THREE.SphereGeometry(0.09, 16, 12),
-      new THREE.MeshBasicMaterial({ color: colour })
-    );
-    group.add(bulb);
+    /* No bulb.
+     *
+     * There was a sphere here standing in for the fixture, and it read as a
+     * ball hanging in the room rather than as a light in it. What a light
+     * actually looks like is the glow and what the glow lands on, both of
+     * which are below and neither of which needed it.
+     *
+     * The cost is that a light doing nothing is now invisible, which would
+     * matter if anything in this view could be clicked. Nothing can — there is
+     * no raycasting here at all — so it does not.
+     */
 
     /* The glow is a camera-facing sprite, not a sphere.
      *
@@ -214,9 +220,6 @@ const BUILDERS = {
       apply(level, params) {
         const c = new THREE.Color(colourOf(params));
         halo.material.color.copy(c);
-        /* The bulb never goes fully black: an off lamp is still a lamp, and a
-         * device you cannot see is a device you cannot click. */
-        bulb.material.color.copy(c).multiplyScalar(0.3 + level * 0.7).addScalar(0.1);
         halo.material.opacity = level * 0.3;
         halo.scale.setScalar(0.2 + level * 0.8);
         if (light) {
@@ -492,16 +495,23 @@ export class Room3D {
     /* One inside-out box is the whole room. BackSide means the camera sees the
      * far walls and never the near ones, so the room is never occluded by the
      * wall you are looking through. */
-    /* Every wall but the one behind the television, which gets its own panel
-     * below because it is a different material and a different problem. */
     this.textures = [];
-    const walls = texture('walls.jpg', 3, 3);
-    this.textures.push(walls);
+    /* Flat, and deliberately so.
+     *
+     * A photograph of a painted wall was tried here and read worse than a
+     * colour does: at the size a wall is drawn, the grain of the photograph
+     * turns into a pattern the eye picks out, and a wall that draws attention
+     * is a wall competing with the devices in front of it. The one behind the
+     * television keeps its panel, being an actual material rather than a
+     * surface that is only supposed to recede.
+     *
+     * Neutral rather than the blue-grey it was: with the fill lighting able to
+     * reach zero now, a wall with a hue of its own tints everything the film
+     * throws onto it. */
     const shell = box(ROOM_W, ROOM_H, ROOM_D, new THREE.MeshStandardMaterial({
-      color: 0x3b424e, roughness: 0.86, metalness: 0.02,
+      color: 0x4e5157, roughness: 0.9, metalness: 0.0,
       side: THREE.BackSide, envMapIntensity: 0.55,
     }));
-    shell.material.map = walls;
     shell.receiveShadow = true;
     place(shell, 0, ROOM_H / 2, ROOM_D / 2);
     scene.add(shell);
@@ -914,15 +924,38 @@ export class Room3D {
   setBrightness(v) {
     const level = Math.max(0, Math.min(1, Number(v)));
     this.brightness = level;
-    const factor = Math.pow(16, level - 0.5);
+    /* Square rather than exponential, so the bottom of the slider is dark and
+     * not merely dim.
+     *
+     * The old curve was 16^(level-0.5), which bottomed out at a quarter of the
+     * fill lighting — enough to see the room by, and therefore enough to hide
+     * what the film alone is doing to it. Watching a projection against an
+     * unlit room is the reason to have the slider at all.
+     *
+     * The halfway point and the top are unchanged, at one and four times the
+     * fill, so a room at the default setting looks exactly as it did. */
+    const factor = 4 * level * level;
     for (const light of this.fill || []) {
       if (light.baseIntensity === undefined) light.baseIntensity = light.intensity;
       light.intensity = light.baseIntensity * factor;
     }
-    /* Exposure moves too, but far less. It affects the cue-driven lights as
-     * well, so leaning on it would break the rule above; a little of it stops
-     * the two ends of the slider looking flat. */
-    this.renderer.toneMappingExposure = BASE_EXPOSURE * Math.pow(2, level - 0.5);
+    /* The environment map is lighting too, and it is not in this.fill.
+     *
+     * Image based lighting is most of what makes the physically based surfaces
+     * in here look like materials rather than paint, and it comes from the
+     * scene rather than from any light — so turning every lamp off left the
+     * room lit by it and the slider could not reach zero. It goes down with
+     * them, and only down: past the halfway point the lamps go on rising and
+     * this holds at full, so the bright end of the slider is exactly the
+     * brightness it always was. */
+    this.scene.environmentIntensity = Math.min(1, factor);
+    /* Exposure rises above the halfway point and holds below it.
+     *
+     * It reaches everything drawn, cue lights and the projection included, so
+     * pulling it down while darkening the room would have dimmed the very
+     * things the darkened room exists to show. */
+    this.renderer.toneMappingExposure =
+      BASE_EXPOSURE * Math.pow(2, Math.max(0, level - 0.5));
     this.frame();
   }
 
