@@ -25,6 +25,7 @@ vi.mock('./Room3D.js', () => {
   class FakeRoom {
     setInstruments() {}
     setPicture() {}
+    setProjection() {}
     setMuted() {}
     setForced() {}
     setBrightness() {}

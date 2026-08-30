@@ -20,11 +20,13 @@ import { Room } from './Room';
 import type { Rig, Score } from '../../core/score';
 
 const shown: (HTMLVideoElement | null)[] = [];
+const thrown: (HTMLVideoElement | null)[] = [];
 
 vi.mock('./Room3D.js', () => {
   class FakeRoom {
     setInstruments() {}
     setPicture(video: HTMLVideoElement | null) { shown.push(video); }
+    setProjection(video: HTMLVideoElement | null) { thrown.push(video); }
     setMuted() {}
     setForced() {}
     setBrightness() {}
@@ -47,10 +49,11 @@ const score = { title: 'demo', duration: 100, tracks: [] } as unknown as Score;
 const NO_MUTES = new Set<string>();
 const NO_FORCES = new Map<string, number>();
 
-beforeEach(() => { shown.length = 0; });
+beforeEach(() => { shown.length = 0; thrown.length = 0; });
 afterEach(() => { cleanup(); });
 
-function show(picture: HTMLVideoElement | null) {
+function show(picture: HTMLVideoElement | null,
+              projection: HTMLVideoElement | null = null) {
   return (
     <Room
       score={score}
@@ -60,6 +63,7 @@ function show(picture: HTMLVideoElement | null) {
       forced={NO_FORCES}
       brightness={50}
       picture={picture}
+      projection={projection}
     />
   );
 }
@@ -114,5 +118,49 @@ describe('the film on the television', () => {
       />,
     );
     await waitFor(() => expect(shown.length).toBe(before));
+  });
+});
+
+describe('throwing the film into the room', () => {
+  it('is off unless it is asked for', async () => {
+    render(show(null));
+    await waitFor(() => expect(thrown.length).toBeGreaterThan(0));
+    expect(thrown.every((v) => v === null)).toBe(true);
+  });
+
+  it('is switched independently of the screen', async () => {
+    // Either can be on without the other. They ask the room for the same
+    // frames, and the room decides that a video is uploaded once.
+    const video = document.createElement('video');
+    render(show(null, video));
+    await waitFor(() => expect(thrown).toContain(video));
+    expect(shown.every((v) => v === null)).toBe(true);
+  });
+
+  it('can be on at the same time as the screen', async () => {
+    const video = document.createElement('video');
+    render(show(video, video));
+    await waitFor(() => expect(thrown).toContain(video));
+    expect(shown).toContain(video);
+  });
+
+  it('is taken away when the switch goes off', async () => {
+    const video = document.createElement('video');
+    const { rerender } = render(show(video, video));
+    await waitFor(() => expect(thrown).toContain(video));
+    rerender(show(video, null));
+    await waitFor(() => expect(thrown[thrown.length - 1]).toBe(null));
+  });
+
+  it('is not re-sent when only the screen changes', async () => {
+    // setProjection rebuilds the light's map, so it must not be called for
+    // something that has nothing to do with it.
+    const video = document.createElement('video');
+    const { rerender } = render(show(null, video));
+    await waitFor(() => expect(thrown).toContain(video));
+    const before = thrown.length;
+    rerender(show(video, video));
+    await waitFor(() => expect(shown).toContain(video));
+    expect(thrown.length).toBe(before);
   });
 });

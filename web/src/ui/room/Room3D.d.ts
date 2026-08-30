@@ -10,6 +10,7 @@ export declare class Room3D {
   constructor(host: HTMLElement);
   setInstruments(instruments: unknown[]): void;
   setPicture(video: HTMLVideoElement | null): void;
+  setProjection(video: HTMLVideoElement | null): void;
   setMuted(muted: Set<string>): void;
   setForced(forced: Map<string, number>): void;
   setBrightness(v: number): void;

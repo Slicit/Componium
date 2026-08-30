@@ -84,6 +84,17 @@ export function App() {
       localStorage.setItem('componium.roomPicture', onScreen ? 'on' : 'off');
     } catch { /* private mode */ }
   }, [onScreen]);
+  /* Throwing the picture into the room. A television does not do this, so it
+   * is its own switch rather than something the picture brings with it. */
+  const [projecting, setProjecting] = useState(() => {
+    try { return localStorage.getItem('componium.roomProjection') === 'on'; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('componium.roomProjection', projecting ? 'on' : 'off');
+    } catch { /* private mode */ }
+  }, [projecting]);
   const history = useRef(new History()).current;
   const [saving, setSaving] = useState<string | null>(null);
   const [clipboard, setClipboard] = useState<Clip | null>(null);
@@ -674,6 +685,11 @@ export function App() {
                   onChange={(e) => setOnScreen(e.target.checked)} />
                 <span className="dim small">picture</span>
               </label>
+              <label className="room-toggle" title="Throw the film into the room from the television, so it lands on the floor, the rug and the couch. A television does not really do this — it spills light rather than projecting an image — so it is off unless you want to look at it.">
+                <input type="checkbox" checked={projecting}
+                  onChange={(e) => setProjecting(e.target.checked)} />
+                <span className="dim small">project</span>
+              </label>
             </div>
             {/* Eight columns of room against four of controls, side by side.
                 Stacked, the panels pushed the room up and everything scrolled
@@ -692,6 +708,7 @@ export function App() {
               onView={views.onCamera}
               revision={history.version}
               picture={onScreen ? picture : null}
+              projection={projecting ? picture : null}
             />
             </div>
             {split.force && (

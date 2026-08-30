@@ -19,6 +19,7 @@ import { evaluate } from '../../core/state';
 interface RoomHandle {
   setInstruments(instruments: unknown[]): void;
   setPicture(video: HTMLVideoElement | null): void;
+  setProjection(video: HTMLVideoElement | null): void;
   setMuted(muted: Set<string>): void;
   setForced(forced: Map<string, number>): void;
   setBrightness(v: number): void;
@@ -56,6 +57,15 @@ export function Room(props: {
    */
   picture?: HTMLVideoElement | null;
   /**
+   * The film to throw into the room from the television, or null for none.
+   *
+   * Independent of `picture`: either can be on without the other, and both
+   * end up asking the room for the same frames. A television does not
+   * actually project, so this is off by default and stays something switched
+   * on deliberately.
+   */
+  projection?: HTMLVideoElement | null;
+  /**
    * Bumped whenever the score is edited.
    *
    * Not decoration. Commands mutate the score in place — they hold references
@@ -67,7 +77,8 @@ export function Room(props: {
    */
   revision?: number;
 }) {
-  const { score, rig, time, muted, forced, brightness, view, onView, revision, picture } =
+  const { score, rig, time, muted, forced, brightness, view, onView, revision, picture,
+    projection } =
     props;
   const host = useRef<HTMLDivElement>(null);
   const room = useRef<RoomHandle | null>(null);
@@ -121,6 +132,10 @@ export function Room(props: {
    * Reaching into a ref from an effect keyed on anything else is how the
    * playhead once stopped following the picture. */
   useEffect(() => { room.current?.setPicture(picture ?? null); }, [picture, status]);
+
+  useEffect(() => {
+    room.current?.setProjection(projection ?? null);
+  }, [projection, status]);
 
   useEffect(() => { room.current?.setMuted(muted); }, [muted, status]);
   useEffect(() => { room.current?.setForced(forced); }, [forced, status]);

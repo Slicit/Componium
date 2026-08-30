@@ -327,6 +327,11 @@ export class Room3D {
      * normal state: the screen's job is to preview the ambient layer. */
     this.picture = null;
     this.pictureTexture = null;
+    this.projectorTexture = null;
+    /* What each consumer of the film has asked for, which is what applyFilm
+     * reads to decide whether a texture has to exist at all. */
+    this.wantScreen = null;
+    this.wantProjection = null;
     this.muted = new Set();
     this.forced = new Map();
     this.lights = 0;
@@ -355,6 +360,19 @@ export class Room3D {
      * to be brighter than the soft wash can go, and without it every spike
      * clips to the same white and the two ambilight layers look identical. */
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    /* Shadows exist for the projector: three samples SpotLight.map through the
+     * light's shadow camera and disables the map outright without one, so the
+     * projection and the occlusion are one feature rather than two.
+     *
+     * Free until used. The projector is the only light that casts, and while
+     * it is invisible it never reaches the render list, so there is no shadow
+     * pass and the materials compile with no shadow code. The cost of that is
+     * a shader recompile the first time the projection is switched on, which
+     * shows as a brief freeze. Setting this flag here does not avoid it — the
+     * recompile follows the light, not the flag — it just keeps renderer
+     * state out of a setter that runs whenever a film changes. */
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMappingExposure = BASE_EXPOSURE;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer = renderer;
@@ -409,6 +427,7 @@ export class Room3D {
       color: 0x3b424e, roughness: 0.86, metalness: 0.02,
       side: THREE.BackSide, envMapIntensity: 0.55,
     }));
+    shell.receiveShadow = true;
     place(shell, 0, ROOM_H / 2, ROOM_D / 2);
     scene.add(shell);
 
@@ -421,11 +440,13 @@ export class Room3D {
       surface(0x3b4250, 0.36, 0.22, 1.15)
     );
     floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
     place(floor, 0, 0.002, ROOM_D / 2);
     scene.add(floor);
 
     const rug = new THREE.Mesh(new THREE.PlaneGeometry(3.7, 2.7), surface(0x3b3340, 0.97, 0));
     rug.rotation.x = -Math.PI / 2;
+    rug.receiveShadow = true;
     place(rug, 0, 0.006, 2.5);
     scene.add(rug);
 
@@ -451,12 +472,29 @@ export class Room3D {
       lamp.position.set(x, ROOM_H - 0.16, 2.6);
       scene.add(lamp);
       this.fill.push(lamp);
-      const fitting = new THREE.Mesh(
-        new THREE.SphereGeometry(0.07, 12, 10),
-        new THREE.MeshBasicMaterial({ color: 0xfff4e4 })
+      /* A recessed downlight, not a bulb hanging in the air.
+       *
+       * Two pieces, which is what one actually looks like from below: a trim
+       * ring sitting in the ceiling, and a flat lens inside it. The lens is
+       * unlit and not tone mapped, so it reads as the thing emitting rather
+       * than as a white disc being lit by something else — and so it stays
+       * the same brightness when the light slider moves the room around it,
+       * which is how a real fitting behaves. */
+      const trim = new THREE.Mesh(
+        new THREE.RingGeometry(0.075, 0.105, 32),
+        surface(0x2a2f38, 0.35, 0.6, 1.2)
       );
-      place(fitting, x, ROOM_H - 0.14, 2.6);
-      scene.add(fitting);
+      trim.rotation.x = Math.PI / 2;
+      place(trim, x, ROOM_H - 0.004, 2.6);
+      scene.add(trim);
+
+      const lens = new THREE.Mesh(
+        new THREE.CircleGeometry(0.076, 32),
+        new THREE.MeshBasicMaterial({ color: 0xfff4e4, toneMapped: false })
+      );
+      lens.rotation.x = Math.PI / 2;
+      place(lens, x, ROOM_H - 0.006, 2.6);
+      scene.add(lens);
     }
   }
 
@@ -498,6 +536,36 @@ export class Room3D {
     place(tv, 0, 1.62, 0.09);
     scene.add(tv);
 
+    /* The projector.
+     *
+     * Aimed away from the screen and down at the couch, so what it lands on is
+     * the floor, the rug and the seat — the surfaces actually in view when the
+     * camera is where anyone puts it, which is somewhere behind the couch
+     * looking at the television. Aiming it at the back wall would be more
+     * literal and would put the picture behind the viewer.
+     *
+     * A television does not do this. It spills light, it does not throw a
+     * focused image across a room, so this is off by default and stays a thing
+     * you switch on to look at.
+     *
+     * decay is 1 rather than the physical 2: a projected image that falls off
+     * with the square of distance is bright on the couch and gone by the
+     * floor, which reads as a lamp rather than as a picture. */
+    const projector = new THREE.SpotLight(0xffffff, 0, 0, 0.55, 0.35, 1);
+    projector.position.set(0, 1.62, 0.2);
+    projector.target.position.set(0, 0.35, SEAT_Z);
+    /* map is disabled outright unless the light casts a shadow: three samples
+     * it through the shadow camera, so the two are one feature. */
+    projector.castShadow = true;
+    projector.shadow.mapSize.set(2048, 2048);
+    projector.shadow.camera.near = 0.2;
+    projector.shadow.camera.far = ROOM_D + 1;
+    projector.shadow.bias = -0.0012;
+    projector.visible = false;
+    scene.add(projector);
+    scene.add(projector.target);
+    this.projector = projector;
+
     /* A soft glow behind the panel, so the wall around the television picks up
      * the wash rather than the screen floating on a dark wall. */
     this.screenGlow = new THREE.PointLight(0x4a7cad, 16, 17, 2);
@@ -538,6 +606,9 @@ export class Room3D {
         couch.add(place(softBox(0.07, 0.17, 0.07, leg, 0.02), x, 0.085, z));
       }
     }
+    couch.traverse((o) => {
+      if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+    });
     place(couch, 0, 0, SEAT_Z);
     scene.add(couch);
     this.seat = couch;
@@ -556,53 +627,109 @@ export class Room3D {
    * Passing null puts the screen back to being the ambient preview.
    */
   setPicture(video) {
-    if (this.picture === video) return;
+    this.wantScreen = video || null;
+    this.applyFilm();
+  }
+
+  /**
+   * Throw the film into the room from the television, or stop.
+   *
+   * Independent of the screen: either can be on without the other, and both
+   * ask the same texture for the same frames.
+   */
+  setProjection(video) {
+    this.wantProjection = video || null;
+    this.applyFilm();
+  }
+
+  /**
+   * Make the texture match what has been asked for.
+   *
+   * The film used to belong to the screen, which was fine while the screen was
+   * the only thing showing it. It belongs to the room now: the screen and the
+   * projector each say whether they want it and this decides what has to
+   * exist, so a video is uploaded once however many things are looking at it.
+   */
+  applyFilm() {
+    const video = this.wantScreen || this.wantProjection || null;
+
+    if (video !== this.picture) {
+      this.releaseFilm();
+      this.picture = video;
+    }
+    if (video && !this.pictureTexture) {
+      const texture = new THREE.VideoTexture(video);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      /* VideoTexture turns mipmaps off, which is right for its usual job of
+       * filling the viewport and wrong here. The screen is a few hundred
+       * pixels of canvas showing a frame 1920 wide, so a drawn pixel covers
+       * around five texels, and taking four of them is what makes fine detail
+       * crawl as the camera moves. The renderer's own anti-aliasing cannot
+       * help: it samples geometry edges, not the inside of a texture.
+       *
+       * Anisotropy is the half that matters when the screen is seen from a
+       * seat rather than square on, and it does nothing without the mip chain
+       * to sample along — the two go together or neither is worth setting. */
+      texture.generateMipmaps = true;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+      this.pictureTexture = texture;
+
+      /* The projection is mirrored, and this is what unmirrors it.
+       *
+       * The light looks back down the room, so world x runs the opposite way
+       * through its projection than it does across the screen, and text in the
+       * picture would come out reversed. A clone shares the Source with the
+       * texture above, so the video is still uploaded once; only the sampling
+       * differs. */
+      const thrown = this.pictureTexture.clone();
+      thrown.repeat.x = -1;
+      thrown.offset.x = 1;
+      thrown.needsUpdate = true;
+      this.projectorTexture = thrown;
+    }
+    if (!video) this.releaseFilm();
+
+    const material = this.screen.material;
+    if (this.wantScreen && this.pictureTexture) {
+      material.map = this.pictureTexture;
+      /* The film is a source image, not a surface in the room.
+       *
+       * The light slider moves toneMappingExposure, which belongs to the
+       * renderer and so reaches everything drawn — the screen with it, which
+       * meant turning the room down dimmed the film. Tone mapping also
+       * applies the ACES curve, which lifts and desaturates. Opting this one
+       * material out leaves the frame exactly as the picture pane shows it. */
+      material.toneMapped = false;
+      this.screenMatte.visible = true;
+    } else {
+      material.map = null;
+      /* Back to being a surface in the room, and lit like one. */
+      material.toneMapped = true;
+      this.screenMatte.visible = false;
+      this.screen.scale.set(1, 1, 1);
+    }
+    material.needsUpdate = true;
+
+    const throwing = !!(this.wantProjection && this.projectorTexture);
+    this.projector.visible = throwing;
+    this.projector.map = throwing ? this.projectorTexture : null;
+    /* Nothing until it is asked for, and then enough to be seen against a room
+     * whose fill lighting is deliberately generous. */
+    this.projector.intensity = throwing ? 26 : 0;
+  }
+
+  releaseFilm() {
+    if (this.projectorTexture) {
+      this.projectorTexture.dispose();
+      this.projectorTexture = null;
+    }
     if (this.pictureTexture) {
       this.pictureTexture.dispose();
       this.pictureTexture = null;
     }
-    this.picture = video || null;
-    const material = this.screen.material;
-    if (!this.picture) {
-      material.map = null;
-      this.screenMatte.visible = false;
-      /* Back to being a surface in the room, and lit like one. */
-      material.toneMapped = true;
-      material.needsUpdate = true;
-      this.screen.scale.set(1, 1, 1);
-      return;
-    }
-    const texture = new THREE.VideoTexture(this.picture);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    /* VideoTexture turns mipmaps off, which is right for its usual job of
-     * filling the viewport and wrong here. The screen is a few hundred pixels
-     * of canvas showing a frame 1920 wide, so a drawn pixel covers around five
-     * texels, and taking four of them is what makes fine detail crawl as the
-     * camera moves. The renderer's own anti-aliasing cannot help: it samples
-     * geometry edges, not the inside of a texture.
-     *
-     * Anisotropy is the half that matters when the screen is seen from a seat
-     * rather than square on, and it does nothing without the mip chain to
-     * sample along — the two go together or neither is worth setting. */
-    texture.generateMipmaps = true;
-    texture.minFilter = THREE.LinearMipmapLinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    this.pictureTexture = texture;
-    /* The film is a source image, not a surface in the room.
-     *
-     * The light slider moves toneMappingExposure, which belongs to the
-     * renderer and so reaches everything drawn — the screen with it, which
-     * meant turning the room down dimmed the film. Tone mapping also applies
-     * the ACES curve, which lifts and desaturates. Opting this one material
-     * out leaves the frame exactly as the picture pane shows it, and leaves
-     * the slider doing its actual job on the room. */
-    material.toneMapped = false;
-    /* Only while there is a film. Without one the screen is full size and the
-     * matte could never be seen. */
-    this.screenMatte.visible = true;
-    material.map = texture;
-    material.needsUpdate = true;
+    this.picture = null;
   }
 
   setMuted(muted) {
@@ -742,7 +869,7 @@ export class Room3D {
      * where that callback does not exist. Marking it again every render
      * uploaded an unchanged frame sixty times a second, and now that there is
      * a mip chain it would rebuild that too. */
-    if (this.picture && this.pictureTexture) {
+    if (this.wantScreen && this.pictureTexture) {
       const fit = containScale(SCREEN_ASPECT, aspectOf(this.picture));
       this.screen.scale.set(fit.x, fit.y, 1);
     }
@@ -859,7 +986,7 @@ export class Room3D {
     if (this.controls) this.controls.dispose();
     for (const [, d] of this.devices) disposeTree(d.group);
     disposeTree(this.scene);
-    if (this.pictureTexture) this.pictureTexture.dispose();
+    this.releaseFilm();
     if (this.environment) this.environment.texture.dispose();
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode) {
