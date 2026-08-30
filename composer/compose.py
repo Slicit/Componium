@@ -552,8 +552,14 @@ def build(args) -> str:
                 source="subtitle")
 
     if args.vlm_command:
-        times = vision.candidates(env, args.fps, cuts, args.vlm_frames)
-        observations = vision.observe(args.input, times, args.vlm_command)
+        times = vision.candidates(env, args.fps, cuts, args.vlm_frames,
+                                  every=args.vlm_every)
+        # The span, because times are counted from the start of what was
+        # decoded and the frames live in the film. Without it a chunk an hour
+        # in asks for the frame one second from the film's beginning, gets it,
+        # and files it under the hour mark.
+        observations = vision.observe(args.input, times, args.vlm_command,
+                                      workers=args.vlm_workers, span=span)
         labels = vision.as_pairs(observations)
         # A splash is only a splash where the model also saw water. It cannot
         # tell spray from kicked sand in a still, and it can tell a sea from a
@@ -721,8 +727,14 @@ def main(argv=None):
                    help="window the rest budget is measured over, in seconds")
     p.add_argument("--budget-max", type=float, default=0.25,
                    help="fraction of any window that may be spent doing something")
-    p.add_argument("--vlm-frames", type=int, default=40,
-                   help="how many keyframes to label at most (default 40)")
+    p.add_argument("--vlm-frames", type=int, default=0,
+                   help="cap on frames shown to the model; 0 leaves the grid "
+                        "at its own spacing. A cap widens the grid rather "
+                        "than stopping part way through the film")
+    p.add_argument("--vlm-every", type=float, default=vision.GRID_SECONDS,
+                   help="how often to look, in seconds (default %(default)s)")
+    p.add_argument("--vlm-workers", type=int, default=vision.VLM_WORKERS,
+                   help="frames labelled at once (default %(default)s)")
     p.add_argument("--scene-threshold", type=float, default=0.35,
                    help="scene change sensitivity, higher is fewer cuts (default 0.35)")
     args = p.parse_args(argv)

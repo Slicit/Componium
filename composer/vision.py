@@ -9,13 +9,14 @@ That is deliberate. Bundling a model would date badly, bloat the install for
 everyone who does not want it, and make a choice on the user's behalf about
 where their film frames are sent. A seam costs forty lines and ages well.
 
-The expensive pass runs only on windows the cheap detectors already flagged.
-Sending every frame of a two hour film to a model would cost a fortune in time
-or money to learn what the audio already said.
+The pass looks at the film on a uniform grid. It used to look only where the
+cheap detectors had already flagged something, which was cheaper and wrong:
+the detectors nominate by loudness, and half the vocabulary is quiet.
 """
 
 from __future__ import annotations
 
+import concurrent.futures as futures
 import os
 import shutil
 import subprocess
@@ -26,40 +27,166 @@ import tempfile
 # the same cues as a subtitle that said "[explosion]".
 
 
-def candidates(envelope, rate: float, cuts=None, limit: int = 40,
-               threshold: float = 0.55, spacing: float = 8.0):
+# How often the film is looked at.
+#
+# A uniform grid, not a shortlist. The signals that used to nominate moments —
+# loud low frequency, and scene cuts — are structurally blind to most of the
+# vocabulary: dust, mist and smoke are quiet, so a shortlist chosen by loudness
+# never contains them. Crab rave throws up sand seven times across three
+# minutes, and a shortlist of forty frames caught one of them. Not because the
+# model could not see the other six; because it was never shown them. On a two
+# second grid it finds all seven.
+GRID_SECONDS = 2.0
+
+# How many frames are labelled at once.
+#
+# The seam runs a process per image, so this is a thread pool around a
+# subprocess rather than anything clever. Measured through vLLM on one 12GB
+# card: 1.6 frames a second one at a time, 10.8 at eight, 17.8 at sixteen,
+# 21.1 at twenty-four and nothing further past that.
+#
+# Eight rather than twenty-four because the composer does not know what is on
+# the other end of the seam. It may be a local model that gains nothing from
+# being asked twice at once, or a metered API. Eight is most of the benefit at
+# a third of the demand, and the number is a flag for anyone who knows better.
+VLM_WORKERS = 8
+
+
+def cadence(duration: float, every: float = GRID_SECONDS, limit: int = 0):
+    """The spacing actually used, once a budget has had its say.
+
+    Its own function because two callers need the same answer and deriving it
+    twice is how they came to disagree: the grid widened for a budget and the
+    nomination step went on using the spacing it had asked for, so a cap of
+    five frames produced five grid points and ninety-five nominations.
+    """
+    if duration <= 0.0 or every <= 0.0:
+        return 0.0
+    if limit > 0 and duration / every > limit:
+        return duration / limit
+    return every
+
+
+def grid(duration: float, every: float = GRID_SECONDS, limit: int = 0):
+    """Times on a uniform grid across a film of this length.
+
+    A budget widens the grid rather than cutting it short. Looking at the
+    first forty minutes of a feature closely and the rest not at all is a
+    worse answer than looking at all of it a little less closely — and it is
+    the kind of wrong that hides, because the score simply has nothing to say
+    after a point and nothing reports that it stopped asking.
+    """
+    step = cadence(duration, every, limit)
+    if step <= 0.0:
+        return []
+    count = max(1, int(duration / step))
+    return [round(i * step + step / 2.0, 3) for i in range(count)]
+
+
+def spacing_of(times):
+    """The step of the evenly spaced run in these times, or 0 if there is none.
+
+    Extraction takes one pass over a run of evenly spaced frames and seeks for
+    everything else. It reads the step off the times rather than being told it,
+    because being told it is the arrangement that already went wrong once: a
+    second argument that has to be kept in step with the first eventually is
+    not.
+    """
+    times = sorted(times)
+    if len(times) < 3:
+        return 0.0
+    gaps = {}
+    for a, b in zip(times, times[1:]):
+        gap = round(b - a, 6)
+        if gap > 0:
+            gaps[gap] = gaps.get(gap, 0) + 1
+    if not gaps:
+        return 0.0
+    step, seen = max(gaps.items(), key=lambda kv: (kv[1], -kv[0]))
+    # One repeated gap is a coincidence, not a grid.
+    return step if seen >= 2 else 0.0
+
+
+def evenly_spaced(times):
+    """The run of grid frames, and everything left over.
+
+    The run has to start at the first time and have no holes, because one pass
+    of ffmpeg emits frames at a fixed cadence from where it was told to start
+    and the nth output is only the nth grid point if none were skipped.
+    """
+    times = sorted(times)
+    step = spacing_of(times)
+    if step <= 0.0:
+        return [], times
+    first = times[0]
+    at_index = {}
+    for t in times:
+        k = (t - first) / step
+        i = int(round(k))
+        if i >= 0 and abs(k - i) < 1e-6 and i not in at_index:
+            at_index[i] = t
+    count = 0
+    while count in at_index:
+        count += 1
+    run = [at_index[i] for i in range(count)]
+    kept = set(run)
+    return run, [t for t in times if t not in kept]
+
+
+def candidates(envelope, rate: float, cuts=None, limit: int = 0,
+               threshold: float = 0.55, spacing: float = 8.0,
+               every: float = GRID_SECONDS):
     """Choose the moments worth showing to a model.
 
-    Two cheap signals nominate: loud low frequency moments, and scene cuts.
-    Both are things the composer already computed, so nomination is free.
+    A uniform grid over everything decoded, plus any moment the cheap signals
+    nominated that the grid does not already cover.
 
-    Results are spaced out and capped, because forty keyframes across a feature
-    is enough to characterise it and four thousand is a way to spend an
-    afternoon.
+    The grid is what finds effects. Nomination survives only for the case
+    where the grid is coarse — a budget has widened it, or the caller asked
+    to look rarely — and a loud moment would otherwise fall a long way from
+    the nearest frame. At the default density the grid covers everything and
+    nomination adds nothing at all, which is the density doing its job.
+
+    Times are counted from the start of what was decoded, like everything
+    else in the composer. Turning them into film times is the span's job.
     """
-    picks = []
+    duration = (len(envelope or []) / rate) if rate > 0 else 0.0
+    chosen = grid(duration, every, limit)
+    # Close enough to count as already looked at. An absolute distance, not a
+    # share of the spacing: a nomination is within half a spacing of a grid
+    # point by construction, so a share of the spacing is a rule that can
+    # never fire. At the default density this covers everything, and
+    # nomination contributes nothing — which is the point of the density, not
+    # an oversight.
+    near = GRID_SECONDS / 2.0
 
+    picks = []
     for i, value in enumerate(envelope or []):
         if value >= threshold:
             picks.append((value, i / rate))
     picks.sort(reverse=True)
 
-    chosen = []
+    # A nomination the grid already covers is not worth a second frame.
+    extra = []
     for _score, at in picks:
-        if all(abs(at - other) >= spacing for other in chosen):
-            chosen.append(at)
-        if len(chosen) >= limit:
-            break
+        if any(abs(at - other) <= near for other in chosen):
+            continue
+        if all(abs(at - other) >= spacing for other in extra):
+            extra.append(at)
 
-    # Scene cuts fill any remaining budget: a cut is a change of place, which
-    # is exactly what a model can describe and audio cannot.
     for at in (cuts or []):
-        if len(chosen) >= limit:
-            break
-        if all(abs(at - other) >= spacing for other in chosen):
-            chosen.append(at)
+        if any(abs(at - other) <= near for other in chosen):
+            continue
+        if all(abs(at - other) >= spacing for other in extra):
+            extra.append(at)
 
-    return sorted(chosen)
+    # Nominations are extra frames, and extra frames cost what every frame
+    # costs. A cap that the grid honours and nominations ignore is not a cap.
+    # The weakest go first: cuts before loud moments, since a cut is a change
+    # of place and a loud moment is closer to being an effect.
+    if limit > 0:
+        extra = extra[:max(0, limit - len(chosen))]
+    return sorted(chosen + extra)
 
 
 # How wide a keyframe is sent to the model.
@@ -163,13 +290,65 @@ def label_frame(command: str, image_path: str, timeout: float = 60.0) -> list[st
     return parse_labels(result.stdout)
 
 
-def observe(path: str, times, command: str, timeout: float = 60.0):
+def extract(path: str, times, into: str, span=None):
+    """Pull every wanted frame out of the film. Returns [(t, image_path)].
+
+    Times are counted from the start of what was decoded; the span turns them
+    into the film's own clock. Without that, a chunk starting an hour in asks
+    the film for the frame one second from its beginning, gets it, and files
+    it under the hour mark — which is what used to happen, and meant every
+    chunk of a feature after the first described the opening of the film.
+
+    The evenly spaced run comes out in one pass. A seek pays for finding the
+    frame, and finding it a hundred times costs a hundred times as much as
+    decoding past it once: measured at 0.231s a frame seeking against 0.100s
+    in one pass, and the gap widens as the grid gets denser. Everything else
+    is seeked to individually, because there is only ever a handful.
+    """
+    exe = shutil.which("ffmpeg")
+    if not exe:
+        return []
+    start = span.decode_start if span is not None else 0.0
+    run, rest = evenly_spaced(float(t) for t in times)
+    out = []
+
+    if run:
+        step = run[1] - run[0]
+        pattern = os.path.join(into, "grid-%05d.jpg")
+        subprocess.run(
+            [exe, "-v", "error", "-y",
+             "-ss", "%.3f" % (start + run[0]), "-i", path,
+             "-vf", "fps=%.9f,scale=%d:-2" % (1.0 / step, KEYFRAME_WIDTH),
+             "-q:v", "3", "-frames:v", str(len(run)), pattern],
+            capture_output=True, check=False,
+        )
+        for i, at in enumerate(run):
+            image = pattern % (i + 1)
+            if os.path.exists(image):
+                out.append((at, image))
+
+    for i, at in enumerate(rest):
+        image = os.path.join(into, "seek-%05d.jpg" % i)
+        film_time = span.to_film_time(at) if span is not None else at
+        if keyframe(path, film_time, image):
+            out.append((at, image))
+
+    return sorted(out)
+
+
+def observe(path: str, times, command: str, timeout: float = 60.0,
+            workers: int = VLM_WORKERS, span=None):
     """Look at a set of moments. Returns one record per frame seen.
 
-    Each record is {"t", "labels", "seen"}. This is the pass that costs a GPU
-    and a decode, and it is the only one that cannot be repeated once the film
-    has been analysed and put away — so it keeps everything it was told, and
-    the passes that draw conclusions from it read this rather than the film.
+    Each record is {"t", "labels", "seen"}, timed from the start of what was
+    decoded. This is the pass that costs a GPU and a decode, and the only one
+    that cannot be repeated once the film has been analysed and put away — so
+    it keeps everything it was told, and the passes that draw conclusions from
+    it read this rather than the film.
+
+    Frames are labelled concurrently. The seam is untouched by that: it is
+    still one process per image printing labels on stdout, just several at
+    once, so a wrapper written for the serial version needs no changes.
 
     A model that fails on one frame does not stop the run. A composer that
     aborts three quarters of the way through a feature because one JPEG upset
@@ -177,14 +356,21 @@ def observe(path: str, times, command: str, timeout: float = 60.0):
     """
     seen = []
     with tempfile.TemporaryDirectory(prefix="componium-vlm-") as tmp:
-        for i, at in enumerate(times):
-            image = os.path.join(tmp, f"frame-{i:04d}.jpg")
-            if not keyframe(path, at, image):
-                continue
+        frames = extract(path, times, tmp, span)
+        if not frames:
+            return []
+
+        def look(item):
+            at, image = item
             labels, said = observe_frame(command, image, timeout)
-            if labels or said:
-                seen.append({"t": round(at, 3), "labels": labels, "seen": said})
-    return seen
+            return at, labels, said
+
+        with futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            for at, labels, said in pool.map(look, frames):
+                if labels or said:
+                    seen.append({"t": round(at, 3), "labels": labels,
+                                 "seen": said})
+    return sorted(seen, key=lambda o: o["t"])
 
 
 def as_pairs(observations):

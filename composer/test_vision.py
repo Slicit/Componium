@@ -4,35 +4,136 @@ Everything that needs a model or ffmpeg is exercised by running the composer;
 the selection and parsing logic is pure and is tested here.
 """
 
+import io
+import tempfile
 import unittest
 
 import vision
 
 
+class TestGrid(unittest.TestCase):
+    def test_covers_the_whole_film(self):
+        got = vision.grid(20.0, every=2.0)
+        self.assertEqual(got[0], 1.0)
+        self.assertEqual(got[-1], 19.0)
+        self.assertEqual(len(got), 10)
+
+    def test_a_budget_widens_rather_than_truncates(self):
+        # The point of the whole arrangement. Five frames over a hundred
+        # seconds must be spread across the hundred, not be the first five.
+        got = vision.grid(100.0, every=2.0, limit=5)
+        self.assertEqual(len(got), 5)
+        self.assertGreater(got[-1], 80.0)
+
+    def test_no_budget_leaves_the_spacing_alone(self):
+        self.assertEqual(len(vision.grid(100.0, every=2.0)), 50)
+
+    def test_nothing_from_nothing(self):
+        self.assertEqual(vision.grid(0.0), [])
+        self.assertEqual(vision.grid(-5.0), [])
+        self.assertEqual(vision.grid(10.0, every=0.0), [])
+
+
+class TestCadence(unittest.TestCase):
+    def test_is_the_spacing_asked_for_when_it_fits(self):
+        self.assertEqual(vision.cadence(100.0, 2.0, limit=0), 2.0)
+        self.assertEqual(vision.cadence(100.0, 2.0, limit=500), 2.0)
+
+    def test_widens_to_meet_a_budget(self):
+        self.assertEqual(vision.cadence(100.0, 2.0, limit=5), 20.0)
+
+    def test_the_grid_uses_it(self):
+        # The two must agree. They once did not, and a cap of five returned a
+        # hundred because the grid widened and nothing else was told.
+        for limit in (0, 3, 5, 50, 5000):
+            step = vision.cadence(400.0, 2.0, limit)
+            got = vision.grid(400.0, 2.0, limit)
+            if len(got) > 1:
+                self.assertAlmostEqual(got[1] - got[0], step, places=2)
+
+
+class TestSpacingOf(unittest.TestCase):
+    def test_reads_the_step_off_an_even_grid(self):
+        self.assertEqual(vision.spacing_of([1.0, 3.0, 5.0, 7.0]), 2.0)
+
+    def test_survives_a_few_odd_moments_among_the_grid(self):
+        self.assertEqual(vision.spacing_of([1.0, 3.0, 4.2, 5.0, 7.0, 9.0]), 2.0)
+
+    def test_no_grid_in_scattered_times(self):
+        self.assertEqual(vision.spacing_of([1.0, 8.0, 30.0]), 0.0)
+
+    def test_too_few_to_tell(self):
+        self.assertEqual(vision.spacing_of([1.0, 3.0]), 0.0)
+        self.assertEqual(vision.spacing_of([]), 0.0)
+
+
+class TestEvenlySpaced(unittest.TestCase):
+    def test_separates_the_run_from_the_rest(self):
+        run, rest = vision.evenly_spaced([1.0, 3.0, 4.2, 5.0, 7.0])
+        self.assertEqual(run, [1.0, 3.0, 5.0, 7.0])
+        self.assertEqual(rest, [4.2])
+
+    def test_a_hole_ends_the_run(self):
+        # One ffmpeg pass emits frames at a fixed cadence from where it starts,
+        # so the nth output is only the nth grid point if none were skipped.
+        run, rest = vision.evenly_spaced([1.0, 3.0, 7.0, 9.0])
+        self.assertEqual(run, [1.0, 3.0])
+        self.assertEqual(rest, [7.0, 9.0])
+
+    def test_everything_is_accounted_for(self):
+        times = [1.0, 3.0, 4.2, 5.0, 7.0, 20.5]
+        run, rest = vision.evenly_spaced(times)
+        self.assertEqual(sorted(run + rest), sorted(times))
+
+    def test_scattered_times_are_all_left_over(self):
+        run, rest = vision.evenly_spaced([1.0, 8.0, 30.0])
+        self.assertEqual(run, [])
+        self.assertEqual(rest, [1.0, 8.0, 30.0])
+
+
 class TestCandidates(unittest.TestCase):
-    def test_picks_the_loudest_moments(self):
+    def test_looks_at_the_whole_film_not_just_the_loud_parts(self):
+        # The change that found the dust. Nomination by loudness cannot see
+        # dust, mist or smoke, because they are quiet.
         env = [0.0] * 100
         env[10] = 0.9
-        env[50] = 0.8
-        got = vision.candidates(env, rate=1.0, threshold=0.5, spacing=1.0)
-        self.assertEqual(got, [10.0, 50.0])
+        got = vision.candidates(env, rate=1.0, threshold=0.5, every=2.0)
+        self.assertEqual(len(got), 50)
+        self.assertLess(min(got), 2.0)
+        self.assertGreater(max(got), 98.0)
 
-    def test_ignores_quiet_moments(self):
-        got = vision.candidates([0.1] * 100, rate=1.0, threshold=0.5)
-        self.assertEqual(got, [])
+    def test_quiet_films_are_still_looked_at(self):
+        # Under the old shortlist this returned nothing at all: a film with no
+        # loud moments was never shown to the model.
+        got = vision.candidates([0.1] * 100, rate=1.0, threshold=0.5, every=2.0)
+        self.assertEqual(len(got), 50)
 
-    def test_spaces_picks_out(self):
-        # Four consecutive loud seconds are one event, not four.
-        env = [0.0, 0.9, 0.9, 0.9, 0.9, 0.0]
-        got = vision.candidates(env, rate=1.0, threshold=0.5, spacing=8.0)
-        self.assertEqual(len(got), 1)
+    def test_a_loud_moment_between_grid_points_is_added(self):
+        env = [0.0] * 100
+        env[10] = 0.9
+        got = vision.candidates(env, rate=1.0, threshold=0.5, spacing=1.0,
+                                every=20.0)
+        self.assertIn(10.0, got)
 
-    def test_respects_the_limit(self):
+    def test_a_loud_moment_the_grid_already_covers_is_not_added_twice(self):
+        # Including one landing exactly between two grid points, which is the
+        # case that used to slip through and add a frame nobody needed.
+        env = [0.0] * 100
+        env[10] = 0.9
+        got = vision.candidates(env, rate=1.0, threshold=0.5, spacing=1.0,
+                                every=2.0)
+        self.assertEqual(len(got), len(set(got)))
+        self.assertEqual(len(got), 50)
+
+    def test_the_cap_caps(self):
+        # Including the nominations. The frames are what costs a GPU, so a
+        # number called a cap is a bill and has to hold.
         env = [0.9 if i % 20 == 0 else 0.0 for i in range(2000)]
-        got = vision.candidates(env, rate=1.0, threshold=0.5, spacing=1.0, limit=5)
-        self.assertEqual(len(got), 5)
+        got = vision.candidates(env, rate=1.0, threshold=0.5, spacing=1.0,
+                                limit=5)
+        self.assertLessEqual(len(got), 5)
 
-    def test_scene_cuts_fill_the_remaining_budget(self):
+    def test_scene_cuts_are_looked_at_when_the_grid_misses_them(self):
         got = vision.candidates([], rate=1.0, cuts=[10.0, 40.0, 70.0], limit=10)
         self.assertEqual(got, [10.0, 40.0, 70.0])
 
@@ -42,6 +143,117 @@ class TestCandidates(unittest.TestCase):
         env[20] = 0.95
         got = vision.candidates(env, rate=1.0, threshold=0.5, spacing=1.0)
         self.assertEqual(got, sorted(got))
+
+
+class TestExtractUsesFilmTime(unittest.TestCase):
+    """A chunk's times are counted from where the decode started.
+
+    The frames are in the film. Handing a chunk-relative time to a seek that
+    reads the film means a chunk starting an hour in asks for the frame one
+    second from the film's beginning, gets it, and files it under the hour
+    mark — so every chunk of a feature after the first described the opening,
+    consistently and with complete confidence.
+
+    Crab rave is one chunk, which is why this survived being looked at.
+    """
+
+    class Span:
+        def __init__(self, decode_start):
+            self.decode_start = decode_start
+
+        def to_film_time(self, t):
+            return self.decode_start + t
+
+    def setUp(self):
+        self.seeked = []
+        self.original = vision.keyframe
+
+        def watching(path, at, out_path):
+            self.seeked.append(at)
+            io.open(out_path, "w").write("x")
+            return True
+
+        vision.keyframe = watching
+
+    def tearDown(self):
+        vision.keyframe = self.original
+
+    def test_a_seeked_frame_is_asked_for_in_film_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vision.extract("film.mkv", [4.0], tmp, span=self.Span(3600.0))
+        self.assertEqual(self.seeked, [3604.0])
+
+    def test_without_a_span_the_time_is_already_film_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vision.extract("film.mkv", [4.0], tmp, span=None)
+        self.assertEqual(self.seeked, [4.0])
+
+    def test_the_grid_pass_starts_at_the_chunk_not_the_film(self):
+        # The grid does not go through keyframe(); it is one ffmpeg over the
+        # range, so the offset it is given is the thing to check.
+        seen = {}
+        real_run = vision.subprocess.run
+
+        def watching(args, **kwargs):
+            if "-ss" in args:
+                seen["ss"] = float(args[args.index("-ss") + 1])
+            return real_run(["true"], **kwargs)
+
+        vision.subprocess.run = watching
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                vision.extract("film.mkv", [1.0, 3.0, 5.0, 7.0], tmp,
+                               span=self.Span(3600.0))
+        finally:
+            vision.subprocess.run = real_run
+        self.assertEqual(seen.get("ss"), 3601.0)
+
+    def test_observations_stay_in_chunk_time(self):
+        # What is seeked for is film time; what is recorded is chunk time,
+        # because the span moves everything into the film's clock at the end
+        # and doing it twice would be as wrong as not doing it at all.
+        with tempfile.TemporaryDirectory() as tmp:
+            got = vision.observe("film.mkv", [4.0], "echo dust",
+                                 span=self.Span(3600.0), workers=1)
+        self.assertEqual([o["t"] for o in got], [4.0])
+        self.assertEqual(self.seeked, [3604.0])
+
+
+class TestObserveInParallel(unittest.TestCase):
+    def test_every_frame_is_answered_for(self):
+        # The pool must not lose or reorder frames.
+        original = vision.keyframe
+
+        def fake(path, at, out_path):
+            io.open(out_path, "w").write("x")
+            return True
+
+        vision.keyframe = fake
+        try:
+            times = [1.0, 8.0, 30.0, 44.0, 61.0]
+            with tempfile.TemporaryDirectory() as tmp:
+                got = vision.observe("film.mkv", times, "echo dust", workers=4)
+        finally:
+            vision.keyframe = original
+        self.assertEqual([o["t"] for o in got], times)
+        # echo prints the image path too, which the parser reads as a label.
+        self.assertTrue(all("dust" in o["labels"] for o in got))
+
+    def test_one_bad_frame_does_not_cost_the_rest(self):
+        original = vision.keyframe
+
+        def fake(path, at, out_path):
+            io.open(out_path, "w").write("x")
+            return True
+
+        vision.keyframe = fake
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                got = vision.observe("film.mkv", [1.0, 8.0, 30.0],
+                                     "definitely-not-a-real-command", workers=4)
+        finally:
+            vision.keyframe = original
+        self.assertEqual(got, [])
 
 
 class TestParseLabels(unittest.TestCase):

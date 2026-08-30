@@ -255,6 +255,16 @@ func (j *Jobs) runChunk(ctx context.Context, film, source string, c Chunk,
 		if n := os.Getenv("COMPONIUM_VLM_FRAMES"); n != "" {
 			args = append(args, "--vlm-frames", n)
 		}
+		// How often to look, and how many frames to have in flight. Both
+		// have defaults the composer is happy with; these are here so a
+		// slower model or a metered one can be told to ease off without
+		// rebuilding anything.
+		if n := os.Getenv("COMPONIUM_VLM_EVERY"); n != "" {
+			args = append(args, "--vlm-every", n)
+		}
+		if n := os.Getenv("COMPONIUM_VLM_WORKERS"); n != "" {
+			args = append(args, "--vlm-workers", n)
+		}
 	}
 	args = append(args, []string{
 		"--from", strconv.FormatFloat(c.From, 'f', 3, 64),
