@@ -193,7 +193,7 @@ export function Timeline(props: TimelineProps) {
 
   /* --- pointer --- */
 
-  const wheel = useCallback((e: React.WheelEvent) => {
+  const wheel = useCallback((e: WheelEvent) => {
     const host = wrap.current;
     if (!host) return;
     e.preventDefault();
@@ -211,6 +211,30 @@ export function Timeline(props: TimelineProps) {
     onView();
   }, [view, onView]);
 
+  /* Bound natively rather than through onWheel, so the page stays put.
+   *
+   * React registers wheel at the root as a passive listener, which means
+   * preventDefault() inside an onWheel handler is silently ignored — the
+   * timeline panned and the window scrolled at the same time, and the thing
+   * you were looking at slid off the screen while you were looking at it. Only
+   * a listener attached to the element with { passive: false } may refuse the
+   * page scroll.
+   *
+   * The handler is reached through a ref so this subscribes once. Keying the
+   * effect on the callback would tear the listener down and rebuild it on
+   * every render, which is how a wheel event lands between the two and does
+   * nothing at all.
+   */
+  const wheelRef = useRef(wheel);
+  wheelRef.current = wheel;
+  useEffect(() => {
+    const host = wrap.current;
+    if (!host) return;
+    const handle = (e: WheelEvent) => wheelRef.current(e);
+    host.addEventListener('wheel', handle, { passive: false });
+    return () => host.removeEventListener('wheel', handle);
+  }, []);
+
   const geom = useCallback(() => {
     const host = wrap.current!;
     return {
@@ -226,7 +250,6 @@ export function Timeline(props: TimelineProps) {
       className="tl-surface"
       ref={wrap}
       style={{ cursor: edit.cursor }}
-      onWheel={wheel}
       onPointerDown={(e) => edit.onPointerDown(e, geom())}
       onPointerMove={(e) => edit.onPointerMove(e, geom())}
       onDoubleClick={(e) => edit.onDoubleClick(e, geom())}
