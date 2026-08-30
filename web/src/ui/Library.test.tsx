@@ -43,7 +43,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); });
 
 async function show(entries: unknown[]) {
   body = libraryOf(entries);
-  render(<Library onOpen={() => {}} />);
+  render(<Library onOpen={() => {}} fps={25} />);
   await waitFor(() => {
     if (!document.querySelector('.lib-row')) throw new Error('no rows yet');
   });
@@ -178,5 +178,46 @@ describe('paging', () => {
     await show(many);
     fireEvent.change(screen.getByLabelText('Films per page'), { target: { value: '0' } });
     expect(rows()).toHaveLength(34);
+  });
+});
+
+describe('reaching what the model said', () => {
+  it('offers it only for a film that has a description', async () => {
+    // The button is the only way to the reading room, and a film nobody has
+    // shown to a model has nothing to read.
+    await show([
+      film('never-looked.mp4', { hasScore: true }),
+      film('looked.mp4', { hasScore: true, seen: true }),
+    ]);
+    const buttons = rows().map((r) =>
+      Array.from(r.querySelectorAll('button')).map((b) => b.textContent));
+    expect(buttons[0]).not.toContain('vision');
+    expect(buttons[1]).toContain('vision');
+  });
+
+  it('says what a rebuild does about the description', async () => {
+    // The thing nobody was ever told: a rebuild reuses what the model said.
+    await show([film('looked.mp4', { hasScore: true, seen: true })]);
+    const rebuild = Array.from(document.querySelectorAll('button'))
+      .find((b) => b.textContent === 'Rebuild')!;
+    expect(rebuild.title).toContain('reused');
+  });
+
+  it('does not say it for a film with nothing to reuse', async () => {
+    await show([film('fresh.mp4', { hasScore: true })]);
+    const rebuild = Array.from(document.querySelectorAll('button'))
+      .find((b) => b.textContent === 'Rebuild')!;
+    expect(rebuild.title).not.toContain('reused');
+  });
+
+  it('still lays every row out the same, with the extra button', async () => {
+    // The alignment rule these tests exist for. A new button is a new way to
+    // break it.
+    await show([
+      film('bare.mp4'),
+      film('looked.mp4', { hasScore: true, seen: true, preview: true }),
+    ]);
+    const slots = rows().map((r) => r.querySelectorAll('.slot').length);
+    expect(new Set(slots).size).toBe(1);
   });
 });

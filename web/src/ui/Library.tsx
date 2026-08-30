@@ -10,6 +10,8 @@ import { Icon } from './Icon';
 import { ALL, DEFAULT_PAGE_SIZE, PAGE_SIZES, matches, paginate } from '../core/paging';
 import { Steps, howLong, type Step } from './Steps';
 import { Progress } from './Progress';
+import { Vision } from './Vision';
+import type { Fps } from '../core/time';
 
 const POLL_MS = 700;
 
@@ -65,6 +67,9 @@ interface Entry {
   cues?: number;
   duration?: number;
   preview?: boolean;
+  /* Whether a description is kept for this film — what the model said, which
+   * a rebuild reuses unless it is told otherwise. */
+  seen?: boolean;
   job?: Job;
   prepare?: Job;
   /* Every score kept for this film, newest first. Sent with the listing so a
@@ -90,12 +95,15 @@ const megabytes = (b: number) => (b / (1024 * 1024)).toFixed(0) + ' MB';
 const clock = (s: number) =>
   Math.floor(s / 60) + 'm' + String(Math.round(s % 60)).padStart(2, '0');
 
-export function Library(props: { onOpen: (film: string) => void }) {
+export function Library(props: { onOpen: (film: string) => void; fps: Fps }) {
   const [data, setData] = useState<View | null>(null);
   const [uploading, setUploading] = useState<{ name: string; percent: number } | null>(null);
   const polling = useRef(false);
   const file = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
+  /* Which film's description is open for reading. One at a time: it is a full
+   * panel, and comparing two descriptions is a different job from reading one. */
+  const [reading, setReading] = useState<string | null>(null);
   /* Which film's steps are open. One at a time: a page of ten expanded runs
    * is a wall, and comparing two is done in the version picker anyway. */
   const [open, setOpen] = useState<string | null>(null);
@@ -178,6 +186,15 @@ export function Library(props: { onOpen: (film: string) => void }) {
     await post('/api/build?reset=1&file=' + encodeURIComponent(e.film));
   };
 
+  /* Showing a film to the model again.
+   *
+   * Confirmed in the reading room rather than here, so that the confirmation
+   * can say what is being thrown away and the person answering has just been
+   * looking at it. This only sends the request. */
+  const lookAgain = async (film: string) => {
+    await post('/api/build?vision=redo&file=' + encodeURIComponent(film));
+  };
+
   const remove = async (e: Entry) => {
     const what = e.hasScore
       ? `Delete ${e.film} and its score? This cannot be undone.`
@@ -200,6 +217,14 @@ export function Library(props: { onOpen: (film: string) => void }) {
 
   return (
     <div className="lib">
+      {reading && (
+        <Vision
+          film={reading}
+          fps={props.fps}
+          onClose={() => setReading(null)}
+          onLookAgain={() => { void lookAgain(reading); }}
+        />
+      )}
       <div className="lib-head">
         <span className="dim small">
           {data.canBuild ? 'scores in ' + (data.scores || '(none)')
@@ -296,7 +321,11 @@ export function Library(props: { onOpen: (film: string) => void }) {
                   title={resumable(e.job)
                     ? `Continue from piece ${done(e.job)} of ${e.job!.chunks!.length}. ` +
                       'The finished pieces are kept.'
-                    : 'Analyse the whole film, in pieces that can be resumed'}
+                    : 'Analyse the whole film, in pieces that can be resumed.'
+                      + (e.seen
+                        ? ' What the model already said is reused — open vision'
+                          + ' to read it, or to ask it to look again.'
+                        : '')}
                 >{resumable(e.job) ? 'Resume' : e.hasScore ? 'Rebuild' : 'Analyse'}</button>
               )}
             </span>
@@ -316,6 +345,14 @@ export function Library(props: { onOpen: (film: string) => void }) {
                   onClick={() => post('/api/prepare?file=' + encodeURIComponent(e.film))}
                   title="Make a copy this browser can play. Usually quick: the video is only re-encoded when it has to be."
                 >Prepare</button>
+              )}
+            </span>
+            <span className="slot">
+              {e.seen && (
+                <button
+                  onClick={() => setReading(e.film)}
+                  title="Read what the model said about this film, and ask it to look again"
+                >vision</button>
               )}
             </span>
             <span className="slot">

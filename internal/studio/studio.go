@@ -180,6 +180,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/prepare", s.handlePrepare)
 	mux.HandleFunc("/api/layout", s.handleLayout)
 	mux.HandleFunc("/api/versions", s.handleVersions)
+	mux.HandleFunc("/api/seen", s.handleSeen)
 	// The rebuilt studio, alongside the original rather than instead of it.
 	mux.Handle("/v2/", s.handleWeb())
 	mux.Handle("/v2", http.RedirectHandler("/v2/", http.StatusFound))
@@ -680,6 +681,12 @@ type libraryEntry struct {
 	// without a request of its own — the listing is already polled while
 	// anything is running, and a second request per film would multiply that.
 	Builds []Version `json:"builds,omitempty"`
+	// Seen is whether a kept description exists — what the model said, which
+	// a rebuild reuses unless it is told not to. Only whether, not how much:
+	// this is answered for every film every time the library polls, and
+	// counting the lines of a feature would mean reading half a megabyte a
+	// second to render a button.
+	Seen bool `json:"seen"`
 	// Preview is whether a browser-playable copy exists, and Prepare is the
 	// job making one. Separate from Job, because a film can legitimately be
 	// being analysed and prepared at the same time.
@@ -729,6 +736,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 			entry.Duration = sc.Meta.Media.Duration.Duration().Seconds()
 		}
 		entry.Preview = f.Preview
+		entry.Seen = s.jobs.HasSeen(f.Name)
 		if job, ok := jobs[jobKey(JobAnalyse, f.Name)]; ok {
 			j := job
 			entry.Job = &j
@@ -740,6 +748,50 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Entries = append(out.Entries, entry)
 	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleSeen returns what the model said about one film.
+//
+// Read only, and deliberately the whole thing rather than a page of it. It is
+// read by a person deciding whether the description is worth keeping, and that
+// judgement is made by scrolling it — a page at a time would mean deciding
+// whether to pay for a new one based on the first twenty frames.
+func (s *Server) handleSeen(w http.ResponseWriter, r *http.Request) {
+	film := r.URL.Query().Get("film")
+	if film == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no film given"})
+		return
+	}
+	// The same rule as serving media: only a name that appeared in the
+	// listing, so this cannot be walked out of the media directory.
+	known := false
+	for _, f := range s.mediaFiles() {
+		if f.Name == film {
+			known = true
+			break
+		}
+	}
+	if !known {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such film"})
+		return
+	}
+
+	out := map[string]any{"film": film, "observations": []Observation{}}
+	// What produced it, when there is a record of it. Which model answered is
+	// the first thing anybody asks of a description they are judging.
+	if versions := s.jobs.Versions(film); len(versions) > 0 {
+		out["note"] = versions[0].Note
+		out["made"] = versions[0].Made
+	}
+	obs, err := s.jobs.ReadSeen(film)
+	if err != nil {
+		// Not an error to the caller: a film that has never been looked at
+		// has no description, which is an answer rather than a failure.
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	out["observations"] = obs
 	writeJSON(w, http.StatusOK, out)
 }
 

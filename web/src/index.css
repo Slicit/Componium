@@ -929,3 +929,83 @@ button:hover { border-color: #3a4553; }
   white-space: nowrap;
 }
 .progress-pct { flex: 0 0 auto; font-variant-numeric: tabular-nums; opacity: 0.85; }
+
+/* --- the reading room ---------------------------------------------------
+   What the model said about a film, at a size you can actually read it at.
+   A description of a feature is thousands of lines and the question being
+   asked of it — is this good enough to keep — is answered by scrolling. */
+.modal-back {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(6, 9, 14, 0.72);
+}
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: min(920px, 100%);
+  max-height: 100%;
+  background: var(--surface-2);
+  border: 1px solid #33404f;
+  border-radius: 7px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6);
+  padding: 14px 16px 12px;
+  gap: 10px;
+}
+.modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.modal-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.modal-sub { margin: 2px 0 0; word-break: break-all; }
+.modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.modal-note { margin: 0; max-width: 62ch; }
+
+.vis-summary { display: flex; flex-direction: column; gap: 7px; }
+.vis-summary p { margin: 0; }
+.vis-tally { display: flex; flex-wrap: wrap; gap: 5px; }
+.vis-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.vis-chip b { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 500; }
+/* How it described the scene, as opposed to what it saw in it. Quieter,
+   because it is context rather than a finding. */
+.vis-chip.is-scene { opacity: 0.62; }
+
+.vis-find { width: 100%; }
+
+.vis-rows { overflow-y: auto; min-height: 0; flex: 1; }
+.vis-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 190px) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.vis-row:first-child { border-top: none; }
+.vis-t { font-family: var(--mono); font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.vis-labels { display: flex; flex-wrap: wrap; gap: 4px; }
+.vis-said { color: var(--muted); }
+
+@media (max-width: 720px) {
+  /* Three columns of twelve characters each is not a table, it is a puzzle. */
+  .vis-row { grid-template-columns: 1fr; gap: 2px; }
+}

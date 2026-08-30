@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -75,4 +76,53 @@ func (j *Jobs) mergeSeen(film, out string) (int, error) {
 		return 0, err
 	}
 	return len(all), nil
+}
+
+// Observation is one moment the model was shown, and what it said about it.
+//
+// The time is counted from the start of the film, the labels are the closed
+// vocabulary the composer can act on, and the sentence is what the model
+// volunteered. The sentence drives nothing; it is there so a person reading
+// this can tell a model that missed something from one that was never shown it,
+// which is a distinction no count of labels can make.
+type Observation struct {
+	T      float64  `json:"t"`
+	Labels []string `json:"labels,omitempty"`
+	Seen   string   `json:"seen,omitempty"`
+}
+
+// HasSeen reports whether a description is kept for this film.
+//
+// A stat rather than a read. The library asks this for every film every time it
+// polls, and a feature analysed every two seconds has thousands of lines.
+func (j *Jobs) HasSeen(film string) bool {
+	info, err := os.Stat(j.SeenPath(film))
+	return err == nil && !info.IsDir() && info.Size() > 0
+}
+
+// ReadSeen returns what the model said about a film, in time order.
+//
+// A line that will not parse is skipped rather than fatal. The file is written
+// a line at a time by something that can be interrupted, so a half written last
+// line is an ordinary way for this to end and is not a reason to refuse the
+// several thousand lines above it.
+func (j *Jobs) ReadSeen(film string) ([]Observation, error) {
+	body, err := os.ReadFile(j.SeenPath(film))
+	if err != nil {
+		return nil, err
+	}
+	var out []Observation
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var o Observation
+		if err := json.Unmarshal([]byte(line), &o); err != nil {
+			continue
+		}
+		out = append(out, o)
+	}
+	sort.SliceStable(out, func(a, b int) bool { return out[a].T < out[b].T })
+	return out, nil
 }

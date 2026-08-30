@@ -874,7 +874,7 @@ export function App() {
 
       <section className="panel">
         <h2>Library <span className="dim small">one film, one score; analysis runs in the background, one at a time</span></h2>
-        <Library onOpen={openFilm} />
+        <Library onOpen={openFilm} fps={fps} />
       </section>
     </div>
   );
