@@ -356,13 +356,22 @@ const BUILDERS = {
 
   wind() {
     const group = new THREE.Group();
-    const streaks = particles(110, 0xbfe6ff, 0.075, 0.5, 0.5, 1.4);
+    /* Denser and larger, not more opaque: opacity was already at 0.85 and
+     * there was nowhere left to take it. The stream stays made of small fast
+     * points, because it has to read as moving air rather than as a cloud
+     * that happens to be travelling.
+     *
+     * The z spread is 1.3 so the furthest a particle can start is 2.6, which
+     * is exactly where drift() recycles it. At 1.4 the tail of the spread
+     * began beyond the range and was thrown back to the start on its first
+     * frame, so a slice of the stream was wasted before it was ever seen. */
+    const streaks = particles(300, 0xbfe6ff, 0.15, 0.55, 0.55, 1.3);
     group.add(streaks.points);
 
     return {
       group: group,
       apply(level, params, dt) {
-        streaks.material.opacity = level * 0.85;
+        streaks.material.opacity = level * 0.9;
         /* Speed reads as speed, and it is now the only thing that does: the
          * cone that used to sit over this stream was a translucent shape
          * hanging in the room, and it read as an object rather than as air. */
