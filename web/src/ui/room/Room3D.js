@@ -21,6 +21,7 @@
 import * as THREE from 'three';
 import { containScale, aspectOf, SCREEN_ASPECT } from '../../core/picture';
 import { repeatForAspect } from '../../core/tiling';
+import { Activity } from './activity';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
@@ -36,6 +37,36 @@ const SEAT_Z = 3.4;
  * either finished or too weak to matter, and drawing it anyway makes an idle
  * room look busy. Same threshold as the flat view, on purpose. */
 const ON = 0.02;
+
+/* Frames between two reads of the host's size.
+ *
+ * Reading clientWidth forces the browser to settle layout before it can
+ * answer, and doing that sixty times a second to learn that a panel is the
+ * same size it was is the sort of cost that does not show up in a profile as
+ * anything with a name. Six times a second is faster than anyone can drag a
+ * splitter, and a resize is drawn on the frame after it is noticed rather than
+ * the frame it happened. */
+const RESIZE_EVERY = 10;
+
+/* Parsed colours, kept.
+ *
+ * colourOf hands back a CSS string and THREE.Color parses one with a regular
+ * expression. Doing that per device per frame is work repeated on a value that
+ * usually has not changed between two frames. Cleared rather than grown
+ * without limit: a curve sweeping through hue produces a new string every
+ * frame, and a cache that only grows is a leak with a nicer name. */
+const COLOURS = new Map();
+const COLOUR_CACHE_MAX = 512;
+
+function parsedColour(css) {
+  let c = COLOURS.get(css);
+  if (c === undefined) {
+    if (COLOURS.size >= COLOUR_CACHE_MAX) COLOURS.clear();
+    c = new THREE.Color(css);
+    COLOURS.set(css, c);
+  }
+  return c;
+}
 
 /* Real point lights are the expensive part of this scene, and past a handful
  * they stop adding information: eight coloured sources already wash the room.
@@ -256,7 +287,7 @@ const BUILDERS = {
       group: group,
       attach(l) { light = l; },
       apply(level, params) {
-        const c = new THREE.Color(colourOf(params));
+        const c = parsedColour(colourOf(params));
         halo.material.color.copy(c);
         halo.material.opacity = level * 0.3;
         halo.scale.setScalar(0.2 + level * 0.8);
@@ -335,7 +366,7 @@ const BUILDERS = {
       fixed: true,
       setGain(v) { gain.value = Math.max(0, Math.min(1, Number(v) || 0)); },
       apply(level, params) {
-        const c = new THREE.Color(colourOf(params));
+        const c = parsedColour(colourOf(params));
         for (const strip of strips) {
           /* The emitter reads the colour, not the wash setting. Turning the
            * light in a room down does not make the strip itself dimmer to look
@@ -537,6 +568,12 @@ export class Room3D {
     this.wantScreen = null;
     this.wantProjection = null;
     this.wash = AMBIENT_WASH_DEFAULT;
+    /* Whether the next frame would look any different from the last. See
+     * activity.ts: the rule has a wrinkle and the wrinkle has tests. */
+    this.activity = new Activity();
+    this.repaintThrow = true;
+    this.resizeIn = 0;
+    this.lastPose = undefined;
     this.muted = new Set();
     this.forced = new Map();
     this.lights = 0;
@@ -929,6 +966,8 @@ export class Room3D {
    * exist, so a video is uploaded once however many things are looking at it.
    */
   applyFilm() {
+    this.activity.changed();
+    this.repaintThrow = true;
     const video = this.wantScreen || this.wantProjection || null;
 
     if (video !== this.picture) {
@@ -1047,6 +1086,7 @@ export class Room3D {
   }
 
   setMuted(muted) {
+    this.activity.changed();
     this.muted = muted;
   }
 
@@ -1066,6 +1106,7 @@ export class Room3D {
    * is: a linear slider spends most of its travel in a range that all looks
    * the same and then falls off a cliff at the end. */
   setBrightness(v) {
+    this.activity.changed();
     const level = Math.max(0, Math.min(1, Number(v)));
     this.brightness = level;
     /* Square rather than exponential, so the bottom of the slider is dark and
@@ -1119,6 +1160,7 @@ export class Room3D {
    * different times for different reasons.
    */
   setWash(v) {
+    this.activity.changed();
     this.wash = Math.max(0, Math.min(1, Number(v)));
     if (this.washDevice && this.washDevice.setGain) {
       this.washDevice.setGain(this.wash);
@@ -1129,6 +1171,7 @@ export class Room3D {
   /* Forced levels: id -> 0..1, overriding whatever the score says. See the
    * force panel in app.js. */
   setForced(forced) {
+    this.activity.changed();
     this.forced = forced || new Map();
   }
 
@@ -1137,6 +1180,7 @@ export class Room3D {
    * it: rebuilding the scene graph every tick is how a preview becomes a
    * slideshow. */
   setInstruments(instruments) {
+    this.activity.changed();
     for (const [, d] of this.devices) {
       this.scene.remove(d.group);
       disposeTree(d.group);
@@ -1201,6 +1245,10 @@ export class Room3D {
    * being given frames. */
   update(state) {
     this.state = state || {};
+    this.activity.changed();
+    /* The playhead may have moved, which for a paused film is the only signal
+     * that the projected copy is out of date. */
+    this.repaintThrow = true;
     this.frame();
   }
 
@@ -1211,12 +1259,26 @@ export class Room3D {
     const dt = this.last ? Math.min((now - this.last) / 1000, 0.1) : 0.016;
     this.last = now;
 
-    this.resize();
+    /* Polled rather than watched, and not on every frame. See RESIZE_EVERY. */
+    this.resizeIn = (this.resizeIn || 0) - 1;
+    if (this.resizeIn <= 0) {
+      this.resizeIn = RESIZE_EVERY;
+      if (this.resize()) this.activity.changed();
+    }
 
+    /* Whether this frame would look different from the last one.
+     *
+     * A device doing something, a camera still settling, a film playing, or
+     * anything that told us so directly. Everything below sets it; the render
+     * at the bottom is skipped when none of it did. */
     const state = this.state;
     for (const [id, device] of this.devices) {
       const { level, params, muted } = readDevice(state, id, this.muted, this.forced);
       device.apply(level, params, dt);
+      /* Above the floor means particles drifting, an opacity ramping, a light
+       * that is on. At or below it the device has settled and its own apply()
+       * has nothing left to change. */
+      if (level > ON) this.activity.moved();
 
       /* A muted device is shrunk, not hidden and not dimmed.
        *
@@ -1238,6 +1300,15 @@ export class Room3D {
      * room scale is a couch that appears not to move at all. */
     this.seat.position.set(pose.sway * 0.5, pose.heave * 0.5, this.seatRest + pose.surge * 0.5);
     this.seat.rotation.set(pose.pitch * 0.6, pose.yaw * 0.6, pose.roll * 0.6);
+    /* A held tilt is not movement. The couch resting off centre looks the same
+     * every frame, so what matters is whether the pose changed, not whether it
+     * is at rest. */
+    const posed = pose.sway + pose.heave + pose.surge
+      + pose.pitch + pose.yaw + pose.roll;
+    if (this.lastPose === undefined || Math.abs(posed - this.lastPose) > 1e-6) {
+      this.activity.moved();
+    }
+    this.lastPose = posed;
 
     /* The picture, if there is one.
      *
@@ -1259,14 +1330,30 @@ export class Room3D {
      * pixels wide and the alternative - working out whether the film has
      * advanced - costs more thought than the draw does. Nothing happens at all
      * when the projector is off. */
+    const running = !!(this.picture && !this.picture.paused
+      && this.picture.readyState >= 2);
+    /* While it plays, and once more whenever the film was moved or switched
+     * under it. A seek while paused presents a new frame and nothing else
+     * would notice. */
     if (this.projector.visible && this.throwContext && this.picture
-        && this.picture.readyState >= 2) {
+        && this.picture.readyState >= 2 && (running || this.repaintThrow)) {
+      this.repaintThrow = false;
       const c = this.throwCanvas;
       this.throwContext.drawImage(this.picture, 0, 0, c.width, c.height);
       this.projectorTexture.needsUpdate = true;
     }
+    /* A playing film changes the screen and the projection every frame; a
+     * paused one changes neither until something says so. */
+    if (running && (this.wantScreen || this.projector.visible)) {
+      this.activity.moved();
+    }
 
-    if (this.controls) this.controls.update();
+    /* Damping keeps moving the camera for a while after the pointer stops, and
+     * update() reports whether it actually did. It has to be called either way
+     * or the damping never settles. */
+    if (this.controls && this.controls.update()) this.activity.moved();
+
+    if (!this.activity.take()) return;
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -1277,12 +1364,13 @@ export class Room3D {
   resize() {
     const w = this.host.clientWidth || 640;
     const h = this.host.clientHeight || 360;
-    if (w === this.width && h === this.height) return;
+    if (w === this.width && h === this.height) return false;
     this.width = w;
     this.height = h;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h, false);
+    return true;
   }
 
   /* Giving up the GPU context matters: browsers allow a small number of live
@@ -1334,6 +1422,7 @@ export class Room3D {
    * then move, then update again from a standstill.
    */
   setView(view) {
+    this.activity.changed();
     const want = view || HOME_VIEW;
     if (!Array.isArray(want.pos) || !Array.isArray(want.target)) return;
     const damping = this.controls.enableDamping;

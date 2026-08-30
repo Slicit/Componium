@@ -174,9 +174,25 @@ export function Timeline(props: TimelineProps) {
     }
 
     paint(ctx, list, FONT, MONO);
-  }, [score, rig, view, time, lay, fps, overlays, edit.selected, edit.band, edit.guide, edit.version]);
+    /* view.start and view.span rather than view.
+     *
+     * The view is a stable mutable object — App holds one for the life of a
+     * film and pans it in place — so depending on the object would key this to
+     * something that never changes and no scroll or zoom would ever redraw.
+     * The window it describes is those two numbers, and they are read fresh on
+     * every render, so React can see them move.
+     *
+     * The score is mutated in place too, by every command. `lay` covers that:
+     * it is rebuilt whenever `revision` changes, so an edit produces a new
+     * layout object and a new draw with it.
+     */
+  }, [score, rig, view, view.start, view.span, time, lay, fps, overlays,
+    edit.selected, edit.band, edit.guide, edit.version]);
 
-  useEffect(() => { draw(); });
+  /* Keyed on the draw itself, which changes exactly when its inputs do. It
+   * used to have no dependency array at all, which redrew on every commit of
+   * this component whatever had caused it. */
+  useEffect(() => { draw(); }, [draw]);
 
   useEffect(() => {
     const on = () => draw();
