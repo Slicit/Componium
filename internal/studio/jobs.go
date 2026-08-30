@@ -311,12 +311,28 @@ func (j *Jobs) pump() {
 // Snapshot returns every job, keyed by kind and film, for the UI.
 func (j *Jobs) Snapshot() map[string]Job {
 	j.mu.Lock()
-	defer j.mu.Unlock()
-	out := make(map[string]Job, len(j.jobs))
+	jobs := make(map[string]Job, len(j.jobs))
+	films := make([]string, 0, len(j.jobs))
 	for k, v := range j.jobs {
-		out[k] = *v
+		jobs[k] = *v
+		if v.Kind == JobAnalyse && v.State == JobRunning && len(v.Steps) > 0 {
+			films = append(films, v.Film)
+		}
 	}
-	return out
+	j.mu.Unlock()
+
+	// A running analysis has its bar recomputed here rather than only when a
+	// step changes. The longest step of a feature is twenty minutes, and a bar
+	// that only moves between steps does not move at all for twenty minutes —
+	// which is indistinguishable from a job that has hung, and the question
+	// the bar is answering is precisely that.
+	for _, film := range films {
+		key := jobKey(JobAnalyse, film)
+		job := jobs[key]
+		job.Progress = predict(job.Steps, j.expect(film), len(job.Chunks))
+		jobs[key] = job
+	}
+	return jobs
 }
 
 // Pending reports how many jobs are waiting or running, so the UI can say

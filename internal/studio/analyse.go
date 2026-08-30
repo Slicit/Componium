@@ -205,9 +205,11 @@ func (j *Jobs) runAnalyse(film string) error {
 			job.Label = said
 		})
 		j.endSteps(film, "", said)
+		j.finishRecord(film)
 		return nil
 	}
 	j.endSteps(film, "", "")
+	j.finishRecord(film)
 	return nil
 }
 

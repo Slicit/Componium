@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { ALL, DEFAULT_PAGE_SIZE, PAGE_SIZES, matches, paginate } from '../core/paging';
-import { Steps, type Step } from './Steps';
+import { Steps, howLong, type Step } from './Steps';
 
 const POLL_MS = 700;
 
@@ -38,6 +38,15 @@ interface Job {
   steps?: Step[];
 }
 
+interface Build {
+  id: string;
+  label: string;
+  note?: string;
+  cues: number;
+  seconds?: number;
+  steps?: Step[];
+}
+
 /** How many pieces of this film are finished and will not be redone. */
 const done = (job?: Job) => (job?.chunks ?? []).filter((c) => c.state === 'done').length;
 
@@ -57,6 +66,9 @@ interface Entry {
   preview?: boolean;
   job?: Job;
   prepare?: Job;
+  /* Every score kept for this film, newest first. Sent with the listing so a
+   * row can show its history without a request of its own. */
+  builds?: Build[];
 }
 
 interface View {
@@ -307,12 +319,12 @@ export function Library(props: { onOpen: (film: string) => void }) {
               )}
             </span>
             <span className="slot">
-              {(e.job?.steps?.length ?? 0) > 0 && (
+              {((e.job?.steps?.length ?? 0) > 0 || (e.builds?.length ?? 0) > 0) && (
                 <button
                   onClick={() => setOpen(open === e.film ? null : e.film)}
                   aria-expanded={open === e.film}
-                  title="What this run did, and how long each part took"
-                >{open === e.film ? 'hide' : 'steps'}</button>
+                  title="Every build of this film, and what each step cost"
+                >{open === e.film ? 'hide' : `builds${e.builds?.length ? ' ' + e.builds.length : ''}`}</button>
               )}
             </span>
             <span className="slot slot-icon">
@@ -326,9 +338,36 @@ export function Library(props: { onOpen: (film: string) => void }) {
               )}
             </span>
           </div>
-          {open === e.film && e.job?.steps && (
+          {open === e.film && (
             <div className="lib-steps">
-              <Steps steps={e.job.steps} />
+              {/* The run happening now, if one is, above the ones that are
+                  finished — it is the one being watched. */}
+              {e.job?.state === 'running' && e.job.steps && (
+                <div className="build build-now">
+                  <div className="build-head">
+                    <strong>running now</strong>
+                    <span className="dim small">{e.job.label}</span>
+                  </div>
+                  <Steps steps={e.job.steps} />
+                </div>
+              )}
+              {(e.builds ?? []).map((b) => (
+                <div className="build" key={b.id}>
+                  <div className="build-head">
+                    <strong>{b.label}</strong>
+                    <span className="dim small">{b.note}</span>
+                    {b.seconds ? <span className="build-took small">{howLong(b.seconds)}</span> : null}
+                  </div>
+                  {b.steps?.length
+                    ? <Steps steps={b.steps} total={b.seconds} />
+                    : <p className="dim small build-none">
+                        Made before the steps were recorded, so there is nothing to show.
+                      </p>}
+                </div>
+              ))}
+              {!(e.builds ?? []).length && e.job?.state !== 'running' && (
+                <p className="dim small build-none">No builds kept for this film yet.</p>
+              )}
             </div>
           )}
         </div>

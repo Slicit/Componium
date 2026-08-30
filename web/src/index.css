@@ -538,10 +538,13 @@ button:hover { border-color: #3a4553; }
 /* Five slots, always in the same order and always the same width, so a button
    stays where it was between one row and the next and between one refresh and
    the next. An empty slot holds its place rather than closing up. */
-:root { --lib-actions: 310px; }
+:root { --lib-actions: 352px; }
 .lib-actions {
   display: grid;
-  grid-template-columns: 52px 72px 52px 68px 30px;
+  /* One column per slot, and the count has to match: a sixth slot added
+     against five columns wrapped onto a second row, which is what put the
+     buttons on a line of their own. */
+  grid-template-columns: 52px 72px 52px 68px 46px 30px;
   gap: 6px;
   justify-content: end;
 }
@@ -838,3 +841,20 @@ button:hover { border-color: #3a4553; }
 .step-total .step-secs { font-variant-numeric: tabular-nums; }
 .step-notes { margin: 6px 0 0; padding-left: 16px; line-height: 1.5; }
 .step-notes strong { font-weight: 500; }
+
+/* --- every build of a film --- */
+
+.build { padding: 8px 0; border-bottom: 1px dashed #1a2027; }
+.build:last-child { border-bottom: none; }
+.build-head {
+  display: flex; align-items: baseline; gap: 10px;
+  padding-bottom: 5px; font-size: 12px;
+}
+.build-head strong { font-weight: 500; }
+.build-head .dim { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.build-took { font-variant-numeric: tabular-nums; }
+.build-none { margin: 0; padding: 4px 0; }
+/* The run happening now is the one being watched, so it is marked and put on
+   top rather than sorted in with the ones that are finished. */
+.build-now { border-left: 2px solid var(--accent); padding-left: 8px; }
+.build-now .build-head strong { color: var(--accent); }

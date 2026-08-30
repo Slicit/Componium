@@ -675,6 +675,11 @@ type libraryEntry struct {
 	Cues      int     `json:"cues,omitempty"`
 	Duration  float64 `json:"duration,omitempty"`
 	Job       *Job    `json:"job,omitempty"`
+	// Builds is every score kept for this film, newest first, with what each
+	// run did and cost. Sent with the listing so a row can show the history
+	// without a request of its own — the listing is already polled while
+	// anything is running, and a second request per film would multiply that.
+	Builds []Version `json:"builds,omitempty"`
 	// Preview is whether a browser-playable copy exists, and Prepare is the
 	// job making one. Separate from Job, because a film can legitimately be
 	// being analysed and prepared at the same time.
@@ -728,6 +733,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 			j := job
 			entry.Job = &j
 		}
+		entry.Builds = s.jobs.Versions(f.Name)
 		if job, ok := jobs[jobKey(JobPrepare, f.Name)]; ok {
 			j := job
 			entry.Prepare = &j

@@ -35,12 +35,14 @@ type Step struct {
 // next one starts, so recording the start of each is enough to time all of
 // them, and nothing has to remember to stop.
 func (j *Jobs) beginStep(film, name string) {
+	expect := j.expect(film)
 	j.update(JobAnalyse, film, false, func(job *Job) {
 		closeStep(job, "", "")
 		job.Steps = append(job.Steps, Step{
 			Name:    name,
 			Started: time.Now().UTC().Format(time.RFC3339),
 		})
+		job.Progress = predict(job.Steps, expect, len(job.Chunks))
 	})
 }
 
@@ -96,6 +98,23 @@ func (j *Jobs) stepsOf(film string) []Step {
 		return append([]Step(nil), job.Steps...)
 	}
 	return nil
+}
+
+// finishRecord copies the completed step list onto the version this run kept.
+//
+// Quietly: the score and its steps are both already on disk, and failing to
+// tidy the record is not worth telling anybody about.
+func (j *Jobs) finishRecord(film string) {
+	j.mu.Lock()
+	var id string
+	if job, ok := j.jobs[jobKey(JobAnalyse, film)]; ok {
+		id = job.Version
+	}
+	j.mu.Unlock()
+	if id == "" {
+		return
+	}
+	_ = j.Restep(film, id, j.stepsOf(film))
 }
 
 // Elapsed is how long every step took together, for a summary line.

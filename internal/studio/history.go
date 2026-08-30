@@ -180,6 +180,34 @@ func (j *Jobs) Keep(film string, sc *score.Score, note string) (Version, error) 
 	return v, os.WriteFile(filepath.Join(dir, id+".json"), body, 0o644)
 }
 
+// Restep rewrites a kept version's record of what the run cost.
+//
+// A version is kept as the score is written, which is part way through the run
+// that made it: the passes that quiet the film and apply what the model saw
+// come after, and so did not exist to be recorded. Rather than keep the score
+// later — it is wanted on disk as early as possible, so an interrupted run
+// still leaves one — the record is completed when the run is.
+func (j *Jobs) Restep(film, id string, steps []Step) error {
+	if id == "" || len(steps) == 0 {
+		return nil
+	}
+	path := filepath.Join(j.historyDir(film), id+".json")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var v Version
+	if err := json.Unmarshal(body, &v); err != nil {
+		return err
+	}
+	v.Steps = steps
+	out, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0o644)
+}
+
 // Versions lists a film's kept scores, newest first.
 //
 // A version whose sidecar is missing or unreadable is still listed, described
