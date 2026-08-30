@@ -44,7 +44,7 @@ TIMEOUT = float(os.environ.get("COMPONIUM_VLM_TIMEOUT", "120"))
 
 # What the composer can do something with. Anything else is noise.
 EFFECTS = (
-    "explosion", "lightning", "fire", "smoke", "dust", "splash", "water", "rain",
+    "explosion", "lightning", "fire", "smoke", "dust", "splash", "rain",
 )
 SCENES = ("calm", "active")
 
@@ -69,9 +69,11 @@ physical effects — fans, lights, water, smoke — for the audience watching it
 Report only what is plainly visible IN THIS FRAME. You are not describing the
 story, guessing what happens next, or inferring from context.
 
-Reply with exactly two lines and nothing else. No explanation.
+Reply with exactly three lines and nothing else. No explanation.
 
 EFFECTS: <comma-separated words from the list below, or the word none>
+WATER: <yes if any sea, lake, river or large stretch of water is visible
+        anywhere in the frame, however calm, otherwise no>
 SCENE: <calm or active>
 
 The only permitted effect words:
@@ -83,8 +85,6 @@ The only permitted effect words:
   dust       a burst of dust or debris thrown into the air by an impact.
   splash     water thrown into the air: spray, a breaking wave, something
              hitting water. The water must be moving.
-  water      a large body of water present in the scene: sea, lake, river.
-             This describes the setting, not an event.
   rain       rain visibly falling.
 
 If none of those are plainly visible, answer exactly: EFFECTS: none
@@ -96,6 +96,15 @@ SCENE is about how much is happening to the audience, not how pretty it is:
 
 Most frames of most films are calm. Answer active only when something is
 actually happening."""
+
+# Water is asked separately because it is not an effect and the prompt spends
+# its first paragraphs insisting on effects.
+#
+# Listed among them it was simply never reported: a still sea on the horizon is
+# the least event-like thing in a frame, and two rewordings inside the list
+# changed nothing at all — the model would not put a setting in a line called
+# EFFECTS. Asked as its own question it answers correctly on every frame tried,
+# water and dry alike. The distinction is real, so the prompt now has it too.
 
 
 # Prefer IPv4, because a name on a home LAN is often not one address.
@@ -223,6 +232,13 @@ def parse(reply: str) -> list[str]:
             for word in re.split(r"[^a-z]+", rest):
                 if word in EFFECTS and word not in out:
                     out.append(word)
+        elif head == "water":
+            # Emitted as a plain "water" label, because that is what the rest
+            # of the composer already reads: it confirms a blue scene really
+            # is water, and it is what the splash gate corroborates against.
+            # The question changed shape, not the answer.
+            if "yes" in re.split(r"[^a-z]+", rest) and "water" not in out:
+                out.append("water")
         elif head == "scene":
             for word in re.split(r"[^a-z]+", rest):
                 if word in SCENES:
