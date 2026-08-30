@@ -45,8 +45,19 @@ export function Room(props: {
   view?: CameraView | null;
   /** Called as the camera moves, so the arrangement can remember it. */
   onView?: (view: CameraView) => void;
+  /**
+   * Bumped whenever the score is edited.
+   *
+   * Not decoration. Commands mutate the score in place — they hold references
+   * to the tracks and cues they act on, because every edit re-sorts the track —
+   * so the score object handed down here is the same object before and after an
+   * edit, and an effect watching it never runs again. Adding a cue at the
+   * playhead therefore changed nothing in the room until you scrubbed away and
+   * back, which reads as the room being out of sync with the timeline.
+   */
+  revision?: number;
 }) {
-  const { score, rig, time, muted, forced, brightness, view, onView } = props;
+  const { score, rig, time, muted, forced, brightness, view, onView, revision } = props;
   const host = useRef<HTMLDivElement>(null);
   const room = useRef<RoomHandle | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
@@ -102,7 +113,7 @@ export function Room(props: {
    * conductor is. One thing owns the playhead. */
   useEffect(() => {
     room.current?.update(evaluate(score, time, rig));
-  }, [score, time, rig, status, muted, forced]);
+  }, [score, revision, time, rig, status, muted, forced]);
 
   return (
     <div className="room">

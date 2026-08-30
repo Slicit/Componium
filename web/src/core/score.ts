@@ -182,7 +182,33 @@ export function channelsOf(track: Track, rig?: Rig | null): string[] {
     const rest = [...seen].filter((c) => !order.includes(c)).sort();
     return [...first, ...rest];
   }
-  return kindOf(track.instrument, rig) === 'light' ? [...COLOUR_KEYS] : ['intensity'];
+  return [...channelsForKind(kindOf(track.instrument, rig))];
+}
+
+/**
+ * The channels a kind of device is driven by, for a track with no points yet.
+ *
+ * An empty track has nothing to read, so this is what decides what a person
+ * can author into it — and it used to answer "intensity" for everything that
+ * was not a light. That is the name a fan and a shaker take, and it is not the
+ * name a fogger takes: adding a fog track gave you an intensity channel the
+ * fogger has no use for, and no way to reach the output it does.
+ *
+ * Anything not named here keeps intensity, which is the right answer for a fan
+ * and a shaker and a fair guess for a device this table has not met.
+ */
+const CHANNELS_BY_KIND: Record<string, readonly string[]> = {
+  light: COLOUR_KEYS,
+  /* Foggers and misters are dosed, not dimmed: how much they put out. */
+  fog: ['output'],
+  mist: ['output'],
+  /* Three axes, because three is the default the analysis writes. A six axis
+   * score names its own channels in its points, so it never reaches here. */
+  motion: ['heave', 'roll', 'pitch'],
+};
+
+export function channelsForKind(kind: string): readonly string[] {
+  return CHANNELS_BY_KIND[kind] ?? ['intensity'];
 }
 
 export function kindOf(instrument: string, rig?: Rig | null): string {

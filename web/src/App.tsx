@@ -30,6 +30,16 @@ import type { Cue, Point } from './core/score';
 
 interface Film { name: string; size: number; preview?: boolean }
 
+/* Hoisted rather than written inline in the markup.
+ *
+ * A fresh Set on every render is a changed dependency on every render, and the
+ * room re-evaluates every track of the score when its dependencies change —
+ * so an empty set built in place cost a full pass over the score for each
+ * keystroke. Nothing in the studio mutes anything yet; when something does,
+ * this becomes state.
+ */
+const NO_MUTES = new Set<string>();
+
 export function App() {
   const [score, setScore] = useState<Score | null>(null);
   const [rig, setRig] = useState<Rig | null>(null);
@@ -607,11 +617,12 @@ export function App() {
               score={score}
               rig={rig}
               time={time}
-              muted={new Set<string>()}
+              muted={NO_MUTES}
               forced={forced}
               brightness={brightness}
               view={views.camera}
               onView={views.onCamera}
+              revision={history.version}
             />
             {split.force && <Force rig={rig} forced={forced} onChange={setForced} />}
           </div>
