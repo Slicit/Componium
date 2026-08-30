@@ -761,6 +761,12 @@ export function App() {
       />
 
       <section className="tl">
+        {/* The lanes and the editor, side by side. The editor is a column
+            rather than a panel that appears over the corner: it is drawn even
+            with nothing selected, so the lanes keep one width and the place to
+            edit is somewhere you look rather than somewhere you wait for. */}
+        <div className="tl-split">
+        <div className="tl-lanes">
         <div className="tl-body">
           <TrackHeads
             score={score}
@@ -793,6 +799,7 @@ export function App() {
             so the window box lines up with the time it represents. */}
         <div className="tl-under">
           <Overview score={score} rig={rig} view={view} time={time} onView={onView} />
+        </div>
         </div>
         {addMenu && (
           <Menu
@@ -848,6 +855,7 @@ export function App() {
           onSeek={seek}
           onClose={edit.clearFocus}
         />
+        </div>
         <p className="legend dim small">
           wheel scrolls · ⇧/⌘ wheel zooms · drag the ruler to scrub · drag the strip below to move
           · <kbd>←</kbd><kbd>→</kbd> frame · <kbd>F</kbd> fit

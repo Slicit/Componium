@@ -127,21 +127,60 @@ export function amplitudeOf(params: Params | undefined): number | null {
 }
 
 /** A colour to tint an event with, when it has one. */
-export function colourOf(params: Params | undefined): string | null {
+/**
+ * The colour these params describe, as three numbers 0 to 1, or null.
+ *
+ * The one place that decides what a set of channels looks like. Everything
+ * that shows a colour — the ribbon, an event tint, the swatch, the picker —
+ * formats this rather than repeating the rule, because two answers to "what
+ * colour is this cue" is a bug waiting for someone to notice the timeline and
+ * the editor disagreeing.
+ */
+export function rgbOf(params: Params | undefined): [number, number, number] | null {
   if (!params) return null;
 
   /* Authored as hue: convert, so the ribbon and every event tint show the
    * colour a fixture will actually be sent rather than nothing at all. */
   if (typeof params.h === 'number' || typeof params.s === 'number') {
-    const [r, g, b] = hsiToRGB(params.h ?? 0, params.s ?? 0, params.i ?? 0);
-    const c = (v: number) => Math.round(clamp01(v) * 255);
-    return `rgb(${c(r)}, ${c(g)}, ${c(b)})`;
+    return hsiToRGB(params.h ?? 0, params.s ?? 0, params.i ?? 0);
   }
 
   const has = COLOUR_KEYS.some((k) => typeof params[k] === 'number');
   if (!has) return null;
-  const c = (k: string) => Math.round(clamp01(params[k] ?? 0) * 255);
-  return `rgb(${c('r')}, ${c('g')}, ${c('b')})`;
+  return [clamp01(params.r ?? 0), clamp01(params.g ?? 0), clamp01(params.b ?? 0)];
+}
+
+export function colourOf(params: Params | undefined): string | null {
+  const rgb = rgbOf(params);
+  if (!rgb) return null;
+  const c = (v: number) => Math.round(clamp01(v) * 255);
+  return `rgb(${c(rgb[0])}, ${c(rgb[1])}, ${c(rgb[2])})`;
+}
+
+/** The same colour as `#rrggbb`, which is the only thing a colour input takes. */
+export function hexOf(params: Params | undefined): string | null {
+  const rgb = rgbOf(params);
+  if (!rgb) return null;
+  return toHex(rgb[0], rgb[1], rgb[2]);
+}
+
+export function toHex(r: number, g: number, b: number): string {
+  const c = (v: number) => Math.round(clamp01(v) * 255).toString(16).padStart(2, '0');
+  return `#${c(r)}${c(g)}${c(b)}`;
+}
+
+/**
+ * `#rrggbb` back to three numbers 0 to 1, or null if it is not one.
+ *
+ * Only the six digit form, because that is what `<input type="color">` gives
+ * back. Anything else is a caller with a different idea of what it is holding,
+ * and guessing at it would turn a typo into a colour.
+ */
+export function fromHex(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
 /** Where an event ends. Momentary cues end where they start. */
@@ -324,6 +363,64 @@ export function hsiToRGB(h: number, s: number, i: number): [number, number, numb
     default: return [val, p, q];
   }
 }
+
+/**
+ * The inverse of hsiToRGB: a colour back into hue, saturation and intensity.
+ *
+ * What a colour picker needs. It hands back a colour and a track stores
+ * channels, so something has to do the conversion and it may as well be the
+ * file that already owns the other direction.
+ *
+ * Grey has no hue — every hue produces it at zero saturation — so this returns
+ * 0 rather than pretending to know. A caller editing an existing point should
+ * keep the hue it had in that case, or picking white would silently swing the
+ * hue to red and show it the moment saturation came back up.
+ */
+export function rgbToHSI(r: number, g: number, b: number): [number, number, number] {
+  const red = clamp01(r);
+  const green = clamp01(g);
+  const blue = clamp01(b);
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const span = max - min;
+
+  let hue = 0;
+  if (span > 0) {
+    if (max === red) hue = ((green - blue) / span + 6) % 6;
+    else if (max === green) hue = (blue - red) / span + 2;
+    else hue = (red - green) / span + 4;
+    hue /= 6;
+  }
+  return [hue, max === 0 ? 0 : span / max, max];
+}
+
+
+/**
+ * Write a picked colour into whichever channels these params actually use.
+ *
+ * Only the ones already there. A point storing hue and saturation but no
+ * intensity is a point about hue, and quietly giving it a third channel would
+ * change what it means as well as what it looks like.
+ *
+ * Grey is the case worth knowing about: it has no hue, so the conversion
+ * reports zero, and taking that literally would swing a point to red the
+ * moment its saturation came back up. The hue it had is kept instead.
+ */
+export function writeColour(params: Params, hex: string): void {
+  const rgb = fromHex(hex);
+  if (!rgb) return;
+  if (typeof params.h === 'number' || typeof params.s === 'number') {
+    const [h, s, i] = rgbToHSI(rgb[0], rgb[1], rgb[2]);
+    if (typeof params.h === 'number' && s > 0) params.h = round3(h);
+    if (typeof params.s === 'number') params.s = round3(s);
+    if (typeof params.i === 'number') params.i = round3(i);
+    return;
+  }
+  if (typeof params.r === 'number') params.r = round3(rgb[0]);
+  if (typeof params.g === 'number') params.g = round3(rgb[1]);
+  if (typeof params.b === 'number') params.b = round3(rgb[2]);
+}
+
 
 /**
  * Interpolate a colour, taking hue the short way round and carrying a hue

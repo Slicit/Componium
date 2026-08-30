@@ -348,18 +348,20 @@ button:hover { border-color: #3a4553; }
 
 /* --- inspector ---------------------------------------------------------- */
 
+/* The lanes and the editor share a row; the lanes take what is left.
+   min-width: 0 because a flex item defaults to the width of its content, and
+   the timeline's content is a two hour film — without it the lanes push the
+   editor off the end rather than scrolling inside themselves. */
+.tl-split { display: flex; align-items: stretch; }
+.tl-lanes { flex: 1; min-width: 0; }
+
 .insp {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
+  flex: 0 0 268px;
   width: 268px;
-  max-height: 70vh;
+  align-self: stretch;
   overflow-y: auto;
-  z-index: 40;
   background: var(--surface-2);
-  border: 1px solid #33404f;
-  border-radius: 6px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  border-left: 1px solid var(--line);
   padding: 10px 12px 12px;
 }
 .insp header {
@@ -397,6 +399,31 @@ button:hover { border-color: #3a4553; }
   font-size: 12px;
 }
 .insp-label { color: var(--muted); font-family: var(--mono); font-size: 10.5px; }
+/* Empty is a state it draws, so it needs to look deliberate rather than
+   broken: the note is what an empty editor is for. */
+.insp.is-empty .insp-note { margin-top: 0; }
+
+.insp-colour { display: inline-flex; align-items: center; gap: 7px; }
+.insp-hex {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+/* A colour input draws its own chrome, and every browser draws it differently.
+   Stripped back to the swatch itself so it matches the one it replaced. */
+.swatch-pick {
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+  inline-size: 34px;
+  block-size: 18px;
+}
+.swatch-pick::-webkit-color-swatch-wrapper { padding: 0; }
+.swatch-pick::-webkit-color-swatch { border: none; border-radius: 2px; }
+.swatch-pick::-moz-color-swatch { border: none; border-radius: 2px; }
 .insp-value { font-variant-numeric: tabular-nums; }
 .insp-row.is-channel .insp-label { color: var(--accent); }
 

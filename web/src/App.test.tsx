@@ -203,7 +203,19 @@ describe('the inspector', () => {
     expect(labels).toContain('intensity');
   });
 
-  it('closes again', async () => {
+  it('is there before anything is selected', async () => {
+    // The whole reason it moved out of the corner. A pane that appears only
+    // when there is something in it is a pane you wait for, and the lanes
+    // beside it change width every time you click.
+    render(<App />);
+    await waitFor(() => expect(document.querySelectorAll('.tl-name').length).toBe(2));
+    expect(document.querySelector('.insp.is-empty')).not.toBeNull();
+    // And it is beside the lanes rather than over them.
+    expect(document.querySelector('.tl-split .insp')).not.toBeNull();
+    expect(document.querySelector('.tl-split .tl-lanes')).not.toBeNull();
+  });
+
+  it('empties, and stays where it is', async () => {
     render(<App />);
     await waitFor(() => expect(document.querySelectorAll('.tl-name').length).toBe(2));
     const surface = document.querySelector('.tl-surface') as HTMLElement;
@@ -217,7 +229,13 @@ describe('the inspector', () => {
     await waitFor(() => expect(document.querySelector('.insp')).not.toBeNull());
 
     fireEvent.click(document.querySelector('.insp-close')!);
-    await waitFor(() => expect(document.querySelector('.insp')).toBeNull());
+    /* The pane stays. It is a place to edit rather than something that appears
+     * when there is editing to do — if it came and went, the lanes beside it
+     * would change width on every click. What the button clears is the
+     * selection, and empty is a state the pane draws. */
+    await waitFor(() => expect(document.querySelector('.insp.is-empty')).not.toBeNull());
+    expect(document.querySelector('.insp')).not.toBeNull();
+    expect(document.querySelector('.insp-close')).toBeNull();
   });
 });
 

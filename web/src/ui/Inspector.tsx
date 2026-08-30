@@ -15,7 +15,7 @@ import type { History } from '../core/history';
 import { movePoints, moveCues, resizeCues } from '../core/history';
 import { durationLabel, parseTime, timecode, clamp01, round3, type Fps } from '../core/time';
 import {
-  amplitudeOf, colourOf, cueEnd, isHSI, isSpan,
+  amplitudeOf, cueEnd, hexOf, isHSI, isSpan, writeColour,
   type Cue, type Point, type Score, type Track,
 } from '../core/score';
 
@@ -36,7 +36,25 @@ export function Inspector(props: {
   onClose: () => void;
 }) {
   const { score, selection, history, fps, onChanged, onSeek, onClose } = props;
-  if (!selection) return null;
+
+  /* Drawn empty rather than not drawn.
+   *
+   * This used to vanish when nothing was selected, which meant the lanes
+   * changed width every time you clicked something and the editor was a place
+   * you waited for rather than a place you looked. An empty pane costs a
+   * column and says what it is for. */
+  if (!selection) {
+    return (
+      <aside className="insp is-empty">
+        <header><span className="insp-what">Editor</span></header>
+        <p className="insp-note">
+          Click an event or a curve point and its numbers appear here, where
+          they can be typed exactly rather than dragged approximately.
+        </p>
+      </aside>
+    );
+  }
+
   const { track, cue, point, channel } = selection;
 
   const run = (cmd: ReturnType<typeof movePoints> | null) => {
@@ -50,7 +68,9 @@ export function Inspector(props: {
     <aside className="insp">
       <header>
         <span className="insp-what">{track.instrument}</span>
-        <button className="insp-close" onClick={onClose} aria-label="Close">×</button>
+        <button className="insp-close" onClick={onClose}
+                aria-label="Clear selection"
+                title="Clear the selection. The editor stays.">×</button>
       </header>
 
       {cue && (
@@ -106,8 +126,21 @@ export function Inspector(props: {
             />
           ))}
 
-          {colourOf(cue.params) && (
-            <Row label="Colour" value={<span className="swatch" style={{ background: colourOf(cue.params)! }} />} />
+          {hexOf(cue.params) && (
+            <Swatch
+              label="Colour"
+              hex={hexOf(cue.params)!}
+              onPick={(picked) => {
+                /* Written directly, like the parameters above and for the same
+                 * reason: the commands cover time and length, and pretending
+                 * otherwise would put a value on the undo stack that undo
+                 * cannot reach. */
+                writeColour(cue.params!, picked);
+                history.run(moveCues([{ track, cue, from: cue.t, to: cue.t }]));
+                history.seal();
+                onChanged();
+              }}
+            />
           )}
           {cue.source && (
             <p className="insp-note">
@@ -155,16 +188,61 @@ export function Inspector(props: {
               }}
             />
           ))}
-          {colourOf(point.value) && (
-            <Row label={isHSI(track) ? 'Colour' : 'Mix'} value={
-              <span className="swatch" style={{ background: colourOf(point.value)! }} />
-            } />
+          {hexOf(point.value) && (
+            <Swatch
+              label={isHSI(track) ? 'Colour' : 'Mix'}
+              hex={hexOf(point.value)!}
+              onPick={(picked) => {
+                /* Every channel in one command, so picking a colour is one
+                 * undo rather than three — and so a half-applied colour cannot
+                 * exist between them. */
+                const before = { ...point.value };
+                writeColour(point.value, picked);
+                const edits = Object.keys(point.value)
+                  .filter((k) => point.value[k] !== before[k])
+                  .map((k) => ({
+                    track, point, channel: k,
+                    fromT: point.t, toT: point.t,
+                    fromV: before[k], toV: point.value[k],
+                  }));
+                if (!edits.length) return;
+                /* Put back, because the command is what applies it. Editing in
+                 * place first was only a way to work out what changed. */
+                Object.assign(point.value, before);
+                run(movePoints(edits));
+              }}
+            />
           )}
           <Row label="Level" value={String(round3(amplitudeOf(point.value) ?? 0))} />
           <button className="insp-go" onClick={() => onSeek(point.t)}>Move playhead here</button>
         </>
       )}
     </aside>
+  );
+}
+
+/* The colour, as a colour.
+ *
+ * The channel fields stay: typing 0.5 into saturation is how you pin a value
+ * down once you have found it, and this is how you find it. The same division
+ * the note at the top of this file makes about dragging and typing time.
+ */
+function Swatch(props: { label: string; hex: string; onPick: (hex: string) => void }) {
+  return (
+    <div className="insp-row">
+      <span className="insp-label">{props.label}</span>
+      <span className="insp-value insp-colour">
+        <input
+          type="color"
+          className="swatch swatch-pick"
+          value={props.hex}
+          aria-label={props.label}
+          title="Pick a colour"
+          onChange={(e) => props.onPick(e.target.value)}
+        />
+        <span className="insp-hex">{props.hex}</span>
+      </span>
+    </div>
   );
 }
 
