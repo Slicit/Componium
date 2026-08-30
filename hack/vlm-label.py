@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+"""Label one film frame with a vision model, for --vlm-command.
+
+    compose.py film.mkv --vlm-command "hack/vlm-label.py"
+
+The composer hands this an image path and reads labels from stdout, one per
+line. That contract is the whole interface; this script is one implementation
+of it and nothing in the composer knows it exists.
+
+Configured entirely by environment, because --vlm-command is a single string
+and threading options through it would mean inventing a second command line:
+
+    COMPONIUM_VLM_HOST   default http://gaming.home:14242
+    COMPONIUM_VLM_MODEL  default qwen3-vl:8b
+    COMPONIUM_VLM_DEBUG  set to print the raw reply on stderr
+
+The vocabulary below is not a description of the world. It is exactly the set
+of words the composer can already act on, plus the ones this feature adds, and
+nothing else: a model that answers "pyroclastic flow" is producing a word that
+maps to no instrument, which is the same as saying nothing while costing five
+seconds. So the prompt names the list and the parser rejects everything off it.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import re
+import socket
+import sys
+import urllib.error
+import urllib.request
+
+HOST = os.environ.get("COMPONIUM_VLM_HOST", "http://gaming.home:14242").rstrip("/")
+MODEL = os.environ.get("COMPONIUM_VLM_MODEL", "qwen3-vl:8b")
+DEBUG = bool(os.environ.get("COMPONIUM_VLM_DEBUG"))
+TIMEOUT = float(os.environ.get("COMPONIUM_VLM_TIMEOUT", "120"))
+
+# What the composer can do something with. Anything else is noise.
+EFFECTS = (
+    "explosion", "lightning", "fire", "smoke", "dust", "splash", "water", "rain",
+)
+SCENES = ("calm", "active")
+
+# The prompt is the feature.
+#
+# Three things it has to fight, all learned by running it:
+#
+# A list of things to look for is read as an invitation to find them. Naming
+# what each word does NOT cover is worth more than defining what it does.
+#
+# The difference between a setting and an event. A seascape contains water in
+# every frame and warrants no effect; a wave breaking over the camera does.
+# "water" is a confirmation that a blue scene really is water, and "splash" is
+# the event — two different jobs that a model will happily conflate.
+#
+# Calm is the answer for most of a film, and a model asked to judge tends
+# toward the more interesting option. So calm is defined as the default and
+# active has to be earned.
+PROMPT = """You are labelling one frame from a film so a machine can drive
+physical effects — fans, lights, water, smoke — for the audience watching it.
+
+Report only what is plainly visible IN THIS FRAME. You are not describing the
+story, guessing what happens next, or inferring from context.
+
+Reply with exactly two lines and nothing else. No explanation.
+
+EFFECTS: <comma-separated words from the list below, or the word none>
+SCENE: <calm or active>
+
+The only permitted effect words:
+
+  explosion  a fireball or blast going off. Not a fire that is merely burning.
+  lightning  a lightning bolt, or a flash so bright it lights the whole scene.
+  fire       visible flames. Not smoke alone, not glowing embers.
+  smoke      a plume or cloud of smoke. Not fog, mist, haze or low cloud.
+  dust       a burst of dust or debris thrown into the air by an impact.
+  splash     water thrown into the air: spray, a breaking wave, something
+             hitting water. The water must be moving.
+  water      a large body of water present in the scene: sea, lake, river.
+             This describes the setting, not an event.
+  rain       rain visibly falling.
+
+If none of those are plainly visible, answer exactly: EFFECTS: none
+
+SCENE is about how much is happening to the audience, not how pretty it is:
+
+  calm    conversation, stillness, scenery, walking, slow camera movement.
+  active  impact, fast motion, combat, chaos, a vehicle at speed, destruction.
+
+Most frames of most films are calm. Answer active only when something is
+actually happening."""
+
+
+# Prefer IPv4, because a name on a home LAN is often not one address.
+#
+# gaming.home resolves to four IPv6 addresses and two IPv4 ones here, and all
+# four of the IPv6 addresses are stale: nothing answers on them. Python tries
+# what getaddrinfo returns, in the order it returns them, with a full TCP
+# timeout each — so a call Ollama serviced in 1.4 seconds took 146, being four
+# dead addresses at roughly 36 seconds apiece before falling through to the one
+# that works. curl hides this with Happy Eyeballs; urllib does not.
+#
+# Sorting IPv4 first is the smallest fix that is still correct: IPv6 is not
+# removed, only tried second, so this still works on a network where IPv6 is
+# the only route. Set COMPONIUM_VLM_IPV6_FIRST to leave the order alone.
+_getaddrinfo = socket.getaddrinfo
+
+
+def _ipv4_first(*args, **kwargs):
+    return sorted(_getaddrinfo(*args, **kwargs),
+                  key=lambda r: 0 if r[0] == socket.AF_INET else 1)
+
+
+if os.environ.get("COMPONIUM_VLM_IPV6_FIRST") is None:
+    socket.getaddrinfo = _ipv4_first
+
+
+def encode(path: str) -> str:
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("ascii")
+
+
+def ask(image_path: str) -> str:
+    """Ask the model about one frame, with the answer already begun.
+
+    The reply is prefilled with "EFFECTS:" as an assistant turn the model
+    continues. That is not a formatting nicety, it is what makes this usable:
+
+    qwen3-vl reasons before answering, and its reasoning goes to a separate
+    "thinking" field rather than to the response. It ignores think: false, and
+    it only reasons on frames it finds ambiguous — so the failure is silent and
+    intermittent, a frame coming back with no labels at all because the model
+    thought carefully about it and then ran out of budget before saying
+    anything. Prefilling leaves it nowhere to put a thought: the turn has
+    already started, and it can only continue.
+
+    Measured over the same frames: 2.5 to 4.3 seconds each and one silent
+    failure in five, against 0.5 to 1.4 seconds and none.
+    """
+    body = json.dumps({
+        "model": MODEL,
+        "stream": False,
+        "think": False,
+        "messages": [
+            {"role": "user", "content": PROMPT, "images": [encode(image_path)]},
+            {"role": "assistant", "content": "EFFECTS:"},
+        ],
+        # Zero temperature because this is a classification, and a label that
+        # changes between runs makes a score that cannot be reproduced.
+        "options": {"temperature": 0, "num_predict": 60},
+    }).encode()
+    req = urllib.request.Request(
+        HOST + "/api/chat", data=body,
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        reply = json.loads(r.read()).get("message", {}).get("content", "")
+    # The prefill is not echoed back, so the first line arrives without the
+    # "EFFECTS:" the parser looks for. Put it back rather than teaching the
+    # parser about a special first line.
+    return "EFFECTS:" + reply
+
+
+def parse(reply: str) -> list[str]:
+    """Pull the permitted words out of a reply, and nothing else.
+
+    Deliberately forgiving about shape and merciless about vocabulary. Models
+    wander in formatting — a bullet, a stray "the", markdown bold — and none of
+    that changes the answer. Inventing a word does.
+    """
+    out: list[str] = []
+    for line in reply.splitlines():
+        line = line.strip().lower().lstrip("-*# ").strip()
+        head, _, rest = line.partition(":")
+        head = head.strip().strip("*")
+        if head == "effects":
+            for word in re.split(r"[^a-z]+", rest):
+                if word in EFFECTS and word not in out:
+                    out.append(word)
+        elif head == "scene":
+            for word in re.split(r"[^a-z]+", rest):
+                if word in SCENES:
+                    # Prefixed so it cannot be mistaken for an effect by
+                    # anything downstream that reads these as a flat list.
+                    tag = "scene-" + word
+                    if tag not in out:
+                        out.append(tag)
+    return out
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        sys.stderr.write("usage: vlm-label.py IMAGE\n")
+        return 2
+    try:
+        reply = ask(argv[1])
+    except (urllib.error.URLError, OSError, TimeoutError) as e:
+        # Silence on stdout, complaint on stderr. The composer treats a
+        # failed frame as an unlabelled one and carries on, which is what it
+        # should do: a model being down is not a reason to lose the analysis.
+        sys.stderr.write("vlm: %s\n" % e)
+        return 1
+    if DEBUG:
+        sys.stderr.write("vlm raw: %r\n" % reply)
+    for label in parse(reply):
+        print(label)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
