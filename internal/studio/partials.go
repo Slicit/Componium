@@ -85,7 +85,7 @@ func (j *Jobs) ResetAnalysis(film string) error {
 // The partials are removed only once the score is written. They are the only
 // copy of the work until then, and deleting them first would turn a failure to
 // write into a failure to have ever analysed the film.
-func (j *Jobs) mergePartials(film, out string) error {
+func (j *Jobs) mergePartials(film, out, note string) error {
 	dir := j.partialDir(film)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -120,6 +120,19 @@ func (j *Jobs) mergePartials(film, out string) error {
 	}
 	if err := merged.Save(out); err != nil {
 		return err
+	}
+	// Kept before the partials are cleared, so a failure here still leaves
+	// something to recover from. Failing to keep a version is reported and
+	// not fatal: the score is the product, the history is a convenience, and
+	// losing an analysis over a bookkeeping error would be a poor trade.
+	if v, err := j.Keep(film, merged, note); err != nil {
+		j.update(JobAnalyse, film, false, func(job *Job) {
+			job.Label = "kept the score, but not a copy: " + err.Error()
+		})
+	} else {
+		j.update(JobAnalyse, film, true, func(job *Job) {
+			job.Version = v.ID
+		})
 	}
 	return os.RemoveAll(dir)
 }

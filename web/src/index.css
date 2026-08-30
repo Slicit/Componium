@@ -653,3 +653,8 @@ button:hover { border-color: #3a4553; }
 .views-save { display: flex; gap: 6px; }
 .views-save input { flex: 1 1 auto; min-width: 0; }
 .views-foot { display: flex; justify-content: flex-end; border-top: 1px solid var(--line); padding-top: 8px; }
+
+/* The version picker sits with the film picker, because it is a property of
+   the film: which of this film's scores are we looking at. */
+.versions { max-width: 230px; }
+.versions:disabled { opacity: 0.5; }

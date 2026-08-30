@@ -230,6 +230,24 @@ export class History {
   }
 
   saved(): void { this.dirty = false; }
+
+  /**
+   * Forget everything, for when a different score is opened.
+   *
+   * Not a convenience. Commands hold references to the tracks and cues they
+   * act on, never indices, because every edit re-sorts the track — so an undo
+   * stack built against one score would, after another is loaded, quietly
+   * mutate objects belonging to a score nobody is looking at any more. The
+   * version is bumped because the timeline recomputes its layout from it, and
+   * the score it is drawing has just been replaced wholesale.
+   */
+  reset(): void {
+    this.past.length = 0;
+    this.future.length = 0;
+    this.key = null;
+    this.dirty = false;
+    this.version++;
+  }
 }
 
 /** Keep the older command's starting values and the newer one's end values. */

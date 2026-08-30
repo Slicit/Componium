@@ -61,7 +61,7 @@ func TestMergePartialsJoinsThePiecesInOrder(t *testing.T) {
   { t = "00:20:00.000", value = { intensity = 0.9000 } },`))
 
 	out := filepath.Join(dir, "film.componium")
-	if err := j.mergePartials(film, out); err != nil {
+	if err := j.mergePartials(film, out, "test"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -102,7 +102,7 @@ func TestMergePartialsNumbersPastNineSortCorrectly(t *testing.T) {
   { t = "00:11:00.000", value = { intensity = 0.9000 } },`))
 
 	out := filepath.Join(dir, "long.componium")
-	if err := j.mergePartials(film, out); err != nil {
+	if err := j.mergePartials(film, out, "test"); err != nil {
 		t.Fatal(err)
 	}
 	merged, _ := score.Load(out)
@@ -120,7 +120,7 @@ func TestMergePartialsClearsUpOnlyAfterWriting(t *testing.T) {
   { t = "00:05:00.000", value = { intensity = 0.1000 } },`))
 
 	out := filepath.Join(dir, "film.componium")
-	if err := j.mergePartials(film, out); err != nil {
+	if err := j.mergePartials(film, out, "test"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(j.partialDir(film)); !os.IsNotExist(err) {
@@ -145,7 +145,7 @@ func TestMergePartialsKeepsThePiecesWhenTheMergeFails(t *testing.T) {
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := j.mergePartials(film, filepath.Join(blocker, "out.componium")); err == nil {
+	if err := j.mergePartials(film, filepath.Join(blocker, "out.componium"), "test"); err == nil {
 		t.Fatal("writing into a file should have failed")
 	}
 	if _, err := os.Stat(j.partialPath(film, 0)); err != nil {
@@ -155,7 +155,7 @@ func TestMergePartialsKeepsThePiecesWhenTheMergeFails(t *testing.T) {
 
 func TestMergePartialsRefusesWhenThereIsNothingToJoin(t *testing.T) {
 	j, dir := newJobs(t)
-	err := j.mergePartials("never-analysed.mkv", filepath.Join(dir, "out.componium"))
+	err := j.mergePartials("never-analysed.mkv", filepath.Join(dir, "out.componium"), "test")
 	if err == nil {
 		t.Fatal("merging a film with no pieces should be an error")
 	}

@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -99,6 +100,15 @@ func New(o Options) (*Server, error) {
 	s.scores = scores
 	s.jobs = NewJobs(o.Composer, scores, o.Media)
 	s.jobs.WithDevices(append(deviceArgs(s.rig), lightArgs(s.rig)...))
+	// Keep whatever scores already exist, so there is a baseline to compare
+	// against on the very first run after history was switched on. Those are
+	// the scores whose behaviour prompted the work, so they are worth more
+	// than the ones made after, not less.
+	var names []string
+	for _, f := range s.mediaFiles() {
+		names = append(names, f.Name)
+	}
+	s.jobs.SeedHistory(names)
 
 	// With no score named, open whichever film's score already exists, so a
 	// studio started against a library is useful immediately.
@@ -169,6 +179,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/build", s.handleBuild)
 	mux.HandleFunc("/api/prepare", s.handlePrepare)
 	mux.HandleFunc("/api/layout", s.handleLayout)
+	mux.HandleFunc("/api/versions", s.handleVersions)
 	// The rebuilt studio, alongside the original rather than instead of it.
 	mux.Handle("/v2/", s.handleWeb())
 	mux.Handle("/v2", http.RedirectHandler("/v2/", http.StatusFound))
@@ -498,6 +509,30 @@ func (s *Server) handleScore(w http.ResponseWriter, r *http.Request) {
 		// score. Without this the picker changed the picture and left the
 		// score alone, so a fifteen minute film played against a three cue
 		// demo and looked like nothing was happening after the first minute.
+		// A kept score, opened for review rather than for editing. Loaded
+		// without becoming the live score: comparing an old version against a
+		// new one should not quietly make the old one current.
+		if id := r.URL.Query().Get("version"); id != "" {
+			film := r.URL.Query().Get("film")
+			path, ok := s.jobs.VersionPath(film, id)
+			if !ok {
+				s.mu.Unlock()
+				writeJSON(w, http.StatusNotFound,
+					map[string]string{"error": "no such version"})
+				return
+			}
+			sc, err := score.Load(path)
+			if err != nil {
+				s.mu.Unlock()
+				writeJSON(w, http.StatusInternalServerError,
+					map[string]string{"error": err.Error()})
+				return
+			}
+			out := toWire(sc, path)
+			s.mu.Unlock()
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
 		if film := r.URL.Query().Get("film"); film != "" {
 			// A film with no score gets an honest refusal. Leaving the
 			// previous score loaded would hand back another film's score
@@ -748,6 +783,32 @@ func (s *Server) handlePrepare(w http.ResponseWriter, r *http.Request) {
 
 // handleBuild starts an analysis. With all=1 it queues every film, which is
 // the "rebuild everything" the library offers.
+// handleVersions lists the scores kept for one film, newest first.
+func (s *Server) handleVersions(w http.ResponseWriter, r *http.Request) {
+	film := r.URL.Query().Get("film")
+	if film == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no film given"})
+		return
+	}
+	versions := s.jobs.Versions(film)
+	out := make([]map[string]any, 0, len(versions))
+	for _, v := range versions {
+		out = append(out, map[string]any{
+			"id":       v.ID,
+			"label":    v.Label(),
+			"note":     v.Note,
+			"from":     v.From,
+			"to":       v.To,
+			"duration": v.Duration,
+			"complete": v.Complete,
+			"cues":     v.Cues,
+			"points":   v.Points,
+			"tracks":   v.Tracks,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"film": film, "versions": out})
+}
+
 func (s *Server) handleBuild(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
@@ -785,6 +846,14 @@ func (s *Server) handleBuild(w http.ResponseWriter, r *http.Request) {
 				if err := s.jobs.ResetAnalysis(want); err != nil {
 					writeJSON(w, http.StatusInternalServerError,
 						map[string]string{"error": err.Error()})
+					return
+				}
+			}
+			// minutes analyses only the opening of a film, for judging a
+			// change without paying for a feature to find out.
+			if m := r.URL.Query().Get("minutes"); m != "" {
+				if mins, err := strconv.ParseFloat(m, 64); err == nil && mins > 0 {
+					writeJSON(w, http.StatusOK, s.jobs.EnqueueLimited(want, mins*60))
 					return
 				}
 			}

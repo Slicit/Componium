@@ -22,6 +22,7 @@ import { COLUMNS, useDrag } from './ui/useSplit';
 import { useViewport } from './ui/useViewport';
 import { Viewports } from './ui/Viewports';
 import { filmForScore } from './core/film';
+import { useVersions } from './ui/useVersions';
 import { canCollapse } from './core/layout';
 import { menuFor } from './ui/menuItems';
 import { addTrack, copy, missingInstruments, nudge, paste, splitCue, duplicateCues, type Clip } from './core/edits';
@@ -118,6 +119,29 @@ export function App() {
       setCollapsed(new Set(Array.isArray(l.collapsed) ? l.collapsed : []));
     } catch { /* an arrangement is a convenience, never a blocker */ }
   }, []);
+
+  /* Open a kept score for review.
+   *
+   * The film stays where it is: comparing an old version against a new one is
+   * about the same film, and reloading the picture under it would lose the
+   * playhead for no reason. An empty id means the live score. */
+  const openVersion = useCallback(async (id: string) => {
+    setError(null);
+    const q = id
+      ? '/api/score?film=' + encodeURIComponent(film) + '&version=' + encodeURIComponent(id)
+      : '/api/score?film=' + encodeURIComponent(film);
+    const res = await fetch(q);
+    if (!res.ok) {
+      setError('could not open that version');
+      return;
+    }
+    const next = await res.json();
+    setScore(next);
+    history.reset();
+    onView();
+  }, [film, history, onView]);
+
+  const versions = useVersions(film, openVersion);
 
   const openFilm = useCallback(async (name: string) => {
     setFilm(name);
@@ -451,6 +475,23 @@ export function App() {
           <option value="">{score.title || '(score)'}</option>
           {films.map((f) => (
             <option key={f.name} value={f.name}>{f.name}</option>
+          ))}
+        </select>
+        <select
+          className="versions"
+          value={versions.current}
+          onChange={(e) => versions.select(e.target.value)}
+          disabled={!film || versions.list.length === 0}
+          aria-label="Score version"
+          title={versions.list.length === 0
+            ? 'No earlier scores kept for this film yet'
+            : 'Scores kept from earlier analyses of this film'}
+        >
+          <option value="">
+            {versions.list.length === 0 ? 'no history' : 'latest'}
+          </option>
+          {versions.list.map((v) => (
+            <option key={v.id} value={v.id} title={v.note}>{v.label}</option>
           ))}
         </select>
         <span className="spacer" />

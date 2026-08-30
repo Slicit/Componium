@@ -69,13 +69,25 @@ func (j *Jobs) runAnalyse(film string) error {
 		return err
 	}
 
+	limit := j.limitOf(film)
 	chunks := j.chunksOf(film)
+	if len(chunks) > 0 && !coversLimit(chunks, limit) {
+		// The plan on file was made for a different amount of film. Keeping it
+		// would silently analyse the wrong length — the far more surprising of
+		// the two options, since the request that just arrived said otherwise.
+		chunks = nil
+		j.setChunks(film, nil)
+	}
 	if len(chunks) == 0 {
 		var size int64
 		if st, err := os.Stat(source); err == nil {
 			size = st.Size()
 		}
-		chunks = planChunks(size, time.Duration(info.Duration*float64(time.Second)))
+		length := info.Duration
+		if limit > 0 && limit < length {
+			length = limit
+		}
+		chunks = planChunks(size, time.Duration(length*float64(time.Second)))
 		if len(chunks) == 0 {
 			return fmt.Errorf("%s has no duration; is it a playable file?", film)
 		}
@@ -117,7 +129,7 @@ func (j *Jobs) runAnalyse(film string) error {
 		job.Progress = 0.99
 		job.Label = "joining the pieces"
 	})
-	return j.mergePartials(film, out)
+	return j.mergePartials(film, out, j.note(len(chunks)))
 }
 
 // runChunk analyses one range and writes its partial score.

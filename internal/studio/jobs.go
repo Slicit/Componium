@@ -64,6 +64,13 @@ type Job struct {
 	// stopping. Empty for a prepare, and for an analysis that has not been
 	// planned yet.
 	Chunks []Chunk `json:"chunks,omitempty"`
+	// Version is the id of the score this run kept, so the editor can open
+	// the thing that just finished rather than guessing it is the newest.
+	Version string `json:"version,omitempty"`
+	// Limit stops the analysis after this many seconds of film, for looking
+	// at the first quarter of an hour of something rather than waiting for
+	// all of it. Zero means the whole film.
+	Limit float64 `json:"limit,omitempty"`
 }
 
 // jobKey identifies a job. Kind is part of it because a film can legitimately
@@ -238,6 +245,19 @@ func (j *Jobs) save() {
 // --- queueing ---
 
 // Enqueue schedules work, unless the same work is already queued or running.
+// EnqueueLimited queues an analysis of only the first seconds of a film.
+//
+// Useful for judging a change without paying for a feature to find out: the
+// resulting score is a real score that happens to be short, and the history
+// records how much of the film it covers so nobody compares a quarter of an
+// hour against two hours and calls it a regression.
+func (j *Jobs) EnqueueLimited(film string, seconds float64) *Job {
+	job := j.Enqueue(JobAnalyse, film)
+	j.update(JobAnalyse, film, true, func(x *Job) { x.Limit = seconds })
+	job.Limit = seconds
+	return job
+}
+
 func (j *Jobs) Enqueue(kind JobKind, film string) *Job {
 	j.mu.Lock()
 	defer j.mu.Unlock()

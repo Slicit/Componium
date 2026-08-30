@@ -156,3 +156,33 @@ func (j *Jobs) partialDir(film string) string {
 func (j *Jobs) partialPath(film string, index int) string {
 	return filepath.Join(j.partialDir(film), fmt.Sprintf("chunk-%03d.componium", index))
 }
+
+// limitOf is how much of a film the pending analysis should cover, in seconds.
+func (j *Jobs) limitOf(film string) float64 {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if job, ok := j.jobs[jobKey(JobAnalyse, film)]; ok {
+		return job.Limit
+	}
+	return 0
+}
+
+// coversLimit reports whether an existing plan matches the length now asked
+// for, so that changing your mind about how much film to analyse replans
+// rather than quietly reusing the old shape.
+func coversLimit(chunks []Chunk, limit float64) bool {
+	if len(chunks) == 0 {
+		return false
+	}
+	end := chunks[len(chunks)-1].To
+	if limit <= 0 {
+		// No limit now. The plan only still fits if it was made without one,
+		// which cannot be told from the chunks alone — so the honest answer is
+		// to keep it, and let a reset be the way to start over. Replanning
+		// here would throw away finished work every time somebody rebuilt.
+		return true
+	}
+	// A tolerance of one chunk, because the plan rounds up to whole chunks and
+	// an exact match would replan on every run.
+	return end >= limit-1 && end <= limit+maxChunk.Seconds()
+}
