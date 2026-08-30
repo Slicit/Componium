@@ -42,6 +42,33 @@ const ON = 0.02;
  * just does not cast. */
 const MAX_LIGHTS = 8;
 
+/* The ceiling strips carrying the soft wash.
+ *
+ * Over the seating rather than over the screen, and set in from the walls, so
+ * what they light is the ceiling and the tops of the walls and the room reads
+ * as being lit rather than as having two glowing lines in it.
+ */
+const AMBIENT_STRIP_X = [-1.35, 1.35];
+const AMBIENT_STRIP_Z = 2.9;
+const AMBIENT_STRIP_LENGTH = 4.6;
+
+/* How hard the wash pushes.
+ *
+ * A hint, deliberately. This is the colour a scene sits in, not a light source
+ * in the film — if it were bright enough to read the room by it would drown
+ * every cue the room exists to show, and a wash that competes with a lightning
+ * strike has stopped being a wash.
+ */
+const AMBIENT_WASH = 5;
+
+/* A recessed lamp lit, and the same lamp dark. Its lens is drawn unlit, so
+ * nothing in the scene can dim it and the fixture has to do it itself. */
+const LENS_ON = 0xfff4e4;
+const LENS_OFF = 0x191b1f;
+
+/* A television with nothing playing. */
+const SCREEN_OFF = 0x0d0f13;
+
 /* Exposure at the middle of the brightness slider. */
 const BASE_EXPOSURE = 1.12;
 
@@ -226,6 +253,72 @@ const BUILDERS = {
           light.color.copy(c).addScalar(0.05);
           light.intensity = level * 15;
           light.visible = level > ON;
+        }
+      },
+    };
+  },
+
+  /* The soft wash, as two strips of LED in the ceiling.
+   *
+   * Not on the television. Edge lighting behind a screen is a real thing and
+   * some televisions have it built in, but it is a bonus a room may or may not
+   * have, and building the preview around it would be showing somebody else's
+   * product doing our job. What the score computes is a colour for the room to
+   * sit in; a pair of ceiling strips is a fixture whose entire purpose is that.
+   *
+   * It ignores the position in the rig file, which is the one place in this
+   * view that does. A wash has no location worth drawing — it is the room that
+   * is lit, not a point in it — and a strip is a run rather than a spot, so
+   * there is nothing for a single coordinate to mean.
+   */
+  lightAmbient() {
+    const group = new THREE.Group();
+    const strips = [];
+    const lights = [];
+
+    for (const x of AMBIENT_STRIP_X) {
+      /* A channel, so the strip is mounted in something rather than floating.
+       * Lit like the rest of the room, which is what makes it read as an
+       * object next to the emitter it holds. */
+      const housing = box(0.085, 0.04, AMBIENT_STRIP_LENGTH,
+                          surface(0x22252b, 0.45, 0.5, 1.0));
+      place(housing, x, ROOM_H - 0.02, AMBIENT_STRIP_Z);
+      group.add(housing);
+
+      /* The emitter. Unlit and not tone mapped: it is the thing making light,
+       * so what it shows is its own colour and not the room's opinion of it —
+       * and it holds that colour while the light slider moves everything
+       * around it, the way a real fixture does. */
+      const strip = new THREE.Mesh(
+        new THREE.BoxGeometry(0.05, 0.014, AMBIENT_STRIP_LENGTH),
+        new THREE.MeshBasicMaterial({ color: 0x0b0c0e, toneMapped: false })
+      );
+      place(strip, x, ROOM_H - 0.045, AMBIENT_STRIP_Z);
+      group.add(strip);
+      strips.push(strip);
+
+      const light = new THREE.PointLight(0xffffff, 0, 9, 2);
+      light.position.set(x, ROOM_H - 0.14, AMBIENT_STRIP_Z);
+      group.add(light);
+      lights.push(light);
+    }
+
+    return {
+      group: group,
+      /* Its own lights, in its own places, so the caller does not also hang a
+       * point light at the coordinate in the rig file. */
+      ownLights: lights.length,
+      fixed: true,
+      apply(level, params) {
+        const c = new THREE.Color(colourOf(params));
+        for (const strip of strips) {
+          /* Nearly black when it is doing nothing, because a strip that is off
+           * should look off. The channel is what keeps the fixture visible. */
+          strip.material.color.copy(c).multiplyScalar(0.05 + level * 0.95);
+        }
+        for (const light of lights) {
+          light.color.copy(c);
+          light.intensity = level * AMBIENT_WASH;
         }
       },
     };
@@ -496,6 +589,7 @@ export class Room3D {
      * far walls and never the near ones, so the room is never occluded by the
      * wall you are looking through. */
     this.textures = [];
+    this.lenses = [];
     /* Flat, and deliberately so.
      *
      * A photograph of a painted wall was tried here and read worse than a
@@ -614,11 +708,16 @@ export class Room3D {
 
       const lens = new THREE.Mesh(
         new THREE.CircleGeometry(0.076, 32),
-        new THREE.MeshBasicMaterial({ color: 0xfff4e4, toneMapped: false })
+        new THREE.MeshBasicMaterial({ color: LENS_ON, toneMapped: false })
       );
       lens.rotation.x = Math.PI / 2;
       place(lens, x, ROOM_H - 0.006, 2.6);
       scene.add(lens);
+      /* Kept, because being unlit means nothing else can turn it off. The lens
+       * is immune to the room's exposure on purpose - that is what makes it
+       * read as the thing emitting - but it must not be immune to whether the
+       * lamp it belongs to is on. */
+      this.lenses.push(lens);
     }
   }
 
@@ -651,9 +750,12 @@ export class Room3D {
     this.screenMatte.visible = false;
     tv.add(this.screenMatte);
 
+    /* Dark, because a television with nothing playing is dark. It used to
+     * carry the soft wash's colour, which is what an Ambilight does, and that
+     * job belongs to the ceiling strips now. */
     this.screen = new THREE.Mesh(
       new THREE.PlaneGeometry(3.22, 1.82),
-      new THREE.MeshBasicMaterial({ color: 0x9dc4e8 })
+      new THREE.MeshBasicMaterial({ color: SCREEN_OFF })
     );
     place(this.screen, 0, 0, 0.048);
     tv.add(this.screen);
@@ -692,12 +794,6 @@ export class Room3D {
     scene.add(projector);
     scene.add(projector.target);
     this.projector = projector;
-
-    /* A soft glow behind the panel, so the wall around the television picks up
-     * the wash rather than the screen floating on a dark wall. */
-    this.screenGlow = new THREE.PointLight(0x4a7cad, 16, 17, 2);
-    this.screenGlow.position.set(0, 1.62, 0.7);
-    scene.add(this.screenGlow);
 
     const stand = new THREE.Group();
     stand.add(place(box(2.5, 0.44, 0.46, surface(0x272c36, 0.28, 0.4, 1.2)), 0, 0.24, 0));
@@ -862,6 +958,9 @@ export class Room3D {
     const material = this.screen.material;
     if (this.wantScreen && this.pictureTexture) {
       material.map = this.pictureTexture;
+      /* White, so the frame arrives as shot rather than multiplied by whatever
+       * the panel looks like when it is off. */
+      material.color.setScalar(1);
       /* The film is a source image, not a surface in the room.
        *
        * The light slider moves toneMappingExposure, which belongs to the
@@ -873,6 +972,7 @@ export class Room3D {
       this.screenMatte.visible = true;
     } else {
       material.map = null;
+      material.color.setHex(SCREEN_OFF);
       /* Back to being a surface in the room, and lit like one. */
       material.toneMapped = true;
       this.screenMatte.visible = false;
@@ -949,6 +1049,13 @@ export class Room3D {
      * this holds at full, so the bright end of the slider is exactly the
      * brightness it always was. */
     this.scene.environmentIntensity = Math.min(1, factor);
+    /* The lenses, which nothing else can reach. A lamp turned all the way down
+     * that still shows a white disc in the ceiling reads as a lamp that is on,
+     * which is the one thing it is not. */
+    const lit = Math.min(1, factor);
+    for (const lens of this.lenses || []) {
+      lens.material.color.setHex(LENS_OFF).lerp(new THREE.Color(LENS_ON), lit);
+    }
     /* Exposure rises above the halfway point and holds below it.
      *
      * It reaches everything drawn, cue lights and the projection included, so
@@ -978,11 +1085,24 @@ export class Room3D {
     this.devices.clear();
     this.lights = 0;
 
+    /* Which light is the wash.
+     *
+     * The same convention the composer routes by: the first light that is not
+     * the event one. The ids say which is which, and falling back to order is
+     * what happens when they do not — this has to agree with devices.go or the
+     * room would draw the wash on the fixture the flashes are going to. */
+    let washTaken = false;
+
     for (const inst of instruments || []) {
-      const build = BUILDERS[inst.kind] || BUILDERS.shake;
+      const isWash = inst.kind === 'light' && !washTaken && inst.id !== 'light.event';
+      if (isWash) washTaken = true;
+      const build = isWash
+        ? BUILDERS.lightAmbient
+        : (BUILDERS[inst.kind] || BUILDERS.shake);
       const device = build();
       const [x, y, z] = inst.position || [0, 0, 0];
-      device.group.position.set(x, y, z);
+      /* A fixture that spans the room says where it is itself. */
+      if (!device.fixed) device.group.position.set(x, y, z);
 
       /* Emitters aim at the couch. A fan bolted to the back wall blowing at
        * the wall behind it would be drawn exactly that way otherwise, and it
@@ -992,7 +1112,11 @@ export class Room3D {
       }
 
       let light = null;
-      if (inst.kind === 'light' && this.lights < MAX_LIGHTS) {
+      if (device.ownLights) {
+        /* Counted, not created: they are inside the group and are as real to
+         * the shader's light budget as any other. */
+        this.lights += device.ownLights;
+      } else if (inst.kind === 'light' && this.lights < MAX_LIGHTS) {
         light = new THREE.PointLight(0xffffff, 0, 11, 2);
         light.position.set(x, y, z);
         this.scene.add(light);
@@ -1023,8 +1147,6 @@ export class Room3D {
     this.resize();
 
     const state = this.state;
-    let ambient = null;
-
     for (const [id, device] of this.devices) {
       const { level, params, muted } = readDevice(state, id, this.muted, this.forced);
       device.apply(level, params, dt);
@@ -1042,9 +1164,6 @@ export class Room3D {
        */
       device.group.scale.setScalar(muted ? 0.55 : 1);
 
-      if (device.kind === 'light' && level > (ambient ? ambient.level : 0)) {
-        ambient = { colour: colourOf(params), level: level };
-      }
     }
 
     const pose = readSeat(this.state, this.forced, now);
@@ -1078,30 +1197,6 @@ export class Room3D {
       const c = this.throwCanvas;
       this.throwContext.drawImage(this.picture, 0, 0, c.width, c.height);
       this.projectorTexture.needsUpdate = true;
-    }
-
-    if (ambient) {
-      /* Both of these have a floor, and the floor is not cosmetic.
-       *
-       * The screen shows the soft ambilight layer's own colour, which during a
-       * dark scene is very nearly black — correctly so. But the screen is also
-       * much of the light in the room, and a room lit by a black screen loses
-       * the geometry, and with it any way to see where the devices are or what
-       * the couch is doing. A real television is never truly black either. So
-       * the wash bottoms out somewhere dim rather than at nothing. */
-      const c = new THREE.Color(ambient.colour);
-      /* With a film on it the screen carries its own light and must not be
-       * tinted by the layer it is no longer previewing — a white multiplier
-       * leaves the frame as shot. The glow behind the panel keeps doing the
-       * ambient job, so the room still shows what the soft layer is up to. */
-      if (this.picture) {
-        this.screen.material.color.setScalar(1);
-      } else {
-        this.screen.material.color.copy(c)
-          .multiplyScalar(0.35 + ambient.level * 0.65).addScalar(0.09);
-      }
-      this.screenGlow.color.copy(c).addScalar(0.18);
-      this.screenGlow.intensity = 9 + ambient.level * 30;
     }
 
     if (this.controls) this.controls.update();
