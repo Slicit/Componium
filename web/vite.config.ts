@@ -11,7 +11,9 @@ import react from '@vitejs/plugin-react';
  */
 export default defineConfig({
   plugins: [react()],
-  base: '/v2/',
+  /* Served from the root now. The assets are content-hashed, so an absolute
+   * base is safe and keeps a deep link working after a reload. */
+  base: '/',
   build: {
     outDir: '../internal/studio/webdist',
     emptyOutDir: true,

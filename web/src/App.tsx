@@ -17,6 +17,7 @@ import { Menu } from './ui/Menu';
 import { Inspector } from './ui/Inspector';
 import { Room } from './ui/room/Room';
 import { Force } from './ui/Force';
+import { Library } from './ui/Library';
 import { canCollapse } from './core/layout';
 import { menuFor } from './ui/menuItems';
 import { addTrack, copy, missingInstruments, nudge, paste, splitCue, duplicateCues, type Clip } from './core/edits';
@@ -607,6 +608,11 @@ export function App() {
           · <kbd>,</kbd><kbd>.</kbd> nudge a frame · <kbd>⌘C</kbd><kbd>⌘X</kbd><kbd>⌘V</kbd> · <kbd>⌘D</kbd> duplicate
           {shuttle !== 0 && <strong className="shuttle"> shuttle {shuttle > 0 ? '▶' : '◀'} {Math.abs(shuttle)}×</strong>}
         </p>
+      </section>
+
+      <section className="panel">
+        <h2>Library <span className="dim small">one film, one score; analysis runs in the background, one at a time</span></h2>
+        <Library onOpen={openFilm} />
       </section>
     </div>
   );

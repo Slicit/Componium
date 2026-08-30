@@ -144,13 +144,22 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux := http.NewServeMux()
 	files := noCache(http.FileServer(http.FS(sub)))
+	// The rebuilt studio is the studio. The original is still here, at
+	// /legacy, because it is the only thing that has been run against the
+	// hardware and because two implementations of the same view are worth
+	// having while one of them is young.
+	web := s.handleWeb()
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+		web.ServeHTTP(w, r)
+	}))
+	mux.Handle("/legacy/", http.StripPrefix("/legacy", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" || r.URL.Path == "" {
 			s.servePage(w, sub)
 			return
 		}
 		files.ServeHTTP(w, r)
-	}))
+	})))
+	mux.Handle("/legacy", http.RedirectHandler("/legacy/", http.StatusFound))
 	mux.HandleFunc("/api/score", s.handleScore)
 	mux.HandleFunc("/api/rig", s.handleRig)
 	mux.HandleFunc("/media", s.handleMedia)

@@ -419,7 +419,9 @@ func TestASingleFileStillWorks(t *testing.T) {
 // caches heuristically and keeps showing an old build after an upgrade.
 func TestAssetsAreNotCached(t *testing.T) {
 	s, _ := newServer(t)
-	for _, path := range []string{"/", "/app.js", "/style.css"} {
+	// The original studio lives at /legacy now; the rebuilt one at / serves
+	// content-hashed bundles and does its own cache busting.
+	for _, path := range []string{"/legacy/", "/legacy/app.js", "/legacy/style.css"} {
 		rec := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if got := rec.Header().Get("Cache-Control"); !strings.Contains(got, "no-store") {
@@ -434,7 +436,7 @@ func TestAssetsAreNotCached(t *testing.T) {
 func TestAssetUrlsCarryAContentVersion(t *testing.T) {
 	s, _ := newServer(t)
 	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/legacy/", nil))
 
 	body := rec.Body.String()
 	if strings.Contains(body, "__V__") {
@@ -451,7 +453,7 @@ func TestTheVersionIsStableAndShort(t *testing.T) {
 	s, _ := newServer(t)
 	get := func() string {
 		rec := httptest.NewRecorder()
-		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/legacy/", nil))
 		i := strings.Index(rec.Body.String(), "?v=")
 		if i < 0 {
 			t.Fatal("no version in the page")

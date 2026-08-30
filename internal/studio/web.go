@@ -34,7 +34,11 @@ func (s *Server) handleWeb() http.Handler {
 	if err != nil {
 		panic(err) // embedded at build time; cannot fail at runtime
 	}
-	files := noCache(http.StripPrefix("/v2/", http.FileServer(http.FS(sub))))
+	/* /v2 is an alias for / while people have it bookmarked. Stripping it here
+	 * rather than only on the index fallback: without this the page loads and
+	 * every asset under it 404s, which looks like a broken build rather than a
+	 * routing mistake. */
+	files := noCache(http.StripPrefix("/v2", http.FileServer(http.FS(sub))))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !hasWeb(sub) {
@@ -52,7 +56,8 @@ func (s *Server) handleWeb() http.Handler {
 		// Anything that is not a file is the app: a single page owns its own
 		// routing, and serving index.html for unknown paths is what lets a
 		// deep link work after a reload.
-		path := strings.TrimPrefix(r.URL.Path, "/v2/")
+		// Reachable at / and, for a while yet, at /v2.
+		path := strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/v2"), "/")
 		if path == "" || !strings.Contains(path, ".") {
 			page, err := fs.ReadFile(sub, "index.html")
 			if err != nil {
@@ -63,6 +68,11 @@ func (s *Server) handleWeb() http.Handler {
 			w.Header().Set("Cache-Control", "no-store, must-revalidate")
 			_, _ = w.Write(page)
 			return
+		}
+		if !strings.HasPrefix(r.URL.Path, "/v2/") {
+			// Give the stripper the prefix it expects, so one handler serves
+			// both roots.
+			r.URL.Path = "/v2" + r.URL.Path
 		}
 		files.ServeHTTP(w, r)
 	})
