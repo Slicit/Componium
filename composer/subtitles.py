@@ -73,7 +73,7 @@ def load_mapping(path: str | None) -> dict:
         return json.load(f)
 
 
-def extract(path: str, stream: int = 0) -> str:
+def extract(path: str, stream: int = 0, span=None) -> str:
     """Pull a subtitle track out of the container as SRT.
 
     Returns an empty string when the file has no subtitles, which is common and
@@ -83,7 +83,8 @@ def extract(path: str, stream: int = 0) -> str:
     if not exe:
         return ""
     out = subprocess.run(
-        [exe, "-v", "error", "-i", path, "-map", f"0:s:{stream}", "-f", "srt", "-"],
+        [exe, "-v", "error", *(span.input_args() if span else []), "-i", path,
+         "-map", f"0:s:{stream}", "-f", "srt", "-"],
         capture_output=True, text=True, errors="replace", check=False,
     )
     return out.stdout if out.returncode == 0 else ""

@@ -32,7 +32,7 @@ def _ffmpeg() -> str:
     return exe
 
 
-def gray_frames(path: str, fps: float, w: int = GRAY_W, h: int = GRAY_H):
+def gray_frames(path: str, fps: float, w: int = GRAY_W, h: int = GRAY_H, span=None):
     """Yield one bytes object of w*h grayscale pixels per sampled frame.
 
     Streams rather than collecting: a two hour film at 8 Hz is 57,600 frames,
@@ -40,7 +40,8 @@ def gray_frames(path: str, fps: float, w: int = GRAY_W, h: int = GRAY_H):
     one frame at a time.
     """
     cmd = [
-        _ffmpeg(), "-v", "error", "-i", path,
+        _ffmpeg(), "-v", "error",
+        *(span.input_args() if span else []), "-i", path,
         "-vf", f"fps={fps},scale={w}:{h},format=gray",
         "-f", "rawvideo", "-pix_fmt", "gray", "-",
     ]
@@ -96,9 +97,10 @@ def features(frame: bytes, w: int = GRAY_W, h: int = GRAY_H) -> Frame:
     return Frame(total / float(w * h), peak, cols, rows)
 
 
-def analyse(path: str, fps: float, w: int = GRAY_W, h: int = GRAY_H) -> list[Frame]:
-    """Extract per frame features for a whole film."""
-    return [features(f, w, h) for f in gray_frames(path, fps, w, h)]
+def analyse(path: str, fps: float, w: int = GRAY_W, h: int = GRAY_H,
+            span=None) -> list[Frame]:
+    """Extract per frame features for a film, or for one range of one."""
+    return [features(f, w, h) for f in gray_frames(path, fps, w, h, span)]
 
 
 # 8x8 is enough to know where in the frame a colour is, which is the difference
@@ -107,10 +109,12 @@ COLOUR_W = 8
 COLOUR_H = 8
 
 
-def colour_frames(path: str, fps: float, w: int = COLOUR_W, h: int = COLOUR_H):
+def colour_frames(path: str, fps: float, w: int = COLOUR_W, h: int = COLOUR_H,
+                  span=None):
     """Yield w*h*3 bytes of RGB per sampled frame."""
     cmd = [
-        _ffmpeg(), "-v", "error", "-i", path,
+        _ffmpeg(), "-v", "error",
+        *(span.input_args() if span else []), "-i", path,
         "-vf", f"fps={fps},scale={w}:{h}",
         "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
     ]
@@ -140,7 +144,7 @@ def mean_colour(frame: bytes) -> tuple[float, float, float]:
     return (r / (255.0 * n), g / (255.0 * n), b / (255.0 * n))
 
 
-def luma_series(path: str, fps: float):
+def luma_series(path: str, fps: float, span=None):
     """Mean luminance per frame, at whatever rate is asked for.
 
     Scaling to a single pixel makes this one byte per frame: sampling a two
@@ -153,7 +157,8 @@ def luma_series(path: str, fps: float):
     can run fast while everything else stays slow.
     """
     cmd = [
-        _ffmpeg(), "-v", "error", "-i", path,
+        _ffmpeg(), "-v", "error",
+        *(span.input_args() if span else []), "-i", path,
         "-vf", f"fps={fps},scale=1:1,format=gray",
         "-f", "rawvideo", "-pix_fmt", "gray", "-",
     ]

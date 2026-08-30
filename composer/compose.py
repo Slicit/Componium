@@ -31,6 +31,7 @@ import sys
 
 import analysis
 import dynamics
+import span as span_mod
 import light
 import motion_est
 import scenes
@@ -78,14 +79,15 @@ def ffprobe_duration(path: str) -> float:
         return 0.0
 
 
-def average_colours(path: str, fps: float) -> list[tuple[float, float, float]]:
+def average_colours(path: str, fps: float, span=None) -> list[tuple[float, float, float]]:
     """Return the average colour of each sampled frame, as 0..1 triples.
 
     Scaling to a single pixel makes ffmpeg do the averaging, which is far
     faster than reading frames into Python and much less code.
     """
     cmd = [
-        ffmpeg_path(), "-v", "error", "-i", path,
+        ffmpeg_path(), "-v", "error",
+        *(span.input_args() if span else []), "-i", path,
         "-vf", f"fps={fps},scale=1:1",
         "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
     ]
@@ -96,32 +98,34 @@ def average_colours(path: str, fps: float) -> list[tuple[float, float, float]]:
     return out
 
 
-def lfe_envelope(path: str, rate: float, cutoff_hz: int = 120) -> list[float]:
-    """Return a low-frequency energy envelope, one value per 1/rate second.
+LFE_RATE = 1000
 
-    The audio is low-passed and downsampled to 1kHz mono, then reduced to RMS
-    per window.  Working at 1kHz rather than 48kHz makes this cheap enough to
-    run over a feature film without anyone noticing.
+
+def lfe_samples(path: str, cutoff_hz: int = 120, span=None):
+    """Low-passed mono audio at 1kHz, as signed 16 bit samples.
+
+    Working at 1kHz rather than 48kHz makes this cheap enough to run over a
+    feature film without anyone noticing: measured at 21 seconds for a two
+    hour film, which is 345 times realtime.
     """
-    sample_rate = 1000
     cmd = [
-        ffmpeg_path(), "-v", "error", "-i", path,
+        ffmpeg_path(), "-v", "error",
+        *(span.input_args() if span else []), "-i", path,
         "-af", f"lowpass=f={cutoff_hz}",
-        "-ac", "1", "-ar", str(sample_rate),
+        "-ac", "1", "-ar", str(LFE_RATE),
         "-f", "s16le", "-",
     ]
     raw = subprocess.run(cmd, capture_output=True, check=True).stdout
     samples = array.array("h")
     samples.frombytes(raw[: len(raw) - (len(raw) % 2)])
-    return rms_windows(samples, int(sample_rate / rate))
+    return samples
 
 
-def rms_windows(samples, window: int) -> list[float]:
-    """Root mean square per window, normalised to 0..1 by the loudest window.
+def rms_series(samples, window: int) -> list[float]:
+    """Root mean square per window, in the units the samples came in.
 
-    Normalising by the peak rather than by full scale means a quiet film still
-    produces a usable range, which matters more than absolute calibration: the
-    author sets the rig's overall intensity, not the composer.
+    Unnormalised, which is the point: this is the only form in which two
+    different parts of a film can be compared with each other.
     """
     if window < 1:
         window = 1
@@ -134,10 +138,53 @@ def rms_windows(samples, window: int) -> list[float]:
         for s in chunk:
             total += float(s) * float(s)
         out.append(math.sqrt(total / len(chunk)))
-    peak = max(out) if out else 0.0
-    if peak <= 0:
+    return out
+
+
+def audio_peak(path: str, rate: float, cutoff_hz: int = 120) -> float:
+    """The loudest window in a whole film, for chunks to normalise against.
+
+    Analysing a film in pieces silently redefines what "the loudest window"
+    means: each piece would be scaled against its own peak, so a quiet chunk
+    would be amplified until it matched an action chunk and the shake track
+    would change character at every boundary. Nothing fails, the score is just
+    wrong. So the peak is measured once over the whole film and handed to every
+    piece.
+    """
+    samples = lfe_samples(path, cutoff_hz)
+    series = rms_series(samples, int(LFE_RATE / rate))
+    return max(series) if series else 0.0
+
+
+def lfe_envelope(path: str, rate: float, cutoff_hz: int = 120, span=None,
+                 peak: float = 0.0) -> list[float]:
+    """Return a low-frequency energy envelope, one value per 1/rate second.
+
+    With no peak given this normalises by the loudest window it can see, which
+    is right for a whole film and wrong for a piece of one.
+    """
+    samples = lfe_samples(path, cutoff_hz, span)
+    return rms_windows(samples, int(LFE_RATE / rate), peak)
+
+
+def rms_windows(samples, window: int, peak: float = 0.0) -> list[float]:
+    """Root mean square per window, normalised to 0..1.
+
+    Normalising by the peak rather than by full scale means a quiet film still
+    produces a usable range, which matters more than absolute calibration: the
+    author sets the rig's overall intensity, not the composer.
+
+    A peak may be supplied, and must be when this is looking at part of a film
+    rather than all of it — see audio_peak. The clamp is for that case: a
+    supplied peak is measured over material this call cannot see, and floating
+    point makes "the loudest window" and "the loudest window, again" differ in
+    the last place.
+    """
+    out = rms_series(samples, window)
+    scale = peak if peak > 0 else (max(out) if out else 0.0)
+    if scale <= 0:
         return [0.0] * len(out)
-    return [v / peak for v in out]
+    return [min(1.0, v / scale) for v in out]
 
 
 # --------------------------------------------------------------------------
@@ -305,24 +352,39 @@ def progress(fraction: float, label: str):
 
 def build(args) -> str:
     report = sys.stderr.write
-    duration = ffprobe_duration(args.input)
+    film_duration = ffprobe_duration(args.input)
+    span = span_mod.Span(getattr(args, "start", 0.0), getattr(args, "end", 0.0),
+                         getattr(args, "warmup", 0.0))
+
+    # How long the part being analysed is, which is what everything below is
+    # counting frames against. For a whole film that is the film.
+    if span.whole:
+        duration = film_duration
+    else:
+        end = span.end if span.end > 0 else film_duration
+        duration = max(0.0, end - span.decode_start)
+        report(f"analysing {timecode(span.start)} to "
+               f"{timecode(span.end) if span.end else 'the end'}"
+               f" ({span.lead:.0f}s lead in)\n")
 
     # One grayscale pass and one colour pass. Everything below is derived from
     # those two, rather than decoding the film once per feature.
     progress(0.05, "decoding frames")
-    frames = analysis.analyse(args.input, args.fps)
+    frames = analysis.analyse(args.input, args.fps, span=span)
     progress(0.45, "decoding colour")
-    colour_raw = list(analysis.colour_frames(args.input, args.fps))
+    colour_raw = list(analysis.colour_frames(args.input, args.fps, span=span))
     colours = [analysis.mean_colour(f) for f in colour_raw]
     report(f"{len(frames)} frames analysed at {args.fps} Hz\n")
 
     progress(0.55, "detecting scene cuts")
-    cuts = [] if args.no_scenes else scenes.detect(args.input, args.scene_threshold)
+    cuts = [] if args.no_scenes else scenes.detect(
+        args.input, args.scene_threshold, span=span)
     progress(0.62, "estimating camera movement")
     movements = motion_est.track(frames, width=analysis.GRAY_W)
     speed = motion_est.speed_series(movements, args.fps)
     progress(0.72, "reading low frequency audio")
-    env = lfe_envelope(args.input, args.fps)
+    env = lfe_envelope(args.input, args.fps, span=span,
+                       peak=getattr(args, "audio_peak", 0.0) or 0.0)
 
     # --- what the film is doing, before deciding what to play ----------------
     progress(0.80, "finding calm")
@@ -360,9 +422,10 @@ def build(args) -> str:
     # misses four out of five. One byte per frame makes 24 Hz free.
     progress(0.86, "finding flashes")
     flash_fps = args.flash_fps or (args.media_fps or 24.0)
-    lumas = [analysis.Luma(v) for v in analysis.luma_series(args.input, flash_fps)]
+    lumas = [analysis.Luma(v)
+             for v in analysis.luma_series(args.input, flash_fps, span=span)]
     flash_colours = [analysis.mean_colour(f)
-                     for f in analysis.colour_frames(args.input, flash_fps)]
+                     for f in analysis.colour_frames(args.input, flash_fps, span=span)]
     add_cues(args.light_event_id, light.flashes(lumas, flash_colours, flash_fps))
 
     # --- shake ---------------------------------------------------------------
@@ -410,7 +473,7 @@ def build(args) -> str:
     semantic = []
     if not args.no_subtitles:
         progress(0.92, "mining subtitles")
-        srt = subtitles.extract(args.input, args.subtitle_stream)
+        srt = subtitles.extract(args.input, args.subtitle_stream, span=span)
         if srt:
             entries = subtitles.parse(srt)
             confirmations += subtitles.descriptions(entries)
@@ -464,12 +527,21 @@ def build(args) -> str:
         if cue_groups[instrument]:
             tracks.append(_cue_track(instrument, cue_groups[instrument]))
 
+    # Everything above counted from the start of what was decoded. Move it
+    # into the film's own clock and drop the lead in, so a partial score is a
+    # short score rather than a score that needs correcting.
+    tracks = span_mod.place(tracks, span)
+    calm = span_mod.place_regions(calm, span)
     if not tracks:
         sys.exit("nothing extracted; is the input a playable file?")
 
     meta = {
         "title": args.title or os.path.splitext(os.path.basename(args.input))[0],
-        "duration": duration or (len(frames) / args.fps),
+        # The duration is the film's, not the range's: a partial score is a
+        # window onto a film of a known length, and a merge that had to add up
+        # its pieces to discover how long the film was would be trusting the
+        # least reliable number it has.
+        "duration": film_duration or (len(frames) / args.fps),
         "fps": args.media_fps,
         "hash": "" if args.no_hash else file_hash(args.input, args.hash_mb),
     }
@@ -480,6 +552,22 @@ def build(args) -> str:
 def main(argv=None):
     p = argparse.ArgumentParser(description="Generate a Componium score from a film.")
     p.add_argument("input", help="video file")
+    p.add_argument("--from", dest="start", type=float, default=0.0,
+                   metavar="SECONDS",
+                   help="analyse from this point in the film (default: the start)")
+    p.add_argument("--to", dest="end", type=float, default=0.0,
+                   metavar="SECONDS",
+                   help="analyse up to this point (default: the end)")
+    p.add_argument("--warmup", type=float, default=span_mod.DEFAULT_WARMUP,
+                   metavar="SECONDS",
+                   help="decode this much before --from and discard it, so motion "
+                        "has something to compare the first frame against")
+    p.add_argument("--audio-peak", type=float, default=0.0,
+                   help="the loudest audio window in the whole film, from "
+                        "--probe-audio-peak. Required for a range to be scaled "
+                        "the same way the rest of the film is")
+    p.add_argument("--probe-audio-peak", action="store_true",
+                   help="print the whole film's loudest audio window and exit")
     p.add_argument("-o", "--out", help="score file to write (default: stdout)")
     p.add_argument("--title", help="score title (default: the filename)")
     p.add_argument("--fps", type=float, default=4.0,
@@ -539,6 +627,10 @@ def main(argv=None):
     p.add_argument("--scene-threshold", type=float, default=0.35,
                    help="scene change sensitivity, higher is fewer cuts (default 0.35)")
     args = p.parse_args(argv)
+
+    if args.probe_audio_peak:
+        sys.stdout.write("%.6f\n" % audio_peak(args.input, args.fps))
+        return 0
 
     out = build(args)
     if args.out:

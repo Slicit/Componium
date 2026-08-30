@@ -19,7 +19,7 @@ import subprocess
 PTS = re.compile(r"pts_time:([0-9.]+)")
 
 
-def detect(path: str, threshold: float = 0.35) -> list[float]:
+def detect(path: str, threshold: float = 0.35, span=None) -> list[float]:
     """Return the times of detected scene cuts, in seconds.
 
     A higher threshold means fewer, more confident cuts. 0.35 is conservative:
@@ -30,7 +30,7 @@ def detect(path: str, threshold: float = 0.35) -> list[float]:
     if not exe:
         return []
     out = subprocess.run(
-        [exe, "-v", "info", "-i", path,
+        [exe, "-v", "info", *(span.input_args() if span else []), "-i", path,
          "-vf", f"select='gt(scene,{threshold})',showinfo",
          "-an", "-f", "null", "-"],
         capture_output=True, text=True, errors="replace", check=False,
