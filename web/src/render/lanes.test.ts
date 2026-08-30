@@ -10,12 +10,12 @@
 import { describe, it, expect } from 'vitest';
 import { TimeView } from '../core/view';
 import { DrawList } from './drawlist';
-import { drawCues, drawCurve, drawRibbon, visibleRange } from './lanes';
+import { drawCalm, drawCues, drawCurve, drawLatency, drawRibbon, visibleRange } from './lanes';
 import type { Track } from '../core/score';
 
 const theme = {
   ink: '#fff', muted: '#888', line: '#333', grid: '#222',
-  event: '#d8a24a', eventSoft: '#333', playhead: '#fff', warn: '#f00',
+  event: '#d8a24a', eventSoft: '#333', playhead: '#fff', warn: '#f00', calm: '#1a2733',
   channel: { r: '#e37', g: '#7c7', b: '#69e', intensity: '#d8a24a' },
 };
 
@@ -239,5 +239,83 @@ describe('the performance budget', () => {
     }
     expect(list.length).toBeLessThan(200);
     expect(Date.now() - started).toBeLessThan(400);
+  });
+});
+
+describe('what the score does not say on its own', () => {
+  /* Rest is a property of the show, not of any one instrument, so it is drawn
+   * across every lane. The point is not decoration: it answers "why is nothing
+   * happening here", and it shows you when you are about to author into
+   * somebody's rest. */
+  it('draws calm regions, and skips the ones off screen', () => {
+    const view = new TimeView(120, 24).set(0, 30);
+    const list = new DrawList();
+    drawCalm(list, [{ from: 5, to: 20 }, { from: 90, to: 110 }], view, box, theme);
+    const rects = list.of('rect');
+    expect(rects.length).toBe(1);
+    expect(list.culled).toBe(1);
+    expect(rects[0].x).toBeCloseTo(box.w * (5 / 30), 0);
+  });
+
+  /* A 1.2s fan lead is the most surprising thing about authoring here, and it
+   * was completely invisible: the timeline showed when the wind arrives and
+   * nothing about when the command leaves. */
+  it('draws the dispatch moment ahead of the authored one', () => {
+    const view = new TimeView(120, 24).fit();
+    const list = new DrawList();
+    drawLatency(list, gusts, 1.2, view, box, theme);
+    const lines = list.of('line');
+    // A lead-in and a stem for each of the three cues.
+    expect(lines.length).toBe(6);
+    // The stem sits earlier than the event it belongs to.
+    const firstCueX = view.toX(10, box.w);
+    expect(lines[0].x1).toBeLessThan(firstCueX);
+    expect(lines[0].x2).toBeCloseTo(firstCueX, 6);
+  });
+
+  it('draws nothing for an instrument with no dead time', () => {
+    const view = new TimeView(120, 24).fit();
+    const list = new DrawList();
+    drawLatency(list, gusts, 0, view, box, theme);
+    expect(list.length).toBe(0);
+  });
+
+  /* Below a couple of pixels the lead is shorter than the line describing it,
+   * and drawing it would claim a precision that is not there. */
+  it('says nothing when the lead is too short to mean anything', () => {
+    const view = new TimeView(7200, 24).fit();
+    const list = new DrawList();
+    drawLatency(list, gusts, 0.02, view, box, theme);
+    expect(list.length).toBe(0);
+  });
+});
+
+describe('hue is an angle, not an amount', () => {
+  const hsi: Track = {
+    instrument: 'light.ambient', type: 'curve', space: 'hsi',
+    points: [
+      { t: 0, value: { h: 0.1, s: 1, i: 0.5 } },
+      { t: 40, value: { h: 0.6, s: 1, i: 0.5 } },
+    ],
+  };
+
+  /* Filling the area under a hue says a half-full lane means half of
+   * something, when it means orange. */
+  it('draws hue as a line with nothing under it', () => {
+    const view = new TimeView(120, 24).fit();
+    const list = new DrawList();
+    drawCurve(list, hsi, 'h', view, box, theme);
+    const [path] = list.of('path');
+    expect(path.fill).toBeUndefined();
+    expect(path.stroke).toBeTruthy();
+  });
+
+  it('still fills the channels that are amounts', () => {
+    const view = new TimeView(120, 24).fit();
+    for (const channel of ['s', 'i']) {
+      const list = new DrawList();
+      drawCurve(list, hsi, channel, view, box, theme);
+      expect(list.of('path')[0].fill).toBeTruthy();
+    }
   });
 });

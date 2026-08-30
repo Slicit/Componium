@@ -29,6 +29,7 @@ export interface Theme {
   eventSoft: string;
   playhead: string;
   warn: string;
+  calm: string;
   channel: Record<string, string>;
 }
 
@@ -170,7 +171,7 @@ export function drawCurve(
   const visible = visibleRange(points, view);
 
   if (density > ENVELOPE_THRESHOLD) {
-    drawEnvelope(list, points, channel, view, box, colour, y);
+    drawEnvelope(list, points, channel, view, box, colour, y, channel !== 'h');
   } else {
     const pts: number[] = [];
     for (let i = visible.from; i <= visible.to; i++) {
@@ -178,7 +179,17 @@ export function drawCurve(
       pts.push(box.x + view.toX(p.t, box.w), y(p.value[channel]));
     }
     if (pts.length >= 4) {
-      list.path({ pts, stroke: colour, fill: colour, baseline: bottom, lineWidth: 1.6, alpha: 1 });
+      /* Hue is an angle, not an amount: filling the area beneath it says a
+       * half-full lane means half of something, when it means orange. Every
+       * other channel is a magnitude and reads better filled. */
+      const magnitude = channel !== 'h';
+      list.path({
+        pts, stroke: colour,
+        fill: magnitude ? colour : undefined,
+        baseline: magnitude ? bottom : undefined,
+        lineWidth: magnitude ? 1.6 : 2,
+        alpha: 1,
+      });
     }
     const visibleDensity = (visible.to - visible.from + 1) / Math.max(1, box.w);
     if (opts.showHandles !== false && visibleDensity <= HANDLE_THRESHOLD) {
@@ -203,7 +214,7 @@ export function drawCurve(
  */
 function drawEnvelope(
   list: DrawList, points: Point[], channel: string, view: TimeView, box: LaneBox,
-  colour: string, y: (v: number) => number,
+  colour: string, y: (v: number) => number, magnitude = true,
 ): void {
   const cols = Math.max(1, Math.floor(box.w));
   const lo = new Float32Array(cols).fill(Infinity);
@@ -246,7 +257,11 @@ function drawEnvelope(
   /* One closed shape: down the tops, back along the bottoms. */
   const shape = upper.slice();
   for (let i = lower.length - 2; i >= 0; i -= 2) shape.push(lower[i], lower[i + 1]);
-  list.path({ pts: shape, fill: colour, stroke: colour, lineWidth: 1, alpha: 0.55 });
+  list.path({
+    pts: shape,
+    fill: magnitude ? colour : undefined,
+    stroke: colour, lineWidth: 1, alpha: magnitude ? 0.55 : 0.9,
+  });
 }
 
 /**
@@ -344,4 +359,78 @@ export function drawLatencyGhost(
   const mid = box.y + box.h / 2;
   list.line({ x1, y1: mid, x2, y2: mid, stroke: theme.muted, lineWidth: 1, dash: [2, 3], alpha: 0.8 });
   list.dot({ x: x1, y: mid, r: 2.5, stroke: theme.muted, lineWidth: 1 });
+}
+
+/* --- what the score does not say on its own ----------------------------- */
+
+/**
+ * The stretches the analysis chose to leave alone.
+ *
+ * Drawn behind everything, across every lane, because rest is a property of
+ * the show rather than of any one instrument. Two things become visible that
+ * were not: why a passage is empty, and — more usefully — that you are about
+ * to author into somebody's rest.
+ */
+export function drawCalm(
+  list: DrawList,
+  regions: Array<{ from: number; to: number }>,
+  view: TimeView, box: LaneBox, theme: Theme,
+): void {
+  for (const r of regions) {
+    if (!view.intersects(r.from, r.to)) { list.culled++; continue; }
+    const x1 = box.x + view.toX(r.from, box.w);
+    const x2 = box.x + view.toX(r.to, box.w);
+    list.rect({
+      x: x1, y: box.y, w: Math.max(1, x2 - x1), h: box.h,
+      fill: theme.calm, alpha: 0.5,
+    });
+    /* Edges, so a band reads as a decision with boundaries rather than as a
+     * smudge in the background. */
+    for (const x of [x1, x2]) {
+      list.line({
+        x1: x, y1: box.y, x2: x, y2: box.y + box.h,
+        stroke: theme.calm, lineWidth: 1, alpha: 0.9,
+      });
+    }
+  }
+}
+
+/**
+ * When the conductor actually fires, against when the score says the effect
+ * happens.
+ *
+ * Every instrument declares dead time, and the conductor dispatches that much
+ * early so the effect *lands* on the authored moment. A 1.2 second fan lead is
+ * the single most surprising thing about authoring for this system, and until
+ * now it was completely invisible: the timeline showed the moment the wind
+ * arrives and nothing about the moment the command leaves.
+ *
+ * Drawn as a stem at the dispatch time joined back to the event, so the gap is
+ * legible as a duration rather than as two unrelated marks.
+ */
+export function drawLatency(
+  list: DrawList, track: Track, latency: number,
+  view: TimeView, box: LaneBox, theme: Theme,
+): void {
+  if (latency <= 0) return;
+  const y = box.y + box.h - 3;
+
+  for (const cue of track.cues ?? []) {
+    const fires = cue.t - latency;
+    if (!view.intersects(fires, cue.t)) { continue; }
+    const x1 = box.x + view.toX(fires, box.w);
+    const x2 = box.x + view.toX(cue.t, box.w);
+    /* Below a couple of pixels the lead is shorter than the line that would
+     * describe it, and drawing it says something untrue about precision. */
+    if (x2 - x1 < 2) continue;
+
+    list.line({
+      x1, y1: y, x2, y2: y,
+      stroke: theme.muted, lineWidth: 1, dash: [2, 3], alpha: 0.9,
+    });
+    list.line({
+      x1, y1: y - 5, x2: x1, y2: y + 1,
+      stroke: theme.muted, lineWidth: 1.5, alpha: 0.9,
+    });
+  }
 }

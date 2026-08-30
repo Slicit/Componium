@@ -14,10 +14,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TimeView, ticks } from '../core/view';
 import { canCollapse, layout, summaryLabel, type Layout } from '../core/layout';
 import { timecode } from '../core/time';
-import { channelsOf, type Rig, type Score } from '../core/score';
+import { channelsOf, latencyOf, type Rig, type Score } from '../core/score';
 import { DrawList, paint } from '../render/drawlist';
 import {
-  drawCollapsedEnvelope, drawCues, drawCurve, drawPlayhead, drawRibbon,
+  drawCalm, drawCollapsedEnvelope, drawCues, drawCurve, drawLatency,
+  drawPlayhead, drawRibbon,
 } from '../render/lanes';
 import { dark } from './theme';
 import type { Editing } from './useEditing';
@@ -46,10 +47,12 @@ export interface TimelineProps {
    * a track or a point changes the *rows*, and those were silently stale.
    */
   revision: number;
+  /** Which of the advisory overlays to draw. */
+  overlays: { calm: boolean; latency: boolean };
 }
 
 export function Timeline(props: TimelineProps) {
-  const { score, rig, view, time, collapsed, order, onView, edit, revision } = props;
+  const { score, rig, view, time, collapsed, order, onView, edit, revision, overlays } = props;
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const size = useRef({ w: 0, h: 0 });
@@ -113,6 +116,12 @@ export function Timeline(props: TimelineProps) {
     }
     list.line({ x1: 0, y1: RULER_H - 0.5, x2: w, y2: RULER_H - 0.5, stroke: theme.line });
 
+    /* Rest first, behind everything: it is a property of the show rather than
+     * of any one instrument, so it spans every lane. */
+    if (overlays.calm && score.calm?.length) {
+      drawCalm(list, score.calm, view, { x: 0, y: RULER_H, w, h: h - RULER_H }, theme);
+    }
+
     /* --- lanes --- */
     for (const row of lay.rows) {
       const track = score.tracks[row.track];
@@ -127,6 +136,9 @@ export function Timeline(props: TimelineProps) {
 
       switch (row.draw) {
         case 'cues':
+          if (overlays.latency) {
+            drawLatency(list, track, latencyOf(track.instrument, rig), view, box, theme);
+          }
           drawCues(list, track, view, box, theme, { selected: edit.selected });
           break;
         case 'curve':
@@ -162,7 +174,7 @@ export function Timeline(props: TimelineProps) {
     }
 
     paint(ctx, list, FONT, MONO);
-  }, [score, rig, view, time, lay, fps, edit.selected, edit.band, edit.guide, edit.version]);
+  }, [score, rig, view, time, lay, fps, overlays, edit.selected, edit.band, edit.guide, edit.version]);
 
   useEffect(() => { draw(); });
 

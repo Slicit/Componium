@@ -44,6 +44,7 @@ export function App() {
    * presses multiply rather than step, which is what makes it a shuttle. */
   const [shuttle, setShuttle] = useState(0);
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
+  const [overlays, setOverlays] = useState({ calm: true, latency: true });
   /* useEditing needs to seek, seek needs the view, and the view is built
    * below. A ref breaks the cycle without either of them knowing about the
    * other's lifetime. */
@@ -420,6 +421,19 @@ export function App() {
         <span className="tc" title="Timecode, HH:MM:SS:FF">{timecode(time, fps, { hours: true })}</span>
         <span className="dim small">{fps} fps</span>
         <span className="dim small">{Math.round(view.fraction * 100)}% shown</span>
+        <button
+          className={'toggle' + (overlays.calm ? ' on' : '')}
+          onClick={() => setOverlays((o) => ({ ...o, calm: !o.calm }))}
+          title={score?.calm?.length
+            ? 'Where the analysis decided to leave the film alone'
+            : 'This score records no calm regions — rebuild it to get them'}
+          disabled={!score?.calm?.length}
+        >calm</button>
+        <button
+          className={'toggle' + (overlays.latency ? ' on' : '')}
+          onClick={() => setOverlays((o) => ({ ...o, latency: !o.latency }))}
+          title="When the conductor actually fires, against when the effect lands"
+        >lead</button>
         {edit.selected.size > 0 && <span className="chip">{edit.selected.size} selected</span>}
         <button
           onClick={() => { if (history.undo()) onView(); }}
@@ -483,6 +497,7 @@ export function App() {
             onView={onView}
             edit={edit}
             revision={history.version}
+            overlays={overlays}
           />
         </div>
         {/* Indented to sit under the lanes rather than under the whole panel,

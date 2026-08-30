@@ -15,6 +15,14 @@ export interface Score {
   fps?: number;
   path?: string;
   tracks: Track[];
+  /**
+   * Where the analysis decided to leave the film alone.
+   *
+   * Advisory, and read only. The player never reads it and a score without
+   * it behaves identically; the editor draws it because it is the answer to
+   * the only question a sparse stretch of timeline provokes.
+   */
+  calm?: Array<{ from: Seconds; to: Seconds }>;
 }
 
 export interface Track {

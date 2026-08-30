@@ -433,3 +433,15 @@ button:hover { border-color: #3a4553; }
   border: 1px solid var(--line);
   vertical-align: middle;
 }
+
+/* Overlay toggles. Off by appearance, not hidden: knowing an overlay exists
+   and is currently off is part of reading what the timeline is showing. */
+.toggle {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 3px 7px;
+  color: var(--muted);
+  background: transparent;
+}
+.toggle.on { color: var(--accent); border-color: #4a3a1c; background: #241d10; }

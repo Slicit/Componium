@@ -17,6 +17,23 @@ const Version = "0.1"
 type Score struct {
 	Meta   Meta    `toml:"score"`
 	Tracks []Track `toml:"track"`
+	// Calm is where the analysis decided the film should be left alone.
+	//
+	// Advisory: the player never reads it, and a score without it behaves
+	// identically. It is written down because it is the answer to the only
+	// question a sparse stretch of timeline provokes — "why is nothing
+	// happening here" — and because an operator authoring into somebody's
+	// rest ought to be able to see that that is what they are doing.
+	//
+	// The composer already computed these to decide what not to play, and
+	// then threw them away.
+	Calm []Region `toml:"calm"`
+}
+
+// Region is a stretch of the film.
+type Region struct {
+	From Timecode `toml:"from"`
+	To   Timecode `toml:"to"`
 }
 
 // Meta identifies the score and the media it belongs to.

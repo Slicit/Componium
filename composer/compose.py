@@ -202,7 +202,7 @@ def file_hash(path: str, limit_mb: int) -> str:
     return f"{prefix}:{h.hexdigest()}"
 
 
-def render(meta, tracks) -> str:
+def render(meta, tracks, calm=()) -> str:
     """Render a score as TOML.
 
     Written by hand rather than with a TOML library so that the composer has no
@@ -224,6 +224,8 @@ def render(meta, tracks) -> str:
         lines.append(f'hash = "{meta["hash"]}"')
     if meta.get("fps"):
         lines.append(f'fps = {meta["fps"]:.3f}')
+
+    lines += _calm_sections(calm)
 
     for tr in tracks:
         lines += ["", "[[track]]", f'instrument = "{tr["instrument"]}"']
@@ -254,6 +256,22 @@ def render(meta, tracks) -> str:
                 lines.append(f'  {{ t = "{timecode(at)}", value = {{ {body} }} }},')
             lines.append("]")
     return "\n".join(lines) + "\n"
+
+
+def _calm_sections(calm):
+    """Write down where the analysis decided to leave the film alone.
+
+    Advisory — the player never reads it. It is recorded because it is the
+    answer to the only question a sparse stretch of timeline provokes, and
+    because these regions were computed anyway, used to decide what not to
+    play, and then discarded.
+    """
+    lines = []
+    for lo, hi in calm:
+        lines += ["", "[[calm]]",
+                  f'from = "{timecode(lo)}"',
+                  f'to = "{timecode(hi)}"']
+    return lines
 
 
 def _cue_track(instrument, cues):
@@ -446,7 +464,9 @@ def build(args) -> str:
         "hash": "" if args.no_hash else file_hash(args.input, args.hash_mb),
     }
     progress(1.0, "writing the score")
-    return render(meta, tracks)
+    return render(meta, tracks, calm)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="Generate a Componium score from a film.")
     p.add_argument("input", help="video file")

@@ -7,6 +7,7 @@ extracted data is pure and is tested here.
 import unittest
 
 import analysis
+import compose
 import light
 import scenes
 import subtitles
@@ -157,3 +158,35 @@ class ColourSpace(unittest.TestCase):
             # Warm is near the red end of the wheel, not the cyan end.
             self.assertLess(cue["params"]["h"], 0.15)
             self.assertGreater(cue["params"]["s"], 0.5)
+
+
+class CalmIsRecorded(unittest.TestCase):
+    """Where the analysis decided to leave the film alone is written down.
+
+    Advisory only — the player never reads it. It is recorded because it is
+    the answer to the only question a sparse stretch of timeline provokes, and
+    because these regions were computed to decide what *not* to play and then
+    thrown away.
+    """
+
+    def test_regions_appear_in_the_score(self):
+        text = compose.render(
+            {"title": "t", "duration": 120.0},
+            [],
+            calm=[(10.0, 40.0), (80.5, 95.25)],
+        )
+        self.assertIn("[[calm]]", text)
+        self.assertIn('from = "00:00:10.000"', text)
+        self.assertIn('to = "00:00:40.000"', text)
+        self.assertIn('from = "00:01:20.500"', text)
+        self.assertEqual(text.count("[[calm]]"), 2)
+
+    def test_a_film_with_no_calm_writes_none(self):
+        text = compose.render({"title": "t", "duration": 60.0}, [], calm=[])
+        self.assertNotIn("[[calm]]", text)
+
+    def test_the_default_is_still_a_valid_score(self):
+        # render() is called from tests and tools without the argument.
+        text = compose.render({"title": "t", "duration": 60.0}, [])
+        self.assertIn("[score]", text)
+        self.assertNotIn("[[calm]]", text)

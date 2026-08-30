@@ -16,6 +16,8 @@ export const dark: Theme = {
   eventSoft: '#141920',
   playhead: '#f0f4fa',
   warn: '#d66e63',
+  /* Rest reads as a cool absence rather than as another effect. */
+  calm: '#1a2733',
   channel: {
     r: '#e3736b',
     g: '#79c073',

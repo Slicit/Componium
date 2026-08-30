@@ -450,6 +450,14 @@ type wireScore struct {
 	FPS    float64     `json:"fps,omitempty"`
 	Path   string      `json:"path"`
 	Tracks []wireTrack `json:"tracks"`
+	// Calm is advisory and read only: the editor draws it, nothing edits it,
+	// and it is not read back in fromWire.
+	Calm []wireRegion `json:"calm,omitempty"`
+}
+
+type wireRegion struct {
+	From float64 `json:"from"`
+	To   float64 `json:"to"`
 }
 
 type wireTrack struct {
@@ -542,6 +550,12 @@ func toWire(sc *score.Score, path string) wireScore {
 		Duration: sc.Meta.Media.Duration.Duration().Seconds(),
 		FPS:      sc.Meta.Media.FPS,
 		Path:     path,
+	}
+	for _, r := range sc.Calm {
+		out.Calm = append(out.Calm, wireRegion{
+			From: r.From.Duration().Seconds(),
+			To:   r.To.Duration().Seconds(),
+		})
 	}
 	for _, t := range sc.Tracks {
 		wt := wireTrack{Instrument: t.Instrument, Type: string(t.Type)}
