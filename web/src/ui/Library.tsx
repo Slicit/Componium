@@ -5,7 +5,9 @@
  * time, and this polls while anything is running and stops when nothing is.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Icon } from './Icon';
+import { ALL, DEFAULT_PAGE_SIZE, PAGE_SIZES, matches, paginate } from '../core/paging';
 
 const POLL_MS = 700;
 
@@ -75,6 +77,27 @@ export function Library(props: { onOpen: (film: string) => void }) {
   const [uploading, setUploading] = useState<{ name: string; percent: number } | null>(null);
   const polling = useRef(false);
   const file = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  /* The page size is remembered and the filter is not. One is how you like to
+   * work; the other is what you were looking for a minute ago, and having it
+   * still applied on the next visit reads as an empty library. */
+  const [size, setSize] = useState(() => {
+    try {
+      const raw = localStorage.getItem('componium.libraryPage');
+      /* Test the key, not the value. Number(null) is 0, and 0 is the size
+       * meaning "show all" — so a first visit read as a deliberate choice to
+       * paginate nothing, and the library opened with every film on one page. */
+      if (raw === null || raw === '') return DEFAULT_PAGE_SIZE;
+      const n = Number(raw);
+      return PAGE_SIZES.includes(n as never) || n === ALL ? n : DEFAULT_PAGE_SIZE;
+    } catch {
+      return DEFAULT_PAGE_SIZE;
+    }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('componium.libraryPage', String(size)); } catch { /* private mode */ }
+  }, [size]);
 
   const refresh = useCallback(async () => {
     const res = await fetch('/api/library');
@@ -144,6 +167,14 @@ export function Library(props: { onOpen: (film: string) => void }) {
     await refresh();
   };
 
+  const shown = useMemo(
+    () => paginate(matches(data?.entries ?? [], query, (e) => e.film), page, size),
+    [data, query, page, size]);
+
+  /* Back to the first page whenever the filter changes: staying on page three
+   * of a search that now matches two things shows nothing at all. */
+  useEffect(() => { setPage(1); }, [query, size]);
+
   if (!data) return <p className="dim small">loading the library…</p>;
 
   return (
@@ -183,6 +214,34 @@ export function Library(props: { onOpen: (film: string) => void }) {
         </div>
       </div>
 
+      <div className="lib-tools">
+        <label className="lib-find">
+          <Icon name="search" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="filter films"
+            aria-label="Filter films"
+          />
+        </label>
+        <span className="dim small lib-count">
+          {shown.total === 0
+            ? (query ? 'nothing matches' : 'no films yet')
+            : shown.pages > 1
+              ? `${shown.first}–${shown.last} of ${shown.total}`
+              : `${shown.total} film${shown.total === 1 ? '' : 's'}`}
+        </span>
+        <select
+          value={size}
+          onChange={(e) => setSize(Number(e.target.value))}
+          aria-label="Films per page"
+          title="How many films to show at once"
+        >
+          {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} per page</option>)}
+          <option value={ALL}>show all</option>
+        </select>
+      </div>
+
       {uploading && (
         <div className="lib-row">
           <div className="lib-name">{uploading.name}</div>
@@ -193,42 +252,93 @@ export function Library(props: { onOpen: (film: string) => void }) {
         </div>
       )}
 
-      {data.entries?.map((e) => (
+      {shown.items.map((e) => (
         <div key={e.film} className={'lib-row' + (e.scoreName === data.current ? ' current' : '')}>
           <div className="lib-name">
             {e.film} <span className="dim">{megabytes(e.size)}</span>
           </div>
           <div className="lib-status">{status(e)}</div>
+          {/* Fixed slots, always in the same order, empty where an action
+              does not apply. Rows used to lay their buttons out left to
+              right, so a film with no Prepare button put Delete where its
+              neighbour put Rebuild — the whole column shifted from row to
+              row, and the button under the pointer changed as the list
+              refreshed underneath it. */}
           <div className="lib-actions">
-            {e.hasScore && <button onClick={() => props.onOpen(e.film)}>Open</button>}
-            {data.canBuild && (
-              <button
-                disabled={!!(e.job && (e.job.state === 'queued' || e.job.state === 'running'))}
-                onClick={() => post('/api/build?file=' + encodeURIComponent(e.film))}
-                title={resumable(e.job)
-                  ? `Continue from piece ${done(e.job)} of ${e.job!.chunks!.length}. ` +
-                    'The finished pieces are kept.'
-                  : 'Analyse the whole film, in pieces that can be resumed'}
-              >{resumable(e.job) ? 'Resume' : e.hasScore ? 'Rebuild' : 'Analyse'}</button>
-            )}
-            {data.canBuild && (e.job?.chunks?.length ?? 0) > 0
-              && e.job?.state !== 'running' && e.job?.state !== 'queued' && (
-              <button
-                onClick={() => reset(e)}
-                title="Throw away every finished piece and analyse the film again from nothing"
-              >Reset</button>
-            )}
-            {data.canPrepare && !e.preview && (
-              <button
-                disabled={!!(e.prepare && (e.prepare.state === 'queued' || e.prepare.state === 'running'))}
-                onClick={() => post('/api/prepare?file=' + encodeURIComponent(e.film))}
-                title="Make a copy this browser can play. Usually quick: the video is only re-encoded when it has to be."
-              >Prepare</button>
-            )}
-            {data.canUpload && <button className="danger" onClick={() => remove(e)}>Delete</button>}
+            <span className="slot">
+              {e.hasScore && <button onClick={() => props.onOpen(e.film)}>Open</button>}
+            </span>
+            <span className="slot">
+              {data.canBuild && (
+                <button
+                  disabled={!!(e.job && (e.job.state === 'queued' || e.job.state === 'running'))}
+                  onClick={() => post('/api/build?file=' + encodeURIComponent(e.film))}
+                  title={resumable(e.job)
+                    ? `Continue from piece ${done(e.job)} of ${e.job!.chunks!.length}. ` +
+                      'The finished pieces are kept.'
+                    : 'Analyse the whole film, in pieces that can be resumed'}
+                >{resumable(e.job) ? 'Resume' : e.hasScore ? 'Rebuild' : 'Analyse'}</button>
+              )}
+            </span>
+            <span className="slot">
+              {data.canBuild && (e.job?.chunks?.length ?? 0) > 0
+                && e.job?.state !== 'running' && e.job?.state !== 'queued' && (
+                <button
+                  onClick={() => reset(e)}
+                  title="Throw away every finished piece and analyse the film again from nothing"
+                >Reset</button>
+              )}
+            </span>
+            <span className="slot">
+              {data.canPrepare && !e.preview && (
+                <button
+                  disabled={!!(e.prepare && (e.prepare.state === 'queued' || e.prepare.state === 'running'))}
+                  onClick={() => post('/api/prepare?file=' + encodeURIComponent(e.film))}
+                  title="Make a copy this browser can play. Usually quick: the video is only re-encoded when it has to be."
+                >Prepare</button>
+              )}
+            </span>
+            <span className="slot slot-icon">
+              {data.canUpload && (
+                <button
+                  className="danger icon-btn"
+                  onClick={() => remove(e)}
+                  title={'Delete ' + e.film}
+                  aria-label={'Delete ' + e.film}
+                ><Icon name="trash" /></button>
+              )}
+            </span>
           </div>
         </div>
       ))}
+
+      {shown.total === 0 && (
+        <p className="dim small lib-empty">
+          {query
+            ? `Nothing matches “${query}”.`
+            : 'No films here yet. Upload one to get started.'}
+        </p>
+      )}
+
+      {shown.pages > 1 && (
+        <div className="lib-pages">
+          <button
+            onClick={() => setPage((n) => n - 1)}
+            disabled={shown.page <= 1}
+            aria-label="Previous page"
+            title="Previous page"
+            className="icon-btn"
+          ><Icon name="left" /></button>
+          <span className="dim small">page {shown.page} of {shown.pages}</span>
+          <button
+            onClick={() => setPage((n) => n + 1)}
+            disabled={shown.page >= shown.pages}
+            aria-label="Next page"
+            title="Next page"
+            className="icon-btn"
+          ><Icon name="right" /></button>
+        </div>
+      )}
     </div>
   );
 }

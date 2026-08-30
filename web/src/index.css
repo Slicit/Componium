@@ -521,7 +521,10 @@ button:hover { border-color: #3a4553; }
 }
 .lib-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) auto;
+  /* The action column is a fixed width, not auto. With auto it was as wide as
+     that row's buttons happened to be, and since every row has a different set
+     of them, no two rows agreed where a column started. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) var(--lib-actions);
   align-items: center;
   gap: 12px;
   padding: 5px 0;
@@ -532,7 +535,22 @@ button:hover { border-color: #3a4553; }
 .lib-row.current .lib-name { color: var(--accent); }
 .lib-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-status { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.lib-actions { display: flex; gap: 5px; }
+/* Five slots, always in the same order and always the same width, so a button
+   stays where it was between one row and the next and between one refresh and
+   the next. An empty slot holds its place rather than closing up. */
+:root { --lib-actions: 310px; }
+.lib-actions {
+  display: grid;
+  grid-template-columns: 52px 72px 52px 68px 30px;
+  gap: 6px;
+  justify-content: end;
+}
+.lib-actions .slot { display: flex; justify-content: stretch; }
+.lib-actions .slot > button { width: 100%; }
+.lib-actions .slot-icon > button { width: 30px; }
+/* The head keeps its own buttons in a plain row: they are one-offs that act on
+   the whole library, not the per-row actions the grid exists to align. */
+.lib-head .lib-actions { display: flex; grid-template-columns: none; }
 .lib-actions button { font-size: 11px; padding: 3px 8px; }
 .lib-actions button.danger { color: var(--warn); }
 .lib-actions button.danger:hover { border-color: #5a2f2a; }
@@ -658,3 +676,60 @@ button:hover { border-color: #3a4553; }
    the film: which of this film's scores are we looking at. */
 .versions { max-width: 230px; }
 .versions:disabled { opacity: 0.5; }
+
+
+/* --- library: filtering, paging, icon buttons --- */
+
+.lib-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 8px;
+}
+.lib-find {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 260px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.lib-find .icon { color: var(--dim, #7a8794); flex: 0 0 auto; }
+.lib-find input {
+  border: none;
+  background: none;
+  padding: 4px 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: 12px;
+}
+.lib-find input:focus { outline: none; }
+.lib-find:focus-within { border-color: var(--accent); }
+.lib-count { margin-left: auto; font-variant-numeric: tabular-nums; }
+.lib-empty { padding: 14px 0; }
+.lib-pages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+/* An icon button is square and holds only its glyph, so a row of them lines up
+   with the text buttons beside it rather than sitting a pixel high. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  line-height: 1;
+}
+.icon { display: block; }
+
+@media (max-width: 760px) {
+  /* Below this the three columns cannot all be honest. The status is the one
+     that can be read from the row itself, so it goes. */
+  .lib-row { grid-template-columns: minmax(0, 1fr) var(--lib-actions); }
+  .lib-status { display: none; }
+}
