@@ -74,9 +74,29 @@ func (j *Jobs) expect(film string) map[string]float64 {
 // finishing so that a step running longer than expected creeps rather than
 // overshoots. A bar that reaches the end and waits is worse than one that
 // slows down, because the first looks stuck and the second looks slow.
-func predict(steps []Step, expect map[string]float64, planned int) float64 {
+// guessTotal is how long a whole run is expected to take, when this film has
+// never been analysed before.
+//
+// Everything is a fraction of the film's own length, which is the only thing
+// known about it up front. A fifth is loose — measured runs come in nearer an
+// eighth since the film stopped being decoded five times — and loose is the
+// right way to be wrong here: a bar that finishes early and waits looks stuck,
+// and one that runs slow keeps moving.
+const guessRatio = 0.2
+
+func predict(steps []Step, expect map[string]float64, planned int, filmSeconds float64) float64 {
 	if len(steps) == 0 {
 		return 0
+	}
+
+	// Everything below is in seconds. It was not, once: the fallback returned
+	// a share of the whole while elapsed time was measured in seconds, so
+	// dividing one by the other saturated the running step within a second of
+	// it starting and the bar sat still until the next one began. It read 17%
+	// for the length of a decode.
+	total := filmSeconds * guessRatio
+	if total <= 0 {
+		total = 120
 	}
 
 	cost := func(s Step) float64 {
@@ -84,29 +104,17 @@ func predict(steps []Step, expect map[string]float64, planned int) float64 {
 			return v
 		}
 		if v, ok := share[family(s.Name)]; ok {
-			// The general shape is a fraction rather than a duration, so it is
-			// only used for its ratio against the other fractions.
 			if family(s.Name) == "analysing" && planned > 1 {
-				return v / float64(planned)
+				return v * total / float64(planned)
 			}
-			return v
+			return v * total
 		}
-		return 0.02
+		return 0.02 * total
 	}
 
 	// Everything a full run is expected to contain, not merely what has been
 	// seen so far: a bar that only knows about the steps already started
 	// reaches the end at the start of the last one.
-	total := 0.0
-	for name, v := range share {
-		if name == "analysing" && planned > 1 {
-			for i := 0; i < planned; i++ {
-				total += v / float64(planned)
-			}
-			continue
-		}
-		total += v
-	}
 	if len(expect) > 0 {
 		total = 0
 		for _, v := range expect {
@@ -166,4 +174,13 @@ func predict(steps []Step, expect map[string]float64, planned int) float64 {
 		f = 0
 	}
 	return f
+}
+
+// filmSeconds is how much film a plan covers, which is the only thing known
+// about a film that has never been analysed.
+func filmSeconds(chunks []Chunk) float64 {
+	if len(chunks) == 0 {
+		return 0
+	}
+	return chunks[len(chunks)-1].To
 }

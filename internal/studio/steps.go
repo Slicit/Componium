@@ -42,7 +42,7 @@ func (j *Jobs) beginStep(film, name string) {
 			Name:    name,
 			Started: time.Now().UTC().Format(time.RFC3339),
 		})
-		job.Progress = predict(job.Steps, expect, len(job.Chunks))
+		job.Progress = predict(job.Steps, expect, len(job.Chunks), filmSeconds(job.Chunks))
 	})
 }
 

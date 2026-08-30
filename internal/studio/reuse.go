@@ -119,3 +119,23 @@ func (j *Jobs) lookAgain(film string) bool {
 	}
 	return want
 }
+
+// replanIfFinished throws away a plan that has nothing left to do.
+//
+// A successful analysis deletes its partials — they are working files and the
+// score is the product — but leaves the chunk record saying every chunk is
+// done. Rebuilding then found nothing to run and handed the merge a directory
+// that had been tidied away, which is the folder error rebuilds were failing
+// with. A plan with nothing left to do is not a plan to resume; it is a plan
+// to make again.
+//
+// A plan with work outstanding is left exactly alone. Continuing an
+// interrupted run rather than repeating it is the entire reason the record
+// exists.
+func (j *Jobs) replanIfFinished(film string) {
+	chunks := j.chunksOf(film)
+	if len(chunks) == 0 || resumeAt(chunks) < len(chunks) {
+		return
+	}
+	j.setChunks(film, nil)
+}

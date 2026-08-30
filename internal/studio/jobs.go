@@ -329,7 +329,7 @@ func (j *Jobs) Snapshot() map[string]Job {
 	for _, film := range films {
 		key := jobKey(JobAnalyse, film)
 		job := jobs[key]
-		job.Progress = predict(job.Steps, j.expect(film), len(job.Chunks))
+		job.Progress = predict(job.Steps, j.expect(film), len(job.Chunks), filmSeconds(job.Chunks))
 		jobs[key] = job
 	}
 	return jobs

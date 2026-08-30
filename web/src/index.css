@@ -558,15 +558,9 @@ button:hover { border-color: #3a4553; }
 .lib-actions button.danger { color: var(--warn); }
 .lib-actions button.danger:hover { border-color: #5a2f2a; }
 
-.bar {
-  flex: 1 1 auto;
-  min-width: 60px;
-  height: 4px;
-  background: var(--surface-2);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.fill { height: 100%; background: var(--accent); }
+/* The progress bar used to be called .bar, which is also the header, so it
+   inherited the header-s padding and flex and rendered as a tall empty box.
+   It has its own name and its own file now. */
 .failed { color: var(--warn); }
 
 /* --- the resizable stage ------------------------------------------------
@@ -858,3 +852,45 @@ button:hover { border-color: #3a4553; }
    top rather than sorted in with the ones that are finished. */
 .build-now { border-left: 2px solid var(--accent); padding-left: 8px; }
 .build-now .build-head strong { color: var(--accent); }
+
+/* --- the progress bar --- */
+
+.progress {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--surface-2, #141b24);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+/* Under the text rather than clipping it: a filled bar and an empty one have
+   to be equally readable, and a fill dim enough to read through is the
+   simplest way to get that. */
+.progress-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  background: var(--accent);
+  opacity: 0.32;
+  transition: width 240ms linear;
+}
+.progress-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--fg, #dbe3ec);
+}
+.progress-what {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.progress-pct { flex: 0 0 auto; font-variant-numeric: tabular-nums; opacity: 0.85; }

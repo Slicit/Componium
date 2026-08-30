@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { ALL, DEFAULT_PAGE_SIZE, PAGE_SIZES, matches, paginate } from '../core/paging';
 import { Steps, howLong, type Step } from './Steps';
+import { Progress } from './Progress';
 
 const POLL_MS = 700;
 
@@ -266,8 +267,7 @@ export function Library(props: { onOpen: (film: string) => void }) {
         <div className="lib-row">
           <div className="lib-name">{uploading.name}</div>
           <div className="lib-status">
-            <div className="bar"><div className="fill" style={{ width: uploading.percent + '%' }} /></div>
-            <span className="dim small">uploading {uploading.percent}%</span>
+            <Progress value={uploading.percent / 100} label={'uploading ' + uploading.name} />
           </div>
         </div>
       )}
@@ -409,10 +409,10 @@ function status(e: Entry) {
   if (j && (j.state === 'queued' || j.state === 'running')) {
     return (
       <>
-        <div className="bar"><div className="fill" style={{ width: Math.round(j.progress * 100) + '%' }} /></div>
-        <span className="dim small">
-          {j.state === 'queued' ? 'queued' : `${j.label}  ${Math.round(j.progress * 100)}%`}
-        </span>
+        <Progress
+          value={j.progress}
+          label={j.state === 'queued' ? 'queued' : j.label}
+        />
       </>
     );
   }

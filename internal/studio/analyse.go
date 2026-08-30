@@ -74,6 +74,11 @@ func (j *Jobs) runAnalyse(film string) error {
 	}
 
 	limit := j.limitOf(film)
+	// A plan with nothing left to do is not a plan to resume. Its partials
+	// were deleted when it succeeded, so keeping it would send the merge to a
+	// folder that is not there — which is what rebuilding a finished film was
+	// failing with.
+	j.replanIfFinished(film)
 	chunks := j.chunksOf(film)
 	if len(chunks) > 0 && !coversLimit(chunks, limit) {
 		// The plan on file was made for a different amount of film. Keeping it
