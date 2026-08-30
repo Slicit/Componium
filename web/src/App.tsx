@@ -18,6 +18,7 @@ import { Inspector } from './ui/Inspector';
 import { Room } from './ui/room/Room';
 import { Force } from './ui/Force';
 import { Library } from './ui/Library';
+import { COLUMNS, useDrag, useSplit } from './ui/useSplit';
 import { canCollapse } from './core/layout';
 import { menuFor } from './ui/menuItems';
 import { addTrack, copy, missingInstruments, nudge, paste, splitCue, duplicateCues, type Clip } from './core/edits';
@@ -51,6 +52,8 @@ export function App() {
   const [forced, setForced] = useState<Map<string, number>>(new Map());
   const [brightness, setBrightness] = useState(50);
   const [showRoom, setShowRoom] = useState(true);
+  const split = useSplit();
+  const stage = useRef<HTMLDivElement>(null);
   /* useEditing needs to seek, seek needs the view, and the view is built
    * below. A ref breaks the cycle without either of them knowing about the
    * other's lifetime. */
@@ -404,6 +407,19 @@ export function App() {
     });
   }, [score]);
 
+  /* Both drags are measured against the stage's own box, so they mean the same
+   * thing at any window size and the split survives a resize. */
+  const dragSplit = useDrag((e) => {
+    const box = stage.current?.getBoundingClientRect();
+    if (!box || box.width <= 0) return;
+    split.setColumns(((e.clientX - box.left) / box.width) * COLUMNS);
+  });
+  const dragHeight = useDrag((e) => {
+    const box = stage.current?.getBoundingClientRect();
+    if (!box) return;
+    split.setHeight(e.clientY - box.top);
+  });
+
   if (error && !score) return <div className="fail">{error}</div>;
   if (!score) return <div className="loading">loading…</div>;
 
@@ -463,7 +479,16 @@ export function App() {
 
       {error && <p className="warn">{error}</p>}
 
-      <div className="stage">
+      <div
+        className="stage"
+        ref={stage}
+        style={{
+          height: split.height,
+          gridTemplateColumns: showRoom
+            ? `${split.columns}fr 10px ${COLUMNS - split.columns}fr`
+            : '1fr',
+        }}
+      >
         <div className="stage-film">
         {playable ? (
           <video
@@ -482,6 +507,20 @@ export function App() {
           </p>
         )}
         </div>
+
+        {showRoom && (
+          <div
+            className="split-v"
+            onPointerDown={dragSplit}
+            onDoubleClick={split.reset}
+            role="separator"
+            aria-label="Resize the picture and the room"
+            aria-valuenow={split.columns}
+            aria-valuemin={2}
+            aria-valuemax={10}
+            title={`${split.columns} of ${COLUMNS} columns — drag to resize, double click for half and half`}
+          />
+        )}
 
         {showRoom && (
           <div className="stage-room">
@@ -505,6 +544,15 @@ export function App() {
           </div>
         )}
       </div>
+
+      <div
+        className="split-h"
+        onPointerDown={dragHeight}
+        onDoubleClick={split.reset}
+        role="separator"
+        aria-label="Resize the height of the picture and the room"
+        title="Drag to resize, double click to reset"
+      />
 
       <section className="tl">
         <div className="tl-body">

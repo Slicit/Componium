@@ -96,7 +96,6 @@ button:hover { border-color: #3a4553; }
 .stage { margin-bottom: 14px; }
 .stage video {
   display: block;
-  max-height: 340px;
   max-width: 100%;
   background: #000;
   border: 1px solid var(--line);
@@ -448,13 +447,11 @@ button:hover { border-color: #3a4553; }
 
 /* --- the stage: picture and room together ------------------------------- */
 
-.stage { display: flex; gap: 14px; align-items: flex-start; }
-.stage-film { flex: 1 1 0; min-width: 0; }
-.stage-room { flex: 0 0 430px; max-width: 46%; }
-@media (max-width: 1100px) {
-  .stage { flex-direction: column; }
-  .stage-room { flex: 1 1 auto; max-width: none; width: 100%; }
-}
+/* The stage is laid out by the twelve column grid further down. It used to
+   be defined here as flex as well, and the two rules fought: the grid was
+   computed, ignored, and the divider between the panes came out zero pixels
+   wide, which reads as a handle that cannot be grabbed rather than as a
+   layout that is not being applied. */
 
 .room-bar {
   display: flex;
@@ -550,3 +547,67 @@ button:hover { border-color: #3a4553; }
 }
 .fill { height: 100%; background: var(--accent); }
 .failed { color: var(--warn); }
+
+/* --- the resizable stage ------------------------------------------------
+ *
+ * Twelve columns. A drag lands on a twelfth rather than on 47.3%, so half and
+ * half is exactly half and there is always a way back to it: double click
+ * either handle.
+ *
+ * This is the only definition of the stage's layout. There used to be a flex
+ * one as well, and the two fought silently — the grid was computed, ignored,
+ * and the divider between the panes came out zero pixels wide, which reads as
+ * a handle that cannot be grabbed rather than as a layout not being applied.
+ */
+.stage {
+  display: grid;
+  align-items: stretch;
+  overflow: hidden;
+}
+.stage-film, .stage-room {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.stage-film video {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+}
+.stage-room .room { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.stage-room .room-host { flex: 1 1 auto; height: auto; min-height: 0; }
+/* The sliders keep their own height and scroll, rather than squeezing the room
+   out of the pane they share. */
+.stage-room .force { flex: 0 0 auto; max-height: 40%; overflow-y: auto; }
+
+.split-v, .split-h { position: relative; touch-action: none; background: transparent; }
+.split-v { cursor: col-resize; }
+.split-h { cursor: row-resize; height: 10px; margin: 2px 0 6px; }
+
+/* A grip, quiet until the pointer is near it. */
+.split-v::after, .split-h::after {
+  content: '';
+  position: absolute;
+  background: var(--line);
+  border-radius: 2px;
+  transition: background 90ms;
+}
+.split-v::after { top: 50%; left: 50%; width: 3px; height: 34px; transform: translate(-50%, -50%); }
+.split-h::after { left: 50%; top: 50%; height: 3px; width: 46px; transform: translate(-50%, -50%); }
+.split-v:hover::after, .split-h:hover::after,
+.split-v:active::after, .split-h:active::after { background: var(--accent); }
+
+@media (max-width: 900px) {
+  /* Below this the split stops helping: two narrow columns are worse than one
+     of each, stacked. */
+  .stage { grid-template-columns: 1fr !important; height: auto !important; }
+  .split-v { display: none; }
+}
+
+/* Stops a drag on a handle selecting the text either side of it. Done here
+   rather than with preventDefault() on pointerdown, because that also cancels
+   the double click that resets the split. */
+.split-v, .split-h { user-select: none; -webkit-user-select: none; }
