@@ -44,6 +44,13 @@ SCORE_VERSION = "0.1"
 # during compression and the names have to go back on in the same order.
 POSE_AXES = ("surge", "sway", "heave", "roll", "pitch", "yaw")
 
+# Three axes by default. A platform with three actuators under a triangle can
+# produce exactly heave, roll and pitch, which is what almost every buildable
+# home rig is; six needs a Stewart platform. Surge and sway are folded in as
+# tilt rather than dropped, and this analysis already leaves sway and roll at
+# zero always, so the honest loss is smaller than the axis count suggests.
+# Six remains available for a rig that has them.
+
 
 # --------------------------------------------------------------------------
 # extraction
@@ -377,13 +384,16 @@ def build(args) -> str:
 
     if args.motion_id:
         pose = motion_est.pose_series(movements, args.fps, gain=args.motion_gain)
-        points = [(i / args.fps, tuple(p[a] for a in POSE_AXES))
+        axes = POSE_AXES if args.dof == 6 else motion_est.DOF3_AXES
+        if args.dof != 6:
+            pose = motion_est.to_3dof(pose)
+        points = [(i / args.fps, tuple(p[a] for a in axes))
                   for i, p in enumerate(pose)]
         points = compress(points, args.threshold)
         points = scenes.snap(points, cuts)
         if len(points) >= 2:
             tracks.append(_curve_track(args.motion_id, [
-                (t, dict(zip(POSE_AXES, v))) for t, v in points]))
+                (t, dict(zip(axes, v))) for t, v in points]))
 
     # --- wind, from apparent speed -------------------------------------------
     if args.wind_id:
@@ -504,7 +514,13 @@ def main(argv=None):
     p.add_argument("--mist-id", default="mist.main",
                    help="instrument for confirmed water scenes")
     p.add_argument("--motion-gain", type=float, default=1.0,
-                   help="scale on the generated 6DOF pose (default 1.0)")
+                   help="scale on the generated pose (default 1.0)")
+    p.add_argument("--dof", type=int, choices=(3, 6), default=3,
+                   help="motion axes to write: 3 is heave, roll and pitch, "
+                        "which is what a three actuator platform can produce "
+                        "and what almost every buildable home rig is. 6 adds "
+                        "surge, sway and yaw for a Stewart platform "
+                        "(default 3)")
     p.add_argument("--wind-id", default="wind.main",
                    help="instrument for wind from camera speed; empty to skip")
     p.add_argument("--wind-gain", type=float, default=1.0)

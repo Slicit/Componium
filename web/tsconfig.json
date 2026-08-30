@@ -13,6 +13,11 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "noEmit": true,
+    // Room3D.js is a direct port of a renderer that already worked; it is
+    // described by a .d.ts rather than rewritten, so JS is allowed but not
+    // type-checked.
+    "allowJs": true,
+    "checkJs": false,
     "types": ["vitest/globals"]
   },
   "include": ["src"]

@@ -15,6 +15,8 @@ import { useEditing } from './ui/useEditing';
 import { History } from './core/history';
 import { Menu } from './ui/Menu';
 import { Inspector } from './ui/Inspector';
+import { Room } from './ui/room/Room';
+import { Force } from './ui/Force';
 import { canCollapse } from './core/layout';
 import { menuFor } from './ui/menuItems';
 import { addTrack, copy, missingInstruments, nudge, paste, splitCue, duplicateCues, type Clip } from './core/edits';
@@ -45,6 +47,9 @@ export function App() {
   const [shuttle, setShuttle] = useState(0);
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
   const [overlays, setOverlays] = useState({ calm: true, latency: true });
+  const [forced, setForced] = useState<Map<string, number>>(new Map());
+  const [brightness, setBrightness] = useState(50);
+  const [showRoom, setShowRoom] = useState(true);
   /* useEditing needs to seek, seek needs the view, and the view is built
    * below. A ref breaks the cycle without either of them knowing about the
    * other's lifetime. */
@@ -422,6 +427,11 @@ export function App() {
         <span className="dim small">{fps} fps</span>
         <span className="dim small">{Math.round(view.fraction * 100)}% shown</span>
         <button
+          className={'toggle' + (showRoom ? ' on' : '')}
+          onClick={() => setShowRoom((v) => !v)}
+          title="The room preview"
+        >room</button>
+        <button
           className={'toggle' + (overlays.calm ? ' on' : '')}
           onClick={() => setOverlays((o) => ({ ...o, calm: !o.calm }))}
           title={score?.calm?.length
@@ -453,6 +463,7 @@ export function App() {
       {error && <p className="warn">{error}</p>}
 
       <div className="stage">
+        <div className="stage-film">
         {playable ? (
           <video
             ref={video}
@@ -468,6 +479,29 @@ export function App() {
           <p className="dim small hint">
             Pick a film to scrub against the picture. The timeline works without one.
           </p>
+        )}
+        </div>
+
+        {showRoom && (
+          <div className="stage-room">
+            <div className="room-bar">
+              <span className="dim small">Room</span>
+              <label className="lumen" title="How brightly the room is lit. Only the fill lighting moves: the lamps a cue drives stay where the score put them, so turning this down makes an effect the brightest thing in the picture rather than dimming it.">
+                <span className="dim small">light</span>
+                <input type="range" min={0} max={100} value={brightness}
+                  onChange={(e) => setBrightness(Number(e.target.value))} />
+              </label>
+            </div>
+            <Room
+              score={score}
+              rig={rig}
+              time={time}
+              muted={new Set<string>()}
+              forced={forced}
+              brightness={brightness}
+            />
+            <Force rig={rig} forced={forced} onChange={setForced} />
+          </div>
         )}
       </div>
 

@@ -9,6 +9,7 @@ import unittest
 import analysis
 import compose
 import light
+import motion_est
 import scenes
 import subtitles
 
@@ -190,3 +191,48 @@ class CalmIsRecorded(unittest.TestCase):
         text = compose.render({"title": "t", "duration": 60.0}, [])
         self.assertIn("[score]", text)
         self.assertNotIn("[[calm]]", text)
+
+
+class ThreeAxes(unittest.TestCase):
+    """Three axes by default, six for a rig that has them.
+
+    A platform with three actuators under a triangle produces exactly heave,
+    roll and pitch; six needs a Stewart platform. Folding rather than dropping
+    matters: surge becomes a backward tilt, which is how a rig with
+    centimetres of travel conveys sustained acceleration at all.
+    """
+
+    def test_only_the_three_a_platform_has(self):
+        pose = [{"surge": 0.5, "sway": 0.2, "heave": 0.3,
+                 "roll": 0.0, "pitch": 0.1, "yaw": 0.9}]
+        got = motion_est.to_3dof(pose)
+        self.assertEqual(set(got[0]), {"heave", "roll", "pitch"})
+
+    def test_surge_becomes_a_backward_tilt(self):
+        # Pitching back is how a seat says "accelerating forward" when it has
+        # centimetres of travel rather than metres.
+        flat = motion_est.to_3dof([{"pitch": 0.0, "surge": 0.0}])[0]["pitch"]
+        pushed = motion_est.to_3dof([{"pitch": 0.0, "surge": 0.8}])[0]["pitch"]
+        self.assertEqual(flat, 0.0)
+        self.assertLess(pushed, 0.0)
+
+    def test_sway_becomes_roll(self):
+        self.assertGreater(motion_est.to_3dof([{"sway": 0.8}])[0]["roll"], 0.0)
+
+    def test_heave_survives_untouched(self):
+        # Heave is where a plunge lives, and it is the one axis a three
+        # actuator platform does natively.
+        self.assertEqual(motion_est.to_3dof([{"heave": 0.42}])[0]["heave"], 0.42)
+
+    def test_nothing_leaves_the_unit_range(self):
+        pose = [{"pitch": 0.9, "surge": 1.0, "sway": 1.0, "roll": 0.9, "heave": 1.0}]
+        got = motion_est.to_3dof(pose)[0]
+        for axis, v in got.items():
+            self.assertGreaterEqual(v, -1.0, axis)
+            self.assertLessEqual(v, 1.0, axis)
+
+    def test_a_yaw_only_pan_moves_nothing(self):
+        # A pan is something the camera looked at, not a motion a seated
+        # person feels — and a three actuator platform cannot yaw at all.
+        got = motion_est.to_3dof([{"yaw": 1.0}])[0]
+        self.assertEqual(got, {"heave": 0.0, "roll": 0.0, "pitch": 0.0})

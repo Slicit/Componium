@@ -278,3 +278,44 @@ def wind_series(movements, fps: float, smooth_seconds: float = 1.5):
     if peak <= 0:
         return [0.0] * len(speeds)
     return [round(v / peak, 4) for v in speeds]
+
+
+# The axes a three actuator platform can actually produce. Three linear
+# actuators under a triangle give exactly these and nothing else, which is what
+# almost every buildable home platform is.
+DOF3_AXES = ("heave", "roll", "pitch")
+
+# How much of a sustained push to render as a backward tilt.
+#
+# The standard motion cueing trick, and it is not a compromise: below the tilt
+# rate threshold the vestibular system cannot distinguish a tilt from a linear
+# acceleration, so a seat pitched back *is* how a platform with centimetres of
+# travel conveys accelerating forward. A full six axis rig does the same thing
+# for sustained acceleration, because it runs out of travel too.
+TILT_COORDINATION = 0.55
+
+
+def to_3dof(pose):
+    """Fold a six axis pose onto the three a real platform has.
+
+    Surge becomes a backward pitch and sway becomes a roll, rather than being
+    discarded: the information is rendered through the axes that exist instead
+    of being thrown away. Yaw is dropped outright — a pan is something the
+    camera looked at, not a motion a seated person feels, and a three actuator
+    platform cannot yaw at all.
+
+    Worth knowing what this costs, which is less than it sounds: of the six
+    axes, this analysis already leaves sway and roll at zero always, because
+    nothing in a single projection pair distinguishes a lateral track from a
+    pan. Three of the six were extrapolation rather than measurement.
+    """
+    out = []
+    for p in pose:
+        pitch = clamp(p.get("pitch", 0.0) - p.get("surge", 0.0) * TILT_COORDINATION)
+        roll = clamp(p.get("roll", 0.0) + p.get("sway", 0.0) * TILT_COORDINATION)
+        out.append({
+            "heave": round(p.get("heave", 0.0), 4),
+            "roll": round(roll, 4),
+            "pitch": round(pitch, 4),
+        })
+    return out
