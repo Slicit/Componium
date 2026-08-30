@@ -178,7 +178,7 @@ export function App() {
 
   const insert = useCallback((preset: Preset) => {
     if (!target || !score) return;
-    const cmd = insertPreset(target, preset, time, channelsOf(target, rig));
+    const cmd = insertPreset(target, preset, time, channelsOf(target, rig), {}, rig);
     if (!cmd) return;
     history.run(cmd);
     history.seal();

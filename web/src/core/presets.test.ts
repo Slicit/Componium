@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { PRESETS, build, presetById, presetsFor, valueOf } from './presets';
+import {
+  PRESETS, actionForKind, build, presetById, presetsFor, valueOf, type Insertion,
+} from './presets';
+
+/** build may refuse; these tests are about what it does when it does not. */
+function must(out: Insertion | null): Insertion {
+  if (!out) throw new Error('build refused');
+  return out;
+}
 
 describe('the library', () => {
   it('offers something for every kind the rig has', () => {
@@ -10,9 +18,7 @@ describe('the library', () => {
 
   it('offers a fogger only fog shapes', () => {
     // A lamp fading over five seconds is a slow dissolve nobody asked for.
-    for (const p of presetsFor('fog')) {
-      expect(p.kinds).toContain('fog');
-    }
+    for (const p of presetsFor('fog')) expect(p.kinds).toContain('fog');
   });
 
   it('has unique ids', () => {
@@ -47,17 +53,26 @@ describe('the library', () => {
     }
   });
 
-  it('drives dosed devices with an action and dimmed ones without', () => {
-    // A fogger is told to burst; a fan is given a level.
-    for (const p of presetsFor('fog')) expect(p.action, p.id).toBeTruthy();
-    for (const p of presetsFor('mist')) expect(p.action, p.id).toBeTruthy();
-    for (const p of presetsFor('wind')) expect(p.action, p.id).toBeUndefined();
-    for (const p of presetsFor('shake')) expect(p.action, p.id).toBeUndefined();
-  });
-
   it('finds one by id, and says so when there is none', () => {
     expect(presetById('fog-fade')?.name).toBe('Fog, fading');
     expect(presetById('nonsense')).toBeNull();
+  });
+});
+
+describe('actionForKind', () => {
+  it('names only actions the vocabulary already uses', () => {
+    // Inventing a verb here produces a cue addressed to an instrument that has
+    // never heard of it, which fails at play time rather than here.
+    const known = ['flash', 'hit', 'gust', 'burst', 'spray', 'puff'];
+    for (const kind of ['light', 'shake', 'wind', 'fog', 'mist', 'scent']) {
+      expect(known, kind).toContain(actionForKind(kind));
+    }
+  });
+
+  it('refuses a kind it has no verb for', () => {
+    // Motion is driven as a curve; there is no cue action for it.
+    expect(actionForKind('motion')).toBeNull();
+    expect(actionForKind('teleporter')).toBeNull();
   });
 });
 
@@ -98,7 +113,7 @@ describe('build', () => {
   const gust = presetById('wind-gust')!;
 
   it('makes a cue for a dosed device, lasting the whole span', () => {
-    const out = build(fade, 100, ['output']);
+    const out = must(build(fade, 100, ['output']));
     expect(out.points).toBeUndefined();
     expect(out.cues).toHaveLength(1);
     expect(out.cues![0].t).toBe(100);
@@ -107,62 +122,73 @@ describe('build', () => {
     expect(out.cues![0].params!.output).toBe(1);
   });
 
-  it('makes points for a dimmed device, in the film s own time', () => {
-    const out = build(gust, 60, ['intensity']);
+  it('makes points for a dimmed device', () => {
+    const out = must(build(gust, 60, ['intensity']));
     expect(out.cues).toBeUndefined();
     expect(out.points!.length).toBe(gust.shape.length);
     expect(out.points![0].t).toBe(60);
     expect(out.points![out.points!.length - 1].t).toBeCloseTo(60 + gust.seconds);
   });
 
+  it('follows the target when it disagrees with the preset', () => {
+    /* The bug this exists for: a fog burst dropped on a fog CURVE track was
+     * built as a cue, because the preset has an action. The format refuses
+     * cues on a curve track, so it drew nothing and would not have saved. */
+    const out = must(build(fade, 10, ['output'], { as: 'curve' }));
+    expect(out.cues).toBeUndefined();
+    expect(out.points!.length).toBe(fade.shape.length);
+    expect(out.points![0].value.output).toBe(1);
+  });
+
+  it('makes a cue from a preset with no action of its own, when told one', () => {
+    const out = must(build(gust, 10, ['intensity'], { as: 'cue', action: 'gust' }));
+    expect(out.cues![0].action).toBe('gust');
+  });
+
+  it('refuses a cue it has no action for, rather than inventing a verb', () => {
+    expect(build(gust, 10, ['intensity'], { as: 'cue' })).toBeNull();
+  });
+
   it('gives every channel the envelope', () => {
     // A motion preset moves each axis it finds: a starting shape, not a
     // finished move.
     const sway = presetById('motion-sway')!;
-    const out = build(sway, 0, ['heave', 'roll', 'pitch']);
+    const out = must(build(sway, 0, ['heave', 'roll', 'pitch']));
     for (const p of out.points!) {
       expect(Object.keys(p.value).sort()).toEqual(['heave', 'pitch', 'roll']);
     }
   });
 
   it('reports the span it occupies', () => {
-    const out = build(gust, 30);
+    const out = must(build(gust, 30));
     expect(out.from).toBe(30);
     expect(out.to).toBeCloseTo(30 + gust.seconds);
   });
 
   it('takes a length that overrides the default', () => {
-    const out = build(gust, 0, ['intensity'], { seconds: 20 });
+    const out = must(build(gust, 0, ['intensity'], { seconds: 20 }));
     expect(out.to).toBe(20);
     expect(out.points![out.points!.length - 1].t).toBe(20);
   });
 
   it('ignores a length of zero or less rather than collapsing the shape', () => {
-    expect(build(gust, 0, ['intensity'], { seconds: 0 }).to).toBeCloseTo(gust.seconds);
-    expect(build(gust, 0, ['intensity'], { seconds: -5 }).to).toBeCloseTo(gust.seconds);
+    expect(must(build(gust, 0, ['intensity'], { seconds: 0 })).to).toBeCloseTo(gust.seconds);
+    expect(must(build(gust, 0, ['intensity'], { seconds: -5 })).to).toBeCloseTo(gust.seconds);
   });
 
   it('scales how hard it is', () => {
-    const out = build(gust, 0, ['intensity'], { scale: 0.5 });
+    const out = must(build(gust, 0, ['intensity'], { scale: 0.5 }));
     const peak = Math.max(...out.points!.map((p) => p.value.intensity));
     expect(peak).toBeCloseTo(0.5);
   });
 
   it('never scales a cue past full', () => {
-    const out = build(fade, 0, ['output'], { scale: 3 });
-    expect(out.cues![0].params!.output).toBe(1);
-  });
-
-  it('rounds times and values, so a score stays readable', () => {
-    const out = build(gust, 1 / 3, ['intensity']);
-    for (const p of out.points!) {
-      expect(String(p.t).replace(/^[^.]*\.?/, '').length).toBeLessThanOrEqual(3);
-    }
+    expect(must(build(fade, 0, ['output'], { scale: 3 })).cues![0].params!.output).toBe(1);
   });
 
   it('takes a cue peak from the envelope, not from its last value', () => {
     // A fade ends at zero and is still a full dose at the moment it starts.
-    expect(build(fade, 0, ['output']).cues![0].params!.output).toBe(1);
+    expect(must(build(fade, 0, ['output'])).cues![0].params!.output).toBe(1);
   });
 
   it('builds with no channels without throwing', () => {

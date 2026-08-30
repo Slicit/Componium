@@ -287,18 +287,58 @@ export interface Insertion {
  * a motion preset moves each axis it finds, which is a starting shape rather
  * than a finished move.
  */
+/**
+ * The action a kind answers to, for a preset that names none of its own.
+ *
+ * Only the actions the vocabulary already uses. Inventing a name here would
+ * produce a cue addressed to an instrument that has never heard of it, which
+ * fails silently at play time rather than loudly here.
+ */
+const ACTION_BY_KIND: Record<string, string> = {
+  light: 'flash',
+  shake: 'hit',
+  wind: 'gust',
+  fog: 'burst',
+  mist: 'spray',
+  scent: 'puff',
+};
+
+export function actionForKind(kind: string): string | null {
+  return ACTION_BY_KIND[kind] ?? null;
+}
+
 export function build(
   preset: Preset,
   at: Seconds,
   channels: readonly string[] = [],
-  opts: { seconds?: number; scale?: number; base?: Params } = {},
-): Insertion {
+  opts: {
+    seconds?: number; scale?: number; base?: Params;
+    /**
+     * What the target track holds, which is not the same question as what the
+     * preset is naturally.
+     *
+     * A fog burst dropped on a fog CURVE track has to arrive as points: the
+     * format refuses cues on a curve track, so building by the preset's own
+     * nature wrote a cue nothing drew and a score that would not save. The
+     * track decides.
+     */
+    as?: 'cue' | 'curve';
+    /** The action to use when the preset names none and a cue is wanted. */
+    action?: string;
+  } = {},
+): Insertion | null {
   const seconds = opts.seconds && opts.seconds > 0 ? opts.seconds : preset.seconds;
   const scale = opts.scale ?? 1;
   const from = round3(at);
   const to = round3(at + seconds);
 
-  if (preset.action) {
+  const as = opts.as ?? (preset.action ? 'cue' : 'curve');
+
+  if (as === 'cue') {
+    const action = preset.action ?? opts.action;
+    /* No action and none offered: there is nothing truthful to send. Better to
+     * refuse than to invent a verb the instrument has never heard. */
+    if (!action) return null;
     /* An event device is told one thing: how hard, for how long. The envelope
      * still decides how hard — its peak is the dose — but the shape itself is
      * the instrument's business once the burst has started. */
@@ -308,7 +348,7 @@ export function build(
     for (const c of channels) params[c] = round3(Math.min(1, peak * scale));
     return {
       from, to,
-      cues: [{ t: from, action: preset.action, params, duration: round3(seconds) }],
+      cues: [{ t: from, action, params, duration: round3(seconds) }],
     };
   }
 

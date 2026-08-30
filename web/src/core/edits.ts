@@ -7,9 +7,9 @@
  */
 
 import { batch, insertCues, insertPoints, movePoints, moveCues, removeCues, removePoints, resizeCues, type Command } from './history';
-import { build, type Preset } from './presets';
+import { actionForKind, build, type Preset } from './presets';
 import { clamp, clamp01, round3, type Seconds } from './time';
-import { cueEnd, isHSI, isSpan, valueAt, channelsOf, type Cue, type Instrument, type Point, type Rig, type Score, type Track } from './score';
+import { cueEnd, isHSI, isSpan, kindOf, valueAt, channelsOf, type Cue, type Instrument, type Point, type Rig, type Score, type Track } from './score';
 
 /** The shortest a split can leave either half. Below this it is not a span. */
 const MIN_PIECE = 0.04;
@@ -298,8 +298,19 @@ export function insertPreset(
   at: Seconds,
   channels: readonly string[],
   opts: { seconds?: number; scale?: number } = {},
+  rig?: Rig | null,
 ): Command | null {
-  const made = build(preset, at, channels, opts);
+  /* What the TRACK holds, not what the preset naturally is. A fog burst
+   * dropped on a fog curve track has to arrive as points: the format refuses
+   * cues on a curve track, so building by the preset's own nature wrote a cue
+   * the timeline never drew and a score that would not have saved. */
+  const as = track.type === 'cue' ? 'cue' : 'curve';
+  const made = build(preset, at, channels, {
+    ...opts,
+    as,
+    action: actionForKind(kindOf(track.instrument, rig)) ?? undefined,
+  });
+  if (!made) return null;
   const cmds: Command[] = [];
 
   if (made.cues?.length) {
