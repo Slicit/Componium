@@ -36,3 +36,7 @@ deploy/.env
 
 # Scratch commit message, never committed.
 .commitmsg
+
+# Python bytecode, which the composer regenerates on every run.
+__pycache__/
+*.pyc
