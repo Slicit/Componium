@@ -95,6 +95,42 @@ def parse_labels(text: str) -> list[str]:
     return out
 
 
+def parse_seen(text: str) -> str:
+    """The description a wrapper offered, if it offered one.
+
+    Carried on a comment line, which the seam has always ignored — so a
+    wrapper written before descriptions existed still works, and one that
+    offers a sentence costs nothing to anything not looking for it.
+    """
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if line.startswith("#"):
+            said = line.lstrip("#").strip()
+            if said:
+                return said
+    return ""
+
+
+def observe_frame(command: str, image_path: str, timeout: float = 60.0):
+    """Run the command against one image, keeping the labels and the sentence.
+
+    Returns (labels, seen). A failure is an empty pair rather than an
+    exception: a model that chokes on one JPEG must not cost the analysis
+    every frame after it.
+    """
+    try:
+        result = subprocess.run(
+            command.split() + [image_path],
+            capture_output=True, text=True, errors="replace",
+            timeout=timeout, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return [], ""
+    if result.returncode != 0:
+        return [], ""
+    return parse_labels(result.stdout), parse_seen(result.stdout)
+
+
 def label_frame(command: str, image_path: str, timeout: float = 60.0) -> list[str]:
     """Run the labelling command against one image."""
     try:
@@ -110,22 +146,45 @@ def label_frame(command: str, image_path: str, timeout: float = 60.0) -> list[st
     return parse_labels(result.stdout)
 
 
-def describe(path: str, times, command: str, timeout: float = 60.0):
-    """Label a set of moments. Returns (time, label) pairs.
+def observe(path: str, times, command: str, timeout: float = 60.0):
+    """Look at a set of moments. Returns one record per frame seen.
+
+    Each record is {"t", "labels", "seen"}. This is the pass that costs a GPU
+    and a decode, and it is the only one that cannot be repeated once the film
+    has been analysed and put away — so it keeps everything it was told, and
+    the passes that draw conclusions from it read this rather than the film.
 
     A model that fails on one frame does not stop the run. A composer that
     aborts three quarters of the way through a feature because one JPEG upset
     something is worse than one that returns slightly less.
     """
-    found = []
+    seen = []
     with tempfile.TemporaryDirectory(prefix="componium-vlm-") as tmp:
         for i, at in enumerate(times):
             image = os.path.join(tmp, f"frame-{i:04d}.jpg")
             if not keyframe(path, at, image):
                 continue
-            for label in label_frame(command, image, timeout):
-                found.append((at, label))
-    return found
+            labels, said = observe_frame(command, image, timeout)
+            if labels or said:
+                seen.append({"t": round(at, 3), "labels": labels, "seen": said})
+    return seen
+
+
+def as_pairs(observations):
+    """The (time, label) pairs the mapping reads, out of the observations."""
+    out = []
+    for o in observations or []:
+        for label in o.get("labels") or []:
+            out.append((o["t"], label))
+    return out
+
+
+def describe(path: str, times, command: str, timeout: float = 60.0):
+    """Label a set of moments. Returns (time, label) pairs.
+
+    Kept as it was for anything that only wants the conclusions.
+    """
+    return as_pairs(observe(path, times, command, timeout))
 
 
 # Some labels are only worth believing in company.

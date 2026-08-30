@@ -224,3 +224,27 @@ func TestChunkStateSurvivesBeingReadBack(t *testing.T) {
 			"back to 0", resumeAt(got))
 	}
 }
+
+func TestMergeIgnoresTheObservationsBesideThePartials(t *testing.T) {
+	/* The vision pass writes its observations into the same directory, and
+	 * merging used to take every file in it — so a JSON lines file was handed
+	 * to a TOML parser and a finished analysis failed at the last step with
+	 * "expected '.' or '=', but got '{'". The work was all done by then. */
+	j, dir := newJobs(t)
+	const film = "film.mkv"
+	partial(t, j, film, 0, chunkScore("", "",
+		`  { t = "00:00:00.000", value = { intensity = 0.1000 } },
+  { t = "00:05:00.000", value = { intensity = 0.1000 } },`))
+	seen := j.partialPath(film, 0) + seenSuffix
+	if err := os.WriteFile(seen, []byte(obsA), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(dir, "film.componium")
+	if err := j.mergePartials(film, out, "test"); err != nil {
+		t.Fatalf("the observations file broke the merge: %v", err)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Errorf("no score was written: %v", err)
+	}
+}

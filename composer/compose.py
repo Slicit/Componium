@@ -24,6 +24,7 @@ import argparse
 import array
 import hashlib
 import math
+import json
 import os
 import shutil
 import subprocess
@@ -350,6 +351,33 @@ def progress(fraction: float, label: str):
     sys.stderr.flush()
 
 
+def write_observations(args, observations, span) -> str:
+    """Keep what the model saw, as one JSON object per line.
+
+    Beside the score rather than inside it: a score says what the rig should
+    do, and this says what was there to be seen. Mixing them would mean every
+    reader of a score carrying an opinion about a vision model.
+
+    One object per line so a two hour film can be read a frame at a time and
+    appended to a chunk at a time, and because a partial file is still a valid
+    one — which matters when the thing writing it may be interrupted.
+    """
+    if not args.out or not observations:
+        return ""
+    path = args.out + ".seen.jsonl"
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        for o in observations:
+            row = {
+                # Already in the film's own clock: observe is handed absolute
+                # times, and the span has done its work by then.
+                "t": o["t"],
+                "labels": o.get("labels") or [],
+                "seen": o.get("seen") or "",
+            }
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return os.path.basename(path)
+
+
 def _kinds(args) -> dict:
     """Which instrument each kind of effect should be addressed to.
 
@@ -503,7 +531,8 @@ def build(args) -> str:
 
     if args.vlm_command:
         times = vision.candidates(env, args.fps, cuts, args.vlm_frames)
-        labels = vision.describe(args.input, times, args.vlm_command)
+        observations = vision.observe(args.input, times, args.vlm_command)
+        labels = vision.as_pairs(observations)
         # A splash is only a splash where the model also saw water. It cannot
         # tell spray from kicked sand in a still, and it can tell a sea from a
         # desert easily.
@@ -517,6 +546,14 @@ def build(args) -> str:
             labels, subtitles.load_mapping(args.mapping), _kinds(args),
             source="vision")
         report(f"{len(times)} keyframes labelled, {len(semantic)} semantic cues\n")
+        # Written down before anything is concluded from it. This is the only
+        # pass that costs a GPU and a decode, and the only one that cannot be
+        # repeated once the film has been analysed and put away — so the later
+        # passes read this rather than the film, and a mapping can be changed
+        # and tried again in seconds.
+        written = write_observations(args, observations, span)
+        if written:
+            report(f"{len(observations)} observations kept in {written}\n")
 
     # --- water, nominated then confirmed -------------------------------------
     progress(0.95, "nominating water")

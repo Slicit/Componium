@@ -74,13 +74,43 @@ class TestParse(unittest.TestCase):
         self.assertEqual(vlm.parse("I am afraid I cannot help with that."), [])
 
 
+class TestDescribed(unittest.TestCase):
+    def test_reads_the_sentence_off_a_comment_line(self):
+        # Carried as a comment because the seam has always ignored those, so a
+        # wrapper written before descriptions existed still works.
+        reply = chr(10).join(["EFFECTS: dust", "SCENE: active", "SEEN: Crabs on sand."])
+        self.assertEqual(vlm.described(reply), "Crabs on sand.")
+
+    def test_says_nothing_when_there_is_no_sentence(self):
+        self.assertEqual(vlm.described(chr(10).join(["EFFECTS: none", "SCENE: calm"])), "")
+        self.assertEqual(vlm.described(""), "")
+
+    def test_collapses_the_whitespace_a_wrapped_line_leaves(self):
+        reply = "SEEN:  A ship   lands," + chr(10) + "   kicking up dust."
+        self.assertEqual(vlm.described(reply), "A ship lands,")
+
+
 class TestPrompt(unittest.TestCase):
-    def test_asks_for_three_lines(self):
+    def test_asks_for_as_many_lines_as_it_wants(self):
         # The count is load bearing: with the prompt still saying two, the
         # water line was never emitted at all.
-        self.assertIn("exactly three lines", vlm.PROMPT)
-        for head in ("EFFECTS:", "WATER:", "SCENE:"):
+        self.assertIn("exactly four lines", vlm.PROMPT)
+        for head in ("EFFECTS:", "WATER:", "SCENE:", "SEEN:"):
             self.assertIn(head, vlm.PROMPT)
+
+    def test_the_sentence_is_asked_for_last(self):
+        """Asked first it changed the answers: the model conditioned its labels
+        on its own narration, and a crab kicking up sand came back a splash on
+        water. Asked last, the labels match what it gives with no sentence at
+        all."""
+        self.assertLess(vlm.PROMPT.index("EFFECTS:"), vlm.PROMPT.index("SEEN:"))
+        self.assertLess(vlm.PROMPT.index("SCENE:"), vlm.PROMPT.index("SEEN:"))
+
+    def test_the_prompt_carries_no_notes_to_itself(self):
+        # The explanation of why the sentence goes last belongs in a comment,
+        # not in the tokens sent to the model, where it once ended up.
+        self.assertNotIn("conditioned", vlm.PROMPT)
+        self.assertNotIn("prompt", vlm.PROMPT.lower())
 
     def test_names_every_word_it_will_accept(self):
         for word in vlm.EFFECTS:

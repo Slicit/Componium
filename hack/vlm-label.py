@@ -69,12 +69,14 @@ physical effects — fans, lights, water, smoke — for the audience watching it
 Report only what is plainly visible IN THIS FRAME. You are not describing the
 story, guessing what happens next, or inferring from context.
 
-Reply with exactly three lines and nothing else. No explanation.
+Reply with exactly four lines and nothing else. No explanation.
 
 EFFECTS: <comma-separated words from the list below, or the word none>
 WATER: <yes if any sea, lake, river or large stretch of water is visible
         anywhere in the frame, however calm, otherwise no>
 SCENE: <calm or active>
+SEEN: <one plain sentence describing what is in the frame and what is
+       happening, as you would tell someone who cannot see it>
 
 The only permitted effect words:
 
@@ -96,6 +98,15 @@ SCENE is about how much is happening to the audience, not how pretty it is:
 
 Most frames of most films are calm. Answer active only when something is
 actually happening."""
+
+# The sentence comes last, after the labels are settled.
+#
+# Asked first it changed the answers, and for the worse: the model conditioned
+# its labels on its own narration, wrote "a sandy beach" and then reported
+# water on a desert frame, and turned a crab kicking up sand back into a
+# splash. Asked last, every label matches what the model gives with no sentence
+# at all — and the sentence itself is better, because it is describing what was
+# decided rather than deciding it. It says the crabs are kicking up sand.
 
 # Water is asked separately because it is not an effect and the prompt spends
 # its first paragraphs insisting on effects.
@@ -166,7 +177,7 @@ def ask(image_path: str) -> str:
         ],
         # Zero temperature because this is a classification, and a label that
         # changes between runs makes a score that cannot be reproduced.
-        "options": {"temperature": 0, "num_predict": 60},
+        "options": {"temperature": 0, "num_predict": 160},
     }).encode()
     req = urllib.request.Request(
         HOST + "/api/chat", data=body,
@@ -195,7 +206,7 @@ def ask_openai(image_path: str) -> str:
     body = json.dumps({
         "model": MODEL,
         "temperature": 0,
-        "max_tokens": 60,
+        "max_tokens": 160,
         "messages": [{
             "role": "user",
             "content": [
@@ -250,6 +261,21 @@ def parse(reply: str) -> list[str]:
     return out
 
 
+def described(reply: str) -> str:
+    """The model's own sentence about the frame, or nothing.
+
+    Kept because it is the part that cannot be reconstructed. The labels are a
+    conclusion and can be drawn again from a rerun; the sentence is what was
+    there, and once the film has been decoded and thrown away it is the only
+    record of it. It costs about eighty bytes.
+    """
+    for line in reply.splitlines():
+        head, _, rest = line.strip().lstrip("-*# ").partition(":")
+        if head.strip().strip("*").lower() == "seen":
+            return " ".join(rest.split())
+    return ""
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         sys.stderr.write("usage: vlm-label.py IMAGE\n")
@@ -266,6 +292,12 @@ def main(argv: list[str]) -> int:
         sys.stderr.write("vlm raw: %r\n" % reply)
     for label in parse(reply):
         print(label)
+    seen = described(reply)
+    if seen:
+        # A comment line, because the seam has always ignored those — so a
+        # description costs nothing to anything that was reading labels before
+        # this existed, and the composer picks it up only because it now looks.
+        print("# " + seen)
     return 0
 
 

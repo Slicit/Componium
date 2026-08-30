@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/Slicit/componium/internal/score"
 )
@@ -94,7 +95,10 @@ func (j *Jobs) mergePartials(film, out, note string) error {
 
 	var names []string
 	for _, e := range entries {
-		if !e.IsDir() {
+		// Only the scores. The observations the vision pass writes live in
+		// this directory too, and handing a JSON lines file to a TOML parser
+		// fails at the first brace — which is how this was found.
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".componium") {
 			names = append(names, e.Name())
 		}
 	}
@@ -120,6 +124,19 @@ func (j *Jobs) mergePartials(film, out, note string) error {
 	}
 	if err := merged.Save(out); err != nil {
 		return err
+	}
+
+	// The observations travel with the score. Reported rather than fatal: the
+	// score is the product and this is the working out, and losing the working
+	// out is not worth losing an analysis over.
+	if n, err := j.mergeSeen(film, out); err != nil {
+		j.update(JobAnalyse, film, false, func(job *Job) {
+			job.Label = "kept the score, but not what the model saw: " + err.Error()
+		})
+	} else if n > 0 {
+		j.update(JobAnalyse, film, false, func(job *Job) {
+			job.Label = "done"
+		})
 	}
 	// Kept before the partials are cleared, so a failure here still leaves
 	// something to recover from. Failing to keep a version is reported and
