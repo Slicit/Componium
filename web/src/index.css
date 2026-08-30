@@ -773,3 +773,5 @@ button:hover { border-color: #3a4553; }
 }
 .fx-hint { flex: 1 1 auto; line-height: 1.35; }
 .fx-insert { white-space: nowrap; }
+.fx-play { flex: 0 0 auto; }
+.fx-play svg { margin-left: 1px; }

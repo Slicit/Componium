@@ -16,7 +16,8 @@
  * worth a dependency, and an icon font that fails to load leaves squares.
  */
 
-export type IconName = 'trash' | 'save' | 'edit' | 'search' | 'left' | 'right';
+export type IconName =
+  | 'trash' | 'save' | 'edit' | 'search' | 'left' | 'right' | 'play' | 'stop';
 
 const paths: Record<IconName, JSX.Element> = {
   /* A bin with a lid and two staves. */
@@ -48,6 +49,9 @@ const paths: Record<IconName, JSX.Element> = {
       <path d="M13 13l4 4" />
     </>
   ),
+  /* Play and stop are as settled as delete is, so they are icons too. */
+  play: <path d="M6.5 4.2l9 5.8-9 5.8z" />,
+  stop: <rect x="5.5" y="5.5" width="9" height="9" rx="1" />,
   left: <path d="M12.5 4L7 10l5.5 6" />,
   right: <path d="M7.5 4l5.5 6-5.5 6" />,
 };
