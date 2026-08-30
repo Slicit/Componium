@@ -109,6 +109,16 @@ func (j *Jobs) runAnalyse(film string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 
+	// Looking at the film with a model is the expensive part and the one part
+	// that does not need doing twice. A description already written is reused
+	// unless somebody asks for a new one.
+	look := !j.hasDescription(film) || j.lookAgain(film)
+	if !look {
+		j.update(JobAnalyse, film, false, func(job *Job) {
+			job.Label = "reusing what the model already saw"
+		})
+	}
+
 	start := resumeAt(chunks)
 	if start < len(chunks) {
 		if start > 0 {
@@ -127,7 +137,8 @@ func (j *Jobs) runAnalyse(film string) error {
 			// Only the last chunk of a run that reaches the film's own end is
 			// open ended. Under a limit, every chunk has a far edge.
 			openEnded := i == len(chunks)-1 && (limit <= 0 || limit >= info.Duration)
-			err := j.runChunk(ctx, film, source, chunks[i], len(chunks), peak, openEnded)
+			err := j.runChunk(ctx, film, source, chunks[i], len(chunks), peak,
+				openEnded, look)
 			if err != nil {
 				j.markChunk(film, i, JobFailed, err.Error())
 				return fmt.Errorf("chunk %d of %d (%s to %s): %w",
@@ -141,7 +152,43 @@ func (j *Jobs) runAnalyse(film string) error {
 		job.Progress = 0.99
 		job.Label = "joining the pieces"
 	})
-	return j.mergePartials(film, out, j.note(len(chunks)))
+	if err := j.mergePartials(film, out, j.note(len(chunks))); err != nil {
+		return err
+	}
+
+	if !look {
+		// The labels only exist inside the vision pass, so a rebuild that
+		// skipped it has no vision cues at all until the kept description is
+		// applied to it.
+		remapCtx, stopRemap := context.WithTimeout(context.Background(), calmTimeout)
+		if said, err := j.runRemap(remapCtx, film, out); err != nil {
+			j.update(JobAnalyse, film, false, func(job *Job) {
+				job.Label = "scored, but the kept description did not apply: " + err.Error()
+			})
+		} else if said != "" {
+			j.update(JobAnalyse, film, false, func(job *Job) { job.Label = said })
+		}
+		stopRemap()
+	}
+
+	// The last act: quiet the parts of the film that are not doing anything.
+	// Reported and never fatal — the score is written and valid by now, and a
+	// film busier than it should be is a worse score rather than a lost one.
+	j.update(JobAnalyse, film, false, func(job *Job) {
+		job.Label = "finding the quiet parts"
+	})
+	calmCtx, stop := context.WithTimeout(context.Background(), calmTimeout)
+	defer stop()
+	if said, err := j.runCalm(calmCtx, film, out); err != nil {
+		j.update(JobAnalyse, film, false, func(job *Job) {
+			job.Label = "scored, but not quieted: " + err.Error()
+		})
+	} else if said != "" {
+		j.update(JobAnalyse, film, true, func(job *Job) {
+			job.Label = said
+		})
+	}
+	return nil
 }
 
 // runChunk analyses one range and writes its partial score.
@@ -154,7 +201,7 @@ func (j *Jobs) runAnalyse(film string) error {
 // otherwise sends it decoding to the end of the film — measured at chunk three
 // of a fifteen minute run reading an hour and three quarters it had no use for.
 func (j *Jobs) runChunk(ctx context.Context, film, source string, c Chunk,
-	total int, peak float64, openEnded bool) error {
+	total int, peak float64, openEnded bool, look bool) error {
 
 	partial := j.partialPath(film, c.Index)
 	if err := os.MkdirAll(filepath.Dir(partial), 0o755); err != nil {
@@ -176,7 +223,7 @@ func (j *Jobs) runChunk(ctx context.Context, film, source string, c Chunk,
 	// Off unless asked for, because it needs a model on the other end of it
 	// and a studio that quietly failed to reach one on every frame of every
 	// film would be slower for no benefit and say nothing about why.
-	if cmd := os.Getenv("COMPONIUM_VLM_COMMAND"); cmd != "" {
+	if cmd := os.Getenv("COMPONIUM_VLM_COMMAND"); cmd != "" && look {
 		args = append(args, "--vlm-command", cmd)
 		if n := os.Getenv("COMPONIUM_VLM_FRAMES"); n != "" {
 			args = append(args, "--vlm-frames", n)

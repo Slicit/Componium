@@ -852,6 +852,14 @@ func (s *Server) handleBuild(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
+			// Showing the film to a model again is the one expensive thing
+			// here, so it is asked for rather than assumed. Without this a
+			// rebuild reuses what the model already said.
+			if r.URL.Query().Get("vision") == "redo" {
+				s.jobs.update(JobAnalyse, want, true, func(job *Job) {
+					job.LookAgain = true
+				})
+			}
 			// minutes analyses only the opening of a film, for judging a
 			// change without paying for a feature to find out.
 			if m := r.URL.Query().Get("minutes"); m != "" {

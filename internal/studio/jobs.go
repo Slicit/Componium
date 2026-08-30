@@ -71,6 +71,10 @@ type Job struct {
 	// at the first quarter of an hour of something rather than waiting for
 	// all of it. Zero means the whole film.
 	Limit float64 `json:"limit,omitempty"`
+	// LookAgain asks for the film to be shown to the model again, throwing
+	// away what it said last time. Off unless asked: it is minutes of a GPU,
+	// and the answer does not change when a threshold does.
+	LookAgain bool `json:"lookAgain,omitempty"`
 }
 
 // jobKey identifies a job. Kind is part of it because a film can legitimately

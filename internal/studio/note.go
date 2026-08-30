@@ -17,6 +17,10 @@ import (
 func (j *Jobs) note(chunks int) string {
 	parts := []string{fmt.Sprintf("%d chunk%s", chunks, plural(chunks))}
 
+	if os.Getenv("COMPONIUM_CALM") == "off" {
+		parts = append(parts, "not quieted")
+	}
+
 	if cmd := os.Getenv("COMPONIUM_VLM_COMMAND"); cmd != "" {
 		vision := "vision"
 		if model := os.Getenv("COMPONIUM_VLM_MODEL"); model != "" {
