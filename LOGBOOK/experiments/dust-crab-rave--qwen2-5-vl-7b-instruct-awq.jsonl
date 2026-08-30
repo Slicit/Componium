@@ -1,0 +1,98 @@
+{"kind": "run", "model": "Qwen/Qwen2.5-VL-7B-Instruct-AWQ", "host": "http://192.168.1.110:8123", "film": "noisestorm-crab-rave_138410.mp4", "every_seconds": 2.0, "frames": 96, "seconds": 14.2, "prompt_bytes": 1671, "when": "2026-08-30T19:03:42Z", "box": "claude-machine-02"}
+{"t": 1.0, "labels": ["water", "scene-calm"], "seen": "A serene island surrounded by calm waters under a clear sky."}
+{"t": 3.0, "labels": ["water", "scene-calm"], "seen": "A serene island surrounded by calm waters under a clear sky."}
+{"t": 5.0, "labels": ["water", "scene-calm"], "seen": "A serene island surrounded by calm waters under a clear sky."}
+{"t": 7.0, "labels": ["water", "scene-calm"], "seen": "A small island surrounded by calm blue waters under a clear sky."}
+{"t": 9.0, "labels": ["water", "scene-calm"], "seen": "A serene island surrounded by calm waters under a clear sky."}
+{"t": 11.0, "labels": ["water", "scene-calm"], "seen": "A serene island surrounded by calm waters under a clear sky."}
+{"t": 13.0, "labels": ["water", "scene-calm"], "seen": "A serene island with lush vegetation surrounded by calm blue waters under a clear sky."}
+{"t": 15.0, "labels": ["water", "scene-calm"], "seen": "A lush green cliff overlooking a tranquil turquoise sea under a clear blue sky."}
+{"t": 17.0, "labels": ["water", "scene-calm"], "seen": "A serene coastal scene with lush green cliffs and calm turquoise waters under a clear blue sky."}
+{"t": 19.0, "labels": ["water", "scene-calm"], "seen": "A serene coastal landscape with lush green cliffs and clear turquoise waters under a bright blue sky."}
+{"t": 21.0, "labels": ["water", "scene-calm"], "seen": "A serene beach with turquoise water and lush green cliffs under a clear sky."}
+{"t": 23.0, "labels": ["water", "scene-calm"], "seen": "A serene view of a turquoise sea with a cave entrance surrounded by lush greenery under a clear sky."}
+{"t": 25.0, "labels": ["water", "scene-calm"], "seen": "A serene beach with turquoise water and lush greenery surrounding a cave entrance."}
+{"t": 27.0, "labels": ["water", "scene-calm"], "seen": "A serene beach with turquoise water and lush greenery surrounding a cave entrance."}
+{"t": 29.0, "labels": ["scene-calm"], "seen": "Silhouettes of people on horseback are seen through a cave opening, suggesting they are entering or exiting the cave."}
+{"t": 31.0, "labels": ["scene-calm"], "seen": "Silhouettes of people standing inside a cave, illuminated by light from outside."}
+{"t": 33.0, "labels": ["scene-calm"], "seen": "Silhouettes of people standing under a structure at night."}
+{"t": 35.0, "labels": ["scene-calm"], "seen": "Silhouettes of people sitting in front of a bright sky, possibly inside a cave or under a structure."}
+{"t": 37.0, "labels": ["dust", "splash", "water", "scene-active"], "seen": "Dust rises as a creature collides with the ground, sending water spraying into the air."}
+{"t": 39.0, "labels": ["dust", "splash", "water", "scene-active"], "seen": "A group of people in red armor is engaged in a fierce battle on a rocky beach, with dust and splashes flying around them."}
+{"t": 41.0, "labels": ["dust", "splash", "water", "scene-active"], "seen": "A group of people is being thrown into the air by a powerful impact, surrounded by dust and splashing water."}
+{"t": 43.0, "labels": ["splash", "dust", "water", "scene-active"], "seen": "A person is being flung through the air by a force, surrounded by dust and debris."}
+{"t": 45.0, "labels": ["scene-calm"], "seen": "A sandy beach with lush green foliage in the foreground."}
+{"t": 47.0, "labels": ["scene-calm"], "seen": "A sandy path bordered by lush greenery and red flowers."}
+{"t": 49.0, "labels": ["scene-calm"], "seen": "A sandy beach with scattered objects and palm trees casting shadows."}
+{"t": 51.0, "labels": ["scene-calm"], "seen": "A sandy beach with scattered objects and palm trees, suggesting a tranquil setting."}
+{"t": 53.0, "labels": ["splash", "dust", "water", "scene-active"], "seen": "A creature is being thrown into the air, creating a splash of water and a burst of dust."}
+{"t": 55.0, "labels": ["water", "scene-active"], "seen": "Giant insects walk through a forested area near a body of water."}
+{"t": 57.0, "labels": ["smoke", "scene-active"], "seen": "A close-up of a creature's tentacles, partially obscured by smoke."}
+{"t": 59.0, "labels": ["scene-calm"], "seen": "A close-up of a red crab with its claws raised, set against a blurred forest background."}
+{"t": 61.0, "labels": ["scene-calm"], "seen": "A group of red crabs scurries across a sandy beach under a clear sky."}
+{"t": 63.0, "labels": ["scene-active"], "seen": "Several creatures resembling crabs are running across a sandy terrain near large rocks."}
+{"t": 65.0, "labels": ["scene-active"], "seen": "A group of red creatures runs through a forested area."}
+{"t": 67.0, "labels": ["scene-active"], "seen": "A group of people on horseback gallops through a forested area."}
+{"t": 69.0, "labels": ["scene-calm"], "seen": "A wide forested area with a path lined with trees, where numerous red creatures are scattered across the ground."}
+{"t": 71.0, "labels": ["scene-calm"], "seen": "A forested area with scattered debris and red figures lying on the ground."}
+{"t": 73.0, "labels": ["scene-calm"], "seen": "A close-up of a reddish-brown crab on sandy ground."}
+{"t": 75.0, "labels": ["scene-active"], "seen": "A large, red, animated creature stands on a sandy beach, casting a shadow."}
+{"t": 77.0, "labels": ["scene-calm"], "seen": "A red crab-like creature lies on a sandy beach, casting a shadow."}
+{"t": 79.0, "labels": ["water", "scene-active"], "seen": "A beach covered in crabs, with palm trees and rocky cliffs in the background."}
+{"t": 81.0, "labels": ["splash", "water", "scene-active"], "seen": "A crab is running on a sandy beach, kicking up sand as it moves."}
+{"t": 83.0, "labels": ["scene-calm"], "seen": "Crabs scurry across a sandy beach surrounded by lush greenery."}
+{"t": 85.0, "labels": ["dust", "scene-active"], "seen": "A creature with multiple legs is moving, kicking up dust."}
+{"t": 87.0, "labels": ["scene-calm"], "seen": "A close-up of a crab's face with its claws raised, set against a blurred sandy background."}
+{"t": 89.0, "labels": ["scene-calm"], "seen": "A close-up of a reddish crab with detailed claws and legs, positioned on a sandy surface."}
+{"t": 91.0, "labels": ["scene-active"], "seen": "A swarm of red crabs scurries across a sandy beach under a clear sky."}
+{"t": 93.0, "labels": ["scene-calm"], "seen": "A bird's-eye view of a beach scattered with red objects, likely crabs, with palm trees casting shadows on the sand."}
+{"t": 95.0, "labels": ["scene-calm"], "seen": "A crab stands on a rock, its claws raised, against a backdrop of green foliage."}
+{"t": 97.0, "labels": ["scene-calm"], "seen": "A red toy crab sits on a rock, surrounded by green foliage."}
+{"t": 99.0, "labels": ["scene-calm"], "seen": "A person wearing a red shirt sits atop a rocky outcrop under a clear blue sky."}
+{"t": 101.0, "labels": ["scene-calm"], "seen": "Two figures are climbing over a rocky outcrop under a clear sky."}
+{"t": 103.0, "labels": ["scene-active"], "seen": "A red crab is moving quickly across a rock, its claws extended."}
+{"t": 105.0, "labels": ["scene-calm"], "seen": "A red robot crab stands on a rock, its claws raised."}
+{"t": 107.0, "labels": ["water", "scene-calm"], "seen": "A lush tropical beach with palm trees and clear turquoise waters."}
+{"t": 109.0, "labels": ["water", "scene-calm"], "seen": "A lush tropical beach with palm trees and dense foliage surrounding a sandy shore."}
+{"t": 111.0, "labels": ["water", "scene-calm"], "seen": "A lush tropical beach with palm trees and dense foliage."}
+{"t": 113.0, "labels": ["water", "scene-calm"], "seen": "A serene beach with lush greenery and clear turquoise waters."}
+{"t": 115.0, "labels": ["water", "scene-calm"], "seen": "A rocky cliffside with lush greenery overlooking a tranquil body of water."}
+{"t": 117.0, "labels": ["scene-calm"], "seen": "A dense forest with sunlight filtering through the trees."}
+{"t": 119.0, "labels": ["scene-calm"], "seen": "Sunlight filters through dense foliage on a rocky hillside."}
+{"t": 121.0, "labels": ["scene-calm"], "seen": "Sunlight filters through autumn leaves on a rocky hillside."}
+{"t": 123.0, "labels": ["water", "scene-calm"], "seen": "A serene sunset over a tranquil body of water, with palm trees silhouetted against the sky."}
+{"t": 125.0, "labels": ["water", "scene-calm"], "seen": "A serene sunset over a tranquil beach with palm trees silhouetted against the sky."}
+{"t": 127.0, "labels": ["water", "scene-calm"], "seen": "A serene sunset over a calm sea, palm trees silhouetted against the sky."}
+{"t": 129.0, "labels": ["water", "scene-calm"], "seen": "A serene beach at sunset, with trees silhouetted against the golden sky and ocean waves gently lapping the shore."}
+{"t": 131.0, "labels": ["water", "scene-calm"], "seen": "A serene sunset over a calm sea, with trees silhouetted against the vibrant sky."}
+{"t": 133.0, "labels": ["water", "scene-calm"], "seen": "A serene beach at sunset with silhouetted figures near the water."}
+{"t": 135.0, "labels": ["splash", "dust", "water", "scene-active"], "seen": "A silhouette of a creature lunging towards the water, creating a splash and dust cloud."}
+{"t": 137.0, "labels": ["water", "scene-calm"], "seen": "A serene beach at sunset, with palm trees silhouetted against the sky."}
+{"t": 139.0, "labels": ["fire", "water", "scene-active"], "seen": "A beach teeming with red crabs under a fiery sky, suggesting an intense event."}
+{"t": 141.0, "labels": ["water", "scene-active"], "seen": "A beach teeming with red crabs, their legs moving rapidly across the sand."}
+{"t": 143.0, "labels": ["water", "scene-active"], "seen": "A beach teeming with red crabs under a sunset sky."}
+{"t": 145.0, "labels": ["fire", "scene-active"], "seen": "A fiery explosion engulfs a group of people, their faces contorted in shock and fear."}
+{"t": 147.0, "labels": ["fire", "scene-active"], "seen": "A silhouette of a person standing amidst rubble under a fiery sky."}
+{"t": 149.0, "labels": ["fire", "scene-active"], "seen": "A large, menacing creature with multiple legs stands against a fiery backdrop."}
+{"t": 151.0, "labels": ["fire", "scene-active"], "seen": "A close-up of a creature's face with glowing eyes, set against a fiery backdrop."}
+{"t": 153.0, "labels": ["water", "scene-calm"], "seen": "A crab walks along a rocky shore under a warm, orange sky."}
+{"t": 155.0, "labels": ["splash", "water", "scene-calm"], "seen": "A crab on a beach at sunset, splashing water with its claws."}
+{"t": 157.0, "labels": ["scene-calm"], "seen": "A beach at sunset with numerous red crabs crawling across the sand."}
+{"t": 159.0, "labels": ["scene-active"], "seen": "A beach covered in red crabs under a sunset sky."}
+{"t": 161.0, "labels": ["water", "scene-active"], "seen": "A beach teeming with crabs under a vibrant sunset."}
+{"t": 163.0, "labels": ["splash", "rain", "water", "scene-active"], "seen": "A beach at sunset is covered in red crabs, with water splashing around them."}
+{"t": 165.0, "labels": ["water", "scene-active"], "seen": "A beach teeming with crabs, their red bodies contrasting against the sandy shore, as they scurry towards the water's edge under a serene sunset sky."}
+{"t": 167.0, "labels": ["water", "scene-calm"], "seen": "A tranquil beach at sunset, with calm waters reflecting the sky and palm trees silhouetted against the horizon."}
+{"t": 169.0, "labels": ["water", "scene-calm"], "seen": "Silhouettes of palm trees against a twilight sky on a rocky beach."}
+{"t": 171.0, "labels": ["water", "scene-calm"], "seen": "Silhouettes of palm trees against a twilight sky, with a small boat on a rocky shore."}
+{"t": 173.0, "labels": ["scene-calm"], "seen": "Silhouettes of palm trees against a twilight sky near a rocky shore."}
+{"t": 175.0, "labels": ["water", "scene-calm"], "seen": "A tranquil beach at dusk, silhouetted palm trees against a gradient sky transitioning from deep blue to warm orange."}
+{"t": 177.0, "labels": ["water", "scene-calm"], "seen": "A serene beach at dusk with palm trees silhouetted against a gradient sky transitioning from deep blue to warm orange near the horizon."}
+{"t": 179.0, "labels": ["water", "scene-calm"], "seen": "A silhouette of an island with palm trees against a darkening sky."}
+{"t": 181.0, "labels": ["water", "scene-calm"], "seen": "A silhouette of a rocky island against a twilight sky with palm trees and a calm sea."}
+{"t": 183.0, "labels": ["water", "scene-calm"], "seen": "A silhouette of a rocky island against a twilight sky with a palm tree on the right side."}
+{"t": 185.0, "labels": ["water", "scene-calm"], "seen": "A silhouette of a rocky island against a twilight sky with a faint glow on the horizon."}
+{"t": 187.0, "labels": ["scene-calm"], "seen": "A black screen with white text reading \"MUSIC & VIDEO BY NOISESTORM\"."}
+{"t": 189.0, "labels": ["scene-calm"], "seen": "A black screen with white text reading \"MUSIC & VIDEO BY NOISESTORM\"."}
+{"t": 191.0, "labels": ["scene-calm"], "seen": "A white logo against a black background."}
+{"kind": "repeats", "at": 59.467, "asked": 10, "answers": {"dust": 10}}

@@ -62,6 +62,22 @@ def candidates(envelope, rate: float, cuts=None, limit: int = 40,
     return sorted(chosen)
 
 
+# How wide a keyframe is sent to the model.
+#
+# Not the film's own size, which is what this used to send. Measured against
+# Qwen2.5-VL on six moments of one film, full resolution and 512 wide disagreed
+# on three of them — and disagreed the wrong way round. A frame of crabs
+# throwing up sand came back as dust ten times out of ten at 512 wide and as
+# nothing at all ten times out of ten at 1080p. Deterministic both ways; the
+# size was the whole difference.
+#
+# It also costs five times more to be wrong: 3091 prompt tokens against 580.
+# A large image becomes many patches, and a diffuse low contrast thing like a
+# dust cloud is spread thin across them, where downscaled it occupies enough of
+# one to be seen.
+KEYFRAME_WIDTH = 512
+
+
 def keyframe(path: str, at: float, out_path: str) -> bool:
     """Extract one frame as a JPEG. Returns False if ffmpeg could not."""
     exe = shutil.which("ffmpeg")
@@ -69,7 +85,8 @@ def keyframe(path: str, at: float, out_path: str) -> bool:
         return False
     result = subprocess.run(
         [exe, "-v", "error", "-y", "-ss", f"{at:.3f}", "-i", path,
-         "-frames:v", "1", "-q:v", "3", out_path],
+         "-frames:v", "1", "-q:v", "3",
+         "-vf", f"scale={KEYFRAME_WIDTH}:-2", out_path],
         capture_output=True, check=False,
     )
     return result.returncode == 0 and os.path.exists(out_path)
