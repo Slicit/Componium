@@ -163,12 +163,60 @@ func TestMergeTakesTheFilmsDurationNotTheSumOfItsParts(t *testing.T) {
 	}
 }
 
-func TestMergeRefusesATrackThatChangesType(t *testing.T) {
-	a := &Score{Tracks: []Track{curveTrack("a", at(0, 0.1))}}
-	b := &Score{Tracks: []Track{cueTrack("a", CueSpec{T: tc(time.Second), Action: "gust"})}}
+func TestMergeKeepsACurveAndCuesForOneInstrumentApart(t *testing.T) {
+	// One instrument may legitimately have both. A light with an ambient wash
+	// under it and flashes on top is the ordinary case — Cues() and Curves()
+	// are separate streams the conductor drives independently — and refusing
+	// it made merging reject its own input on a single chunk of Sintel.
+	a := &Score{Tracks: []Track{
+		curveTrack("light.ambient", at(0, 0.1), at(10*time.Second, 0.4)),
+		cueTrack("light.ambient", CueSpec{T: tc(5 * time.Second), Action: "flash"}),
+	}}
+	b := &Score{Tracks: []Track{
+		curveTrack("light.ambient", at(20*time.Second, 0.9)),
+		cueTrack("light.ambient", CueSpec{T: tc(25 * time.Second), Action: "flash"}),
+	}}
 
-	if _, err := Merge([]*Score{a, b}); err == nil {
-		t.Fatal("an instrument that is a curve in one part and cues in another should be refused")
+	out, err := Merge([]*Score{a, b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Tracks) != 2 {
+		t.Fatalf("want a curve and a cue track, got %d tracks", len(out.Tracks))
+	}
+
+	var curve, cue *Track
+	for i := range out.Tracks {
+		if out.Tracks[i].Type == TrackCurve {
+			curve = &out.Tracks[i]
+		} else {
+			cue = &out.Tracks[i]
+		}
+	}
+	if curve == nil || cue == nil {
+		t.Fatalf("one of the two kinds is missing: %+v", out.Tracks)
+	}
+	if len(curve.Points) != 3 {
+		t.Errorf("the curve has %d points across two parts", len(curve.Points))
+	}
+	if len(cue.Cues) != 2 {
+		t.Errorf("the cue track has %d cues across two parts", len(cue.Cues))
+	}
+}
+
+func TestMergeDoesNotMixOneInstrumentsCuesIntoAnothers(t *testing.T) {
+	a := &Score{Tracks: []Track{
+		cueTrack("light.ambient", CueSpec{T: tc(time.Second), Action: "flash"}),
+		cueTrack("light.event", CueSpec{T: tc(2 * time.Second), Action: "flash"}),
+	}}
+	out, _ := Merge([]*Score{a})
+	if len(out.Tracks) != 2 {
+		t.Fatalf("two instruments collapsed into %d tracks", len(out.Tracks))
+	}
+	for _, tr := range out.Tracks {
+		if len(tr.Cues) != 1 {
+			t.Errorf("%s ended up with %d cues", tr.Instrument, len(tr.Cues))
+		}
 	}
 }
 

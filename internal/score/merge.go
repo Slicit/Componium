@@ -29,6 +29,20 @@ import (
 // than its own, so the merged score does not have to add up its pieces to
 // discover how long the film is — which would be trusting the least reliable
 // number available.
+// trackKey is what makes two tracks the same track.
+//
+// The type is half of it. One instrument may legitimately have both a curve
+// and cues — a light with an ambient wash under it and flashes on top is the
+// ordinary case, and Cues() and Curves() are separate streams that the
+// conductor drives independently. Keying on the name alone made merging refuse
+// its own input: a single chunk of Sintel came back as "light.ambient is a
+// curve track in one part and a cue track in another", describing two tracks
+// that were in the same part and both belonged there.
+type trackKey struct {
+	instrument string
+	kind       TrackType
+}
+
 func Merge(parts []*Score) (*Score, error) {
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("nothing to merge")
@@ -40,8 +54,15 @@ func Merge(parts []*Score) (*Score, error) {
 	// cannot happen.
 	out := &Score{Meta: parts[0].Meta}
 
-	byInstrument := map[string]*Track{}
-	var order []string
+	// Keyed by instrument AND type, because one instrument may legitimately
+	// have both. A light with an ambient curve under it and flash events on
+	// top is the ordinary case, not a mistake: Cues() and Curves() are
+	// separate streams and the conductor drives both. Keying on the name alone
+	// made merging refuse its own input — a single chunk of Sintel, whose
+	// light.ambient has a wash and whose semantic cues flash the same fixture,
+	// came back as "a curve track in one part and a cue track in another".
+	byTrack := map[trackKey]*Track{}
+	var order []trackKey
 	for _, part := range parts {
 		if part == nil {
 			continue
@@ -50,20 +71,16 @@ func Merge(parts []*Score) (*Score, error) {
 			out.Meta.Media.Duration = d
 		}
 		for _, t := range part.Tracks {
-			into, seen := byInstrument[t.Instrument]
+			key := trackKey{t.Instrument, t.Type}
+			into, seen := byTrack[key]
 			if !seen {
 				// Copy, so merging does not quietly rewrite one of its inputs.
 				fresh := t
 				fresh.Cues = append([]CueSpec(nil), t.Cues...)
 				fresh.Points = append([]Point(nil), t.Points...)
-				byInstrument[t.Instrument] = &fresh
-				order = append(order, t.Instrument)
+				byTrack[key] = &fresh
+				order = append(order, key)
 				continue
-			}
-			if into.Type != t.Type {
-				return nil, fmt.Errorf(
-					"%s is a %s track in one part and a %s track in another",
-					t.Instrument, into.Type, t.Type)
 			}
 			into.Cues = append(into.Cues, t.Cues...)
 			into.Points = append(into.Points, t.Points...)
@@ -71,9 +88,17 @@ func Merge(parts []*Score) (*Score, error) {
 		out.Calm = append(out.Calm, part.Calm...)
 	}
 
-	sort.Strings(order)
-	for _, name := range order {
-		t := byInstrument[name]
+	// Sorted so the merged file reads the same way every time. The key sorts
+	// by instrument first and then by type, which puts an instrument's curve
+	// and its cues next to each other.
+	sort.Slice(order, func(i, k int) bool {
+		if order[i].instrument != order[k].instrument {
+			return order[i].instrument < order[k].instrument
+		}
+		return order[i].kind < order[k].kind
+	})
+	for _, key := range order {
+		t := byTrack[key]
 		sort.SliceStable(t.Cues, func(i, j int) bool { return t.Cues[i].T < t.Cues[j].T })
 		sort.SliceStable(t.Points, func(i, j int) bool { return t.Points[i].T < t.Points[j].T })
 		t.Cues = dedupeCues(t.Cues)
