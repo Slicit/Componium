@@ -470,6 +470,25 @@ export class Room3D {
     const tv = new THREE.Group();
     const bezel = box(3.34, 1.94, 0.09, surface(0x0f1216, 0.32, 0.65, 1.3));
     tv.add(bezel);
+    /* What shows when a film does not fill the panel.
+     *
+     * A scope film is fitted inside the screen rather than stretched to it, so
+     * the screen mesh shrinks and something behind it is uncovered. That was
+     * the bezel, which is glossy dark metal carrying an environment map, so
+     * the letterbox came out as a bright reflection of the room instead of as
+     * black - a glow along the top and bottom.
+     *
+     * Unlit and not tone mapped, so it is the same black whatever the light
+     * slider is doing. A film with the bars already baked into it, which is
+     * the other way a letterbox arrives here, lands on exactly this colour. */
+    this.screenMatte = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.22, 1.82),
+      new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false })
+    );
+    place(this.screenMatte, 0, 0, 0.046);
+    this.screenMatte.visible = false;
+    tv.add(this.screenMatte);
+
     this.screen = new THREE.Mesh(
       new THREE.PlaneGeometry(3.22, 1.82),
       new THREE.MeshBasicMaterial({ color: 0x9dc4e8 })
@@ -546,6 +565,7 @@ export class Room3D {
     const material = this.screen.material;
     if (!this.picture) {
       material.map = null;
+      this.screenMatte.visible = false;
       /* Back to being a surface in the room, and lit like one. */
       material.toneMapped = true;
       material.needsUpdate = true;
@@ -578,6 +598,9 @@ export class Room3D {
      * out leaves the frame exactly as the picture pane shows it, and leaves
      * the slider doing its actual job on the room. */
     material.toneMapped = false;
+    /* Only while there is a film. Without one the screen is full size and the
+     * matte could never be seen. */
+    this.screenMatte.visible = true;
     material.map = texture;
     material.needsUpdate = true;
   }

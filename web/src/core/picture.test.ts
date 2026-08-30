@@ -60,3 +60,35 @@ describe('reading the shape off a video element', () => {
     expect(aspectOf(null)).toBe(0);
   });
 });
+
+describe('the two ways a letterbox arrives', () => {
+  /* Both of these are scope films and both should show black bars, but they
+   * get there differently, and that is why one of them looked wrong.
+   *
+   * Rebel Moon, as encoded here, is 1280x720 with the bars baked into the
+   * frame: the picture fills the screen and the black comes out of the
+   * texture. Wanted is 1920x816, true scope with no bars, so the picture is
+   * inset and the black has to come from whatever sits behind it. That used
+   * to be the bezel, which is glossy metal with an environment map, so it
+   * came out as a reflection of the room. */
+
+  it('leaves a film with the bars baked in filling the screen', () => {
+    const fit = containScale(SCREEN_ASPECT, aspectOf({ videoWidth: 1280, videoHeight: 720 }));
+    expect(fit.y).toBeGreaterThan(0.99);
+    expect(fit.x).toBe(1);
+  });
+
+  it('insets a film that is genuinely scope', () => {
+    const fit = containScale(SCREEN_ASPECT, aspectOf({ videoWidth: 1920, videoHeight: 816 }));
+    expect(fit.x).toBe(1);
+    expect(fit.y).toBeCloseTo(0.752, 3);
+  });
+
+  it('draws both at the shape they were shot', () => {
+    for (const [w, h] of [[1280, 720], [1920, 816], [1920, 1080], [1440, 1080]]) {
+      const aspect = aspectOf({ videoWidth: w, videoHeight: h });
+      const fit = containScale(SCREEN_ASPECT, aspect);
+      expect((SCREEN_ASPECT * fit.x) / fit.y).toBeCloseTo(aspect, 5);
+    }
+  });
+});
