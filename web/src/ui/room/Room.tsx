@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Rig, Score } from '../../core/score';
+import type { CameraView } from '../../core/viewport';
 import { evaluate } from '../../core/state';
 
 interface RoomHandle {
@@ -21,6 +22,9 @@ interface RoomHandle {
   setForced(forced: Map<string, number>): void;
   setBrightness(v: number): void;
   update(state: unknown): void;
+  onView(fn: (view: CameraView) => void): void;
+  getView(): CameraView;
+  setView(view: CameraView | null): void;
   dispose(): void;
 }
 
@@ -31,11 +35,25 @@ export function Room(props: {
   muted: Set<string>;
   forced: Map<string, number>;
   brightness: number;
+  /**
+   * Where to put the camera.
+   *
+   * Applied when the object identity changes, never on every render, because
+   * the camera is something the person watching is holding: re-applying it
+   * continuously would snap the view back out from under a drag.
+   */
+  view?: CameraView | null;
+  /** Called as the camera moves, so the arrangement can remember it. */
+  onView?: (view: CameraView) => void;
 }) {
-  const { score, rig, time, muted, forced, brightness } = props;
+  const { score, rig, time, muted, forced, brightness, view, onView } = props;
   const host = useRef<HTMLDivElement>(null);
   const room = useRef<RoomHandle | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  /* Held in a ref so the subscription below survives a caller that passes a
+   * new arrow function on every render, which is the normal case. */
+  const report = useRef(onView);
+  report.current = onView;
 
   /* Build once, and take the context back on the way out. Browsers allow a
    * small number of live WebGL contexts per page, and a component that
@@ -64,6 +82,17 @@ export function Room(props: {
   useEffect(() => {
     room.current?.setInstruments((rig?.instruments ?? []) as unknown[]);
   }, [rig, status]);
+
+  useEffect(() => {
+    room.current?.onView((v) => report.current?.(v));
+  }, [status]);
+
+  /* The camera is placed once per distinct view handed down, and null is a
+   * real instruction — it is what reset means — so this does not skip it. */
+  useEffect(() => {
+    if (status !== 'ready') return;
+    room.current?.setView(view ?? null);
+  }, [view, status]);
 
   useEffect(() => { room.current?.setMuted(muted); }, [muted, status]);
   useEffect(() => { room.current?.setForced(forced); }, [forced, status]);

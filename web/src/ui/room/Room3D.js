@@ -316,6 +316,17 @@ function particles(count, colour, size, sx, sy, sz) {
   };
 }
 
+/* Where the camera stands before anybody moves it.
+ *
+ * Named, because it is now two things: the position the room opens at, and
+ * the position "reset" means. Those have to stay the same value or resetting
+ * lands somewhere the room has never been.
+ */
+export const HOME_VIEW = {
+  pos: [3.4, 2.1, 9.4],
+  target: [0, 1.2, 2.2],
+};
+
 /* --- the room ---------------------------------------------------------- */
 
 export class Room3D {
@@ -341,7 +352,7 @@ export class Room3D {
     this.scene = scene;
 
     const camera = new THREE.PerspectiveCamera(48, 16 / 9, 0.1, 100);
-    camera.position.set(3.4, 2.1, 9.4);
+    camera.position.set(...HOME_VIEW.pos);
     this.camera = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -368,7 +379,7 @@ export class Room3D {
     pmrem.dispose();
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1.2, 2.2);
+    controls.target.set(...HOME_VIEW.target);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.minDistance = 1.5;
@@ -685,6 +696,67 @@ export class Room3D {
   /* Giving up the GPU context matters: browsers allow a small number of live
    * WebGL contexts per page, and toggling between views a dozen times without
    * this would lose the oldest one and blank the canvas. */
+
+  /* --- where the camera is standing ------------------------------------ */
+
+  /**
+   * Report the camera whenever it moves.
+   *
+   * OrbitControls fires "change" per frame of a drag and once more as the
+   * damping settles, so this is chatty by design; smoothing it is the caller's
+   * problem, because only the caller knows what it is going to do with it.
+   */
+  onView(fn) {
+    this.viewListener = fn;
+    if (this.controls && !this.viewWired) {
+      this.viewWired = true;
+      this.controls.addEventListener('change', () => {
+        if (this.viewListener) this.viewListener(this.getView());
+      });
+    }
+  }
+
+  /** Where the camera is, in the shape setView takes back. */
+  getView() {
+    const p = this.camera.position;
+    const t = this.controls.target;
+    /* Rounded, because this is written to storage on a timer and six decimal
+     * places of a camera position is noise that makes every write different. */
+    const r = (v) => Math.round(v * 1000) / 1000;
+    return { pos: [r(p.x), r(p.y), r(p.z)], target: [r(t.x), r(t.y), r(t.z)] };
+  }
+
+  /**
+   * Put the camera somewhere. Null means home.
+   *
+   * The two update() calls around the move are the whole trick, and they are
+   * not defensive: OrbitControls carries the rest of a drag as momentum, and
+   * that momentum is still pending when a viewport is recalled a moment later.
+   * Setting the position and handing control back would apply the leftover
+   * rotation from the new position, and the camera would slide off to
+   * somewhere it was never asked to be — measured at around sixty degrees
+   * away, which looks like the recall picking a different angle rather than
+   * like drift.
+   *
+   * So: turn damping off, update once to spend and clear whatever is pending,
+   * then move, then update again from a standstill.
+   */
+  setView(view) {
+    const want = view || HOME_VIEW;
+    if (!Array.isArray(want.pos) || !Array.isArray(want.target)) return;
+    const damping = this.controls.enableDamping;
+    this.controls.enableDamping = false;
+    this.controls.update();
+    this.camera.position.set(want.pos[0], want.pos[1], want.pos[2]);
+    this.controls.target.set(want.target[0], want.target[1], want.target[2]);
+    this.controls.update();
+    this.controls.enableDamping = damping;
+    /* Draw once now rather than waiting for the loop. The loop will come
+     * round on its own, but a preset that takes a frame to land looks like a
+     * click that did not register. */
+    this.renderer.render(this.scene, this.camera);
+  }
+
   dispose() {
     this.running = false;
     if (this.controls) this.controls.dispose();

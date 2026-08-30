@@ -611,3 +611,45 @@ button:hover { border-color: #3a4553; }
    rather than with preventDefault() on pointerdown, because that also cancels
    the double click that resets the split. */
 .split-v, .split-h { user-select: none; -webkit-user-select: none; }
+
+/* --- saved viewports --- */
+
+.views { position: relative; display: inline-flex; }
+.views .count {
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: var(--line);
+  font-size: 10px;
+}
+.views-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: 320px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel, #14181f);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+}
+.views-empty { margin: 0; line-height: 1.45; }
+.views-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+/* The name is the button: the whole point of a row is to recall it, so the
+   target is the thing you read rather than a separate control beside it. */
+.views-apply { justify-self: start; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+.views-row.match .views-apply { border-color: var(--accent); }
+.views-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.views-del { padding: 2px 7px; line-height: 1; }
+.views-save { display: flex; gap: 6px; }
+.views-save input { flex: 1 1 auto; min-width: 0; }
+.views-foot { display: flex; justify-content: flex-end; border-top: 1px solid var(--line); padding-top: 8px; }

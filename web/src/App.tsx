@@ -18,7 +18,10 @@ import { Inspector } from './ui/Inspector';
 import { Room } from './ui/room/Room';
 import { Force } from './ui/Force';
 import { Library } from './ui/Library';
-import { COLUMNS, useDrag, useSplit } from './ui/useSplit';
+import { COLUMNS, useDrag } from './ui/useSplit';
+import { useViewport } from './ui/useViewport';
+import { Viewports } from './ui/Viewports';
+import { filmForScore } from './core/film';
 import { canCollapse } from './core/layout';
 import { menuFor } from './ui/menuItems';
 import { addTrack, copy, missingInstruments, nudge, paste, splitCue, duplicateCues, type Clip } from './core/edits';
@@ -51,8 +54,8 @@ export function App() {
   const [overlays, setOverlays] = useState({ calm: true, latency: true });
   const [forced, setForced] = useState<Map<string, number>>(new Map());
   const [brightness, setBrightness] = useState(50);
-  const [showRoom, setShowRoom] = useState(true);
-  const split = useSplit();
+  const views = useViewport();
+  const split = views.viewport;
   const stage = useRef<HTMLDivElement>(null);
   /* useEditing needs to seek, seek needs the view, and the view is built
    * below. A ref breaks the cycle without either of them knowing about the
@@ -84,7 +87,18 @@ export function App() {
         if (gone) return;
         setScore(s);
         setRig(r);
-        setFilms(m ?? []);
+        const media = m ?? [];
+        setFilms(media);
+        /* Open the film this score was made from.
+         *
+         * The studio starts holding a score and nothing else, so without this
+         * the picture pane shows its "pick a film" hint over a score that is
+         * obviously already about one particular film, and the timeline scrubs
+         * against nothing until somebody works out that the dropdown in the
+         * corner is the thing to touch. There is no ambiguity to preserve: a
+         * score is named after its film and at most one film can match.
+         */
+        setFilm(filmForScore(s?.path, media));
         void loadLayout();
       } catch (e) {
         if (!gone) setError(e instanceof Error ? e.message : String(e));
@@ -412,12 +426,12 @@ export function App() {
   const dragSplit = useDrag((e) => {
     const box = stage.current?.getBoundingClientRect();
     if (!box || box.width <= 0) return;
-    split.setColumns(((e.clientX - box.left) / box.width) * COLUMNS);
+    views.setColumns(((e.clientX - box.left) / box.width) * COLUMNS);
   });
   const dragHeight = useDrag((e) => {
     const box = stage.current?.getBoundingClientRect();
     if (!box) return;
-    split.setHeight(e.clientY - box.top);
+    views.setHeight(e.clientY - box.top);
   });
 
   if (error && !score) return <div className="fail">{error}</div>;
@@ -444,10 +458,26 @@ export function App() {
         <span className="dim small">{fps} fps</span>
         <span className="dim small">{Math.round(view.fraction * 100)}% shown</span>
         <button
-          className={'toggle' + (showRoom ? ' on' : '')}
-          onClick={() => setShowRoom((v) => !v)}
+          className={'toggle' + (split.room ? ' on' : '')}
+          onClick={() => views.setRoom(!split.room)}
           title="The room preview"
         >room</button>
+        <button
+          className={'toggle' + (split.force ? ' on' : '')}
+          onClick={() => views.setForce(!split.force)}
+          disabled={!split.room}
+          title={split.room
+            ? 'The sliders that force one effect on, whatever the score says'
+            : 'The sliders live in the room pane, which is hidden'}
+        >sliders</button>
+        <Viewports
+          viewport={split}
+          saved={views.saved}
+          onSave={views.save}
+          onApply={views.apply}
+          onRemove={views.remove}
+          onReset={views.reset}
+        />
         <button
           className={'toggle' + (overlays.calm ? ' on' : '')}
           onClick={() => setOverlays((o) => ({ ...o, calm: !o.calm }))}
@@ -484,7 +514,7 @@ export function App() {
         ref={stage}
         style={{
           height: split.height,
-          gridTemplateColumns: showRoom
+          gridTemplateColumns: split.room
             ? `${split.columns}fr 10px ${COLUMNS - split.columns}fr`
             : '1fr',
         }}
@@ -508,11 +538,11 @@ export function App() {
         )}
         </div>
 
-        {showRoom && (
+        {split.room && (
           <div
             className="split-v"
             onPointerDown={dragSplit}
-            onDoubleClick={split.reset}
+            onDoubleClick={views.reset}
             role="separator"
             aria-label="Resize the picture and the room"
             aria-valuenow={split.columns}
@@ -522,7 +552,7 @@ export function App() {
           />
         )}
 
-        {showRoom && (
+        {split.room && (
           <div className="stage-room">
             <div className="room-bar">
               <span className="dim small">Room</span>
@@ -539,8 +569,10 @@ export function App() {
               muted={new Set<string>()}
               forced={forced}
               brightness={brightness}
+              view={views.camera}
+              onView={views.onCamera}
             />
-            <Force rig={rig} forced={forced} onChange={setForced} />
+            {split.force && <Force rig={rig} forced={forced} onChange={setForced} />}
           </div>
         )}
       </div>
@@ -548,7 +580,7 @@ export function App() {
       <div
         className="split-h"
         onPointerDown={dragHeight}
-        onDoubleClick={split.reset}
+        onDoubleClick={views.reset}
         role="separator"
         aria-label="Resize the height of the picture and the room"
         title="Drag to resize, double click to reset"

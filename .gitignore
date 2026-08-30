@@ -30,3 +30,6 @@ build/
 deploy/scores/*
 !deploy/scores/.gitkeep
 node_modules/
+
+# Per box paths, not the same on any two machines.
+deploy/.env
