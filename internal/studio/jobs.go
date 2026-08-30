@@ -284,6 +284,12 @@ func (j *Jobs) Enqueue(kind JobKind, film string) *Job {
 	// Reset is the way to discard them, and it is the only way.
 	if existing, ok := j.jobs[key]; ok {
 		job.Chunks = existing.Chunks
+		// And the request for a fresh look, which is set on the job before it
+		// is queued. Dropping it here meant asking for one and silently
+		// getting the kept description instead — the same fault as losing the
+		// chunks, one field along.
+		job.LookAgain = existing.LookAgain
+		job.Limit = existing.Limit
 	}
 	j.jobs[key] = job
 	j.queue = append(j.queue, key)

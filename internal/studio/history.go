@@ -49,15 +49,15 @@ type Version struct {
 	// Note is what produced it — whether the vision seam was on, and so on.
 	// Free text on purpose: it is read by a person deciding which two
 	// versions to compare, not by anything that has to parse it.
-	Note   string        `json:"note,omitempty"`
+	Note   string         `json:"note,omitempty"`
 	Tracks []TrackSummary `json:"tracks,omitempty"`
 	// Steps is what the run that made this score did, and what each part of
 	// it cost. Kept with the version rather than only on the job, because the
 	// job is overwritten by the next run and the question "why was that one
 	// slower" is asked afterwards.
-	Steps []Step `json:"steps,omitempty"`
-	Cues   int            `json:"cues"`
-	Points int            `json:"points"`
+	Steps  []Step `json:"steps,omitempty"`
+	Cues   int    `json:"cues"`
+	Points int    `json:"points"`
 }
 
 // TrackSummary is one instrument's contribution, for telling two runs apart at

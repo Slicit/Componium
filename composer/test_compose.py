@@ -84,5 +84,50 @@ class TestRender(unittest.TestCase):
         self.assertNotIn("hash =", compose.render(meta, self.tracks))
 
 
+class TestSourceSurvivesRendering(unittest.TestCase):
+    """What a cue says about where it came from, written whole.
+
+    The source is the only trace of why a cue exists. It is read by a person
+    reviewing a score and asking whether the machine was right, so it has to
+    come out the way it went in. It once came out as
+    " v i s i o n :   d u s t " because a replace() lost its escape and replaced
+    the empty string instead of a backslash.
+    """
+
+    def render_source(self, said):
+        meta = {"title": "T", "duration": 10, "fps": 24, "hash": ""}
+        track = {
+            "instrument": "fog.left",
+            "type": "cue",
+            "cues": [{"t": 1.0, "action": "burst",
+                      "params": {"output": 0.7}, "duration": 3.0,
+                      "source": said}],
+        }
+        for line in compose.render(meta, [track]).splitlines():
+            if "source =" in line:
+                return line.split("source = ")[1].strip().rstrip(" },").strip('"')
+        return None
+
+    def test_a_vision_source_reads_as_written(self):
+        self.assertEqual(self.render_source("vision: dust"), "vision: dust")
+
+    def test_every_character_is_not_spaced_out(self):
+        # The exact fault: replacing the empty string puts a space between
+        # every character, so the length gives it away on its own.
+        said = "vision: dust"
+        self.assertEqual(len(self.render_source(said)), len(said))
+
+    def test_a_backslash_cannot_end_the_string_early(self):
+        # What the replace is actually for. A trailing backslash would escape
+        # the closing quote and make the score unparseable.
+        out = self.render_source("vision: dust\\")
+        self.assertNotIn(chr(92), out)  # no backslash survives
+        self.assertTrue(out.startswith("vision: dust"))
+
+    def test_a_quote_cannot_end_the_string_early(self):
+        out = self.render_source('he said "go"')
+        self.assertNotIn(chr(34), out)  # no quote survives
+
+
 if __name__ == "__main__":
     unittest.main()

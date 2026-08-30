@@ -92,3 +92,22 @@ func TestResetThenQueueStartsFromNothing(t *testing.T) {
 		t.Errorf("after a reset, queueing carried %d chunks forward", len(job.Chunks))
 	}
 }
+
+func TestQueueingKeepsARequestForAFreshLook(t *testing.T) {
+	// Asking for a new look and silently getting the kept description is the
+	// same fault as losing the chunks, one field along: the flag is set on the
+	// job before it is queued, and queueing built a fresh one.
+	j := &Jobs{jobs: map[string]*Job{}}
+	const film = "feature.mkv"
+	j.jobs[jobKey(JobAnalyse, film)] = &Job{
+		Kind: JobAnalyse, Film: film, State: JobDone, LookAgain: true, Limit: 900,
+	}
+
+	job := j.Enqueue(JobAnalyse, film)
+	if !job.LookAgain {
+		t.Error("the request for a fresh look was dropped when the film was queued")
+	}
+	if job.Limit != 900 {
+		t.Errorf("the length limit was dropped: %v", job.Limit)
+	}
+}

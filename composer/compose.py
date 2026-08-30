@@ -257,6 +257,14 @@ def file_hash(path: str, limit_mb: int) -> str:
     return f"{prefix}:{h.hexdigest()}"
 
 
+# A backslash would end the TOML string early, so it is replaced. Named
+# rather than written as an escape, because the escape collapsed on its way
+# into this file once and left replace('', ' ') - which replaces the empty
+# string, putting a space between every character. A cue from the vision
+# seam then recorded its own source as " v i s i o n :   d u s t ".
+BACKSLASH = chr(92)
+
+
 def render(meta, tracks, calm=()) -> str:
     """Render a score as TOML.
 
@@ -299,7 +307,7 @@ def render(meta, tracks, calm=()) -> str:
                     # do not survive being read and written again, which a
                     # chunked analysis does on every merge, so it was reliably
                     # lost on exactly the films long enough to need it.
-                    said = str(cue["source"]).replace('', ' ').replace('"', "'")
+                    said = str(cue["source"]).replace(BACKSLASH, ' ').replace('"', "'")
                     row += f', source = "{said}"'
                 row += " },"
                 lines.append(row)
