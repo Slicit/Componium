@@ -126,3 +126,42 @@ def describe(path: str, times, command: str, timeout: float = 60.0):
             for label in label_frame(command, image, timeout):
                 found.append((at, label))
     return found
+
+
+# Some labels are only worth believing in company.
+#
+# A model asked whether spray is water or sand is being asked to judge a
+# material from a still, and it is not good at it: crabs kicking up sand on a
+# beach read as a splash. It is good at whether a scene contains water at all —
+# a sea, a lake, a river — which is a much easier question about a much larger
+# part of the frame.
+#
+# So the weak judgement is gated on the strong one. A splash counts only where
+# the model also saw water nearby; on a beach that is most of the film, and in
+# a dust-blown desert it is none of it, which is exactly the discrimination the
+# label could not make on its own.
+#
+# Tried and rejected: saying it more firmly in the prompt. Emphasising that a
+# splash must be water made the model reach for the word more often, not less,
+# and two calm shots of an island went from no effects to a splash.
+CORROBORATES = {"splash": "water"}
+
+
+def gate(found, window: float = 20.0):
+    """Drop labels needing corroboration that did not get it.
+
+    found is the (time, label) list describe() returns. The window is generous
+    because it is asking whether this is a watery part of the film, not whether
+    two things happened together.
+    """
+    if not found:
+        return found
+    out = []
+    for at, label in found:
+        need = CORROBORATES.get(label)
+        if need is None:
+            out.append((at, label))
+            continue
+        if any(other == need and abs(when - at) <= window for when, other in found):
+            out.append((at, label))
+    return out

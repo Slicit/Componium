@@ -84,6 +84,10 @@ type Jobs struct {
 	scores   string
 	python   string
 	mediaDir string
+	// devices names the instrument each kind of effect should be addressed
+	// to, from the rig the studio is holding. Empty when there is no rig, and
+	// the composer then falls back to its own defaults.
+	devices []string
 
 	mu      sync.Mutex
 	jobs    map[string]*Job
@@ -99,6 +103,15 @@ type Jobs struct {
 // composer's own folder so its sibling modules import; a relative path then
 // resolves against that folder and doubles, which is a confusing way to be
 // told a file does not exist.
+// WithDevices records which instrument each kind of effect belongs to.
+//
+// Set after construction rather than passed in, because the rig is optional
+// and a studio without one still analyses films perfectly well.
+func (j *Jobs) WithDevices(args []string) *Jobs {
+	j.devices = append([]string(nil), args...)
+	return j
+}
+
 func NewJobs(composer, scores, mediaDir string) *Jobs {
 	if composer != "" {
 		if abs, err := filepath.Abs(composer); err == nil {

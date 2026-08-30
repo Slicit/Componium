@@ -350,6 +350,25 @@ def progress(fraction: float, label: str):
     sys.stderr.flush()
 
 
+def _kinds(args) -> dict:
+    """Which instrument each kind of effect should be addressed to.
+
+    Every kind, not the two that happened to be needed first. A rig names its
+    own devices — the demo rig calls its fogger fog.left — and a kind missing
+    from here falls through to "<kind>.main", which is a device id that may
+    well not exist. Nothing catches that: a score is a proposal, and no part of
+    the composer knows what rig it will be played on.
+    """
+    return {
+        "light": args.light_id,
+        "shake": args.shake_id,
+        "wind": args.wind_id,
+        "mist": args.mist_id,
+        "fog": args.fog_id,
+        "scent": args.scent_id,
+    }
+
+
 def build(args) -> str:
     report = sys.stderr.write
     film_duration = ffprobe_duration(args.input)
@@ -477,18 +496,26 @@ def build(args) -> str:
         if srt:
             entries = subtitles.parse(srt)
             confirmations += subtitles.descriptions(entries)
-            kinds = {"light": args.light_id, "shake": args.shake_id}
             semantic += subtitles.cues_from_descriptions(
                 entries and subtitles.descriptions(entries),
-                subtitles.load_mapping(args.mapping), kinds)
+                subtitles.load_mapping(args.mapping), _kinds(args),
+                source="subtitle")
 
     if args.vlm_command:
         times = vision.candidates(env, args.fps, cuts, args.vlm_frames)
         labels = vision.describe(args.input, times, args.vlm_command)
+        # A splash is only a splash where the model also saw water. It cannot
+        # tell spray from kicked sand in a still, and it can tell a sea from a
+        # desert easily.
+        kept = vision.gate(labels)
+        if len(kept) != len(labels):
+            report(str(len(labels) - len(kept))
+                   + " labels dropped for want of corroboration" + chr(10))
+        labels = kept
         confirmations += labels
-        kinds = {"light": args.light_id, "shake": args.shake_id}
         semantic += subtitles.cues_from_descriptions(
-            labels, subtitles.load_mapping(args.mapping), kinds)
+            labels, subtitles.load_mapping(args.mapping), _kinds(args),
+            source="vision")
         report(f"{len(times)} keyframes labelled, {len(semantic)} semantic cues\n")
 
     # --- water, nominated then confirmed -------------------------------------
@@ -608,6 +635,10 @@ def main(argv=None):
                    help="instrument for bright spikes, separate from the soft wash")
     p.add_argument("--motion-id", default="",
                    help="instrument for plunges; empty means do not emit them")
+    p.add_argument("--fog-id", default="fog.main",
+                   help="the fogger, for smoke and dust (default fog.main)")
+    p.add_argument("--scent-id", default="scent.main",
+                   help="the scent device (default scent.main)")
     p.add_argument("--mist-id", default="mist.main",
                    help="instrument for confirmed water scenes")
     p.add_argument("--motion-gain", type=float, default=1.0,

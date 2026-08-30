@@ -134,9 +134,26 @@ func (j *Jobs) runChunk(ctx context.Context, film, source string, c Chunk,
 		"-o", partial,
 		"--motion-id", "motion.platform",
 		"--hash-file", filepath.Join(j.mediaDir, film),
+	}
+	// Which fogger, which fan, which scent — from the rig rather than from the
+	// composer's guesses, or a rig whose fogger is called fog.left gets every
+	// smoke cue addressed to a fog.main that does not exist.
+	args = append(args, j.devices...)
+	// The vision seam, when one is configured.
+	//
+	// Off unless asked for, because it needs a model on the other end of it
+	// and a studio that quietly failed to reach one on every frame of every
+	// film would be slower for no benefit and say nothing about why.
+	if cmd := os.Getenv("COMPONIUM_VLM_COMMAND"); cmd != "" {
+		args = append(args, "--vlm-command", cmd)
+		if n := os.Getenv("COMPONIUM_VLM_FRAMES"); n != "" {
+			args = append(args, "--vlm-frames", n)
+		}
+	}
+	args = append(args, []string{
 		"--from", strconv.FormatFloat(c.From, 'f', 3, 64),
 		"--audio-peak", strconv.FormatFloat(peak, 'f', 6, 64),
-	}
+	}...)
 	// The last chunk is left open ended. Its end came from ffprobe, and
 	// asking for a range that stops a frame short of the duration would leave
 	// the tail of the film analysed by nobody.

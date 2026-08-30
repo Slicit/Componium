@@ -42,7 +42,8 @@ DEFAULT_MAPPING = {
                   {"kind": "light", "action": "flash", "params": {"r": 1.0, "g": 1.0, "b": 1.0}, "duration": 0.2}],
     "lightning": [{"kind": "light", "action": "flash", "params": {"r": 1.0, "g": 1.0, "b": 1.0}, "duration": 0.15}],
     "explosion": [{"kind": "shake", "action": "hit", "params": {"intensity": 1.0}, "duration": 1.5},
-                  {"kind": "light", "action": "flash", "params": {"r": 1.0, "g": 0.6, "b": 0.2}, "duration": 0.3}],
+                  {"kind": "light", "action": "flash", "params": {"r": 1.0, "g": 0.6, "b": 0.2}, "duration": 0.3},
+                  {"kind": "fog", "action": "burst", "params": {"output": 0.8}, "duration": 3.0}],
     "explodes":  [{"kind": "shake", "action": "hit", "params": {"intensity": 1.0}, "duration": 1.5}],
     "gunshot":   [{"kind": "shake", "action": "hit", "params": {"intensity": 0.6}, "duration": 0.3}],
     "gunfire":   [{"kind": "shake", "action": "rumble", "params": {"intensity": 0.5}, "duration": 2.0}],
@@ -60,7 +61,22 @@ DEFAULT_MAPPING = {
     # lingers past the scene that called for it, and some people are
     # asthmatic or allergic. Only the most unambiguous words qualify.
     "burning":   [{"kind": "scent", "action": "puff", "params": {"channel": 1.0}, "duration": 1.0}],
-    "smoke":     [{"kind": "scent", "action": "puff", "params": {"channel": 1.0}, "duration": 1.0}],
+    # Smoke is the fogger's whole reason to exist, and it was reaching only
+    # the scent channel — a room full of smoke on screen, a faint burning
+    # smell, and a fog machine sitting idle through all of it.
+    "smoke":     [{"kind": "fog", "action": "burst", "params": {"output": 0.6}, "duration": 4.0},
+                  {"kind": "scent", "action": "puff", "params": {"channel": 1.0}, "duration": 1.0}],
+    # Dust reads like smoke to a camera and to a fogger, and unlike smoke it
+    # does not smell of anything. A dust cloud is usually an impact throwing
+    # it, so it comes on faster and clears sooner.
+    "dust":      [{"kind": "fog", "action": "burst", "params": {"output": 0.7}, "duration": 3.0}],
+    # A splash is an event, not a setting: water thrown into the air. Short
+    # and wet, against rain which is long and thin.
+    "splash":    [{"kind": "mist", "action": "spray", "params": {"output": 0.8}, "duration": 1.5}],
+    # Flames on screen. Deliberately only a smell: heat is not something this
+    # rig can make, and pretending otherwise with a light effect would be
+    # inventing a flicker the film did not have.
+    "fire":      [{"kind": "scent", "action": "puff", "params": {"channel": 1.0}, "duration": 1.0}],
     "petrichor": [{"kind": "scent", "action": "puff", "params": {"channel": 2.0}, "duration": 1.0}],
 }
 
@@ -144,7 +160,7 @@ def cues(entries, mapping=None, kinds=None):
     return cues_from_descriptions(descriptions(entries), mapping, kinds)
 
 
-def cues_from_descriptions(descs, mapping=None, kinds=None):
+def cues_from_descriptions(descs, mapping=None, kinds=None, source="subtitle"):
     """Turn (time, phrase) pairs into cue dictionaries.
 
     Shared with the vision seam on purpose. A model that says "explosion"
@@ -171,7 +187,12 @@ def cues_from_descriptions(descs, mapping=None, kinds=None):
                     "action": effect["action"],
                     "params": dict(effect.get("params", {})),
                     "duration": effect.get("duration", 1.0),
-                    "source": f"subtitle: {phrase}",
+                    # Which of the two seams nominated this, because the
+                    # source line exists so a reviewer can judge a cue without
+                    # rerunning anything — and "a model saw smoke" and "the
+                    # subtitles said [smoke]" are worth very different amounts
+                    # of trust.
+                    "source": f"{source}: {phrase}",
                 })
     out.sort(key=lambda c: (c["t"], c["instrument"]))
     return dedupe(out)

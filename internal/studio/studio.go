@@ -98,6 +98,7 @@ func New(o Options) (*Server, error) {
 	}
 	s.scores = scores
 	s.jobs = NewJobs(o.Composer, scores, o.Media)
+	s.jobs.WithDevices(append(deviceArgs(s.rig), lightArgs(s.rig)...))
 
 	// With no score named, open whichever film's score already exists, so a
 	// studio started against a library is useful immediately.
