@@ -14,6 +14,7 @@ export declare class Room3D {
   setMuted(muted: Set<string>): void;
   setForced(forced: Map<string, number>): void;
   setBrightness(v: number): void;
+  setWash(v: number): void;
   update(state: unknown): void;
   onView(fn: (view: CameraView) => void): void;
   getView(): CameraView;

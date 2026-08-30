@@ -24,6 +24,7 @@ import { repeatForAspect } from '../../core/tiling';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 import { deviceState, seatPose, cssColour } from './readings';
 
 const ROOM_W = 5.0;
@@ -52,14 +53,20 @@ const AMBIENT_STRIP_X = [-1.35, 1.35];
 const AMBIENT_STRIP_Z = 2.9;
 const AMBIENT_STRIP_LENGTH = 4.6;
 
-/* How hard the wash pushes.
+/* How hard the wash pushes at the top of its slider.
  *
- * A hint, deliberately. This is the colour a scene sits in, not a light source
- * in the film — if it were bright enough to read the room by it would drown
- * every cue the room exists to show, and a wash that competes with a lightning
- * strike has stopped being a wash.
+ * A rectangular light is measured in luminance rather than in the candela a
+ * point light takes, so this number has nothing to do with the one that was
+ * here before it and is not comparable to the lamps either. Which is most of
+ * why it is a slider: the useful setting is a judgement about a particular
+ * room on a particular screen, and the honest way to pick it is to let it be
+ * picked.
+ *
+ * The default lands at a third of this, which is a wash you notice without it
+ * competing with the cues the room exists to show.
  */
-const AMBIENT_WASH = 5;
+const AMBIENT_WASH_MAX = 120;
+const AMBIENT_WASH_DEFAULT = 0.3;
 
 /* A recessed lamp lit, and the same lamp dark. Its lens is drawn unlit, so
  * nothing in the scene can dim it and the fixture has to do it itself. */
@@ -297,11 +304,24 @@ const BUILDERS = {
       group.add(strip);
       strips.push(strip);
 
-      const light = new THREE.PointLight(0xffffff, 0, 9, 2);
-      light.position.set(x, ROOM_H - 0.14, AMBIENT_STRIP_Z);
+      /* A rectangle the shape of the strip, facing down.
+       *
+       * Rotating -90 degrees about x aims the emitting face at the floor and
+       * carries the light's own height on to the room's z axis, so `height` is
+       * the length of the run and `width` is how thick it is. A point light
+       * here lit a circle in the middle of a four and a half metre channel,
+       * which is exactly what it looked like. */
+      const light = new THREE.RectAreaLight(0xffffff, 0, 0.06, AMBIENT_STRIP_LENGTH);
+      light.position.set(x, ROOM_H - 0.06, AMBIENT_STRIP_Z);
+      light.rotation.x = -Math.PI / 2;
       group.add(light);
       lights.push(light);
     }
+
+    /* Held in a box so the slider can reach it. apply() runs from the frame
+     * loop and is handed a level and some params; how much of it the room
+     * wants is a separate question with a separate control. */
+    const gain = { value: AMBIENT_WASH_DEFAULT };
 
     return {
       group: group,
@@ -309,16 +329,22 @@ const BUILDERS = {
        * point light at the coordinate in the rig file. */
       ownLights: lights.length,
       fixed: true,
+      setGain(v) { gain.value = Math.max(0, Math.min(1, Number(v) || 0)); },
       apply(level, params) {
         const c = new THREE.Color(colourOf(params));
         for (const strip of strips) {
-          /* Nearly black when it is doing nothing, because a strip that is off
-           * should look off. The channel is what keeps the fixture visible. */
-          strip.material.color.copy(c).multiplyScalar(0.05 + level * 0.95);
+          /* The emitter reads the colour, not the wash setting. Turning the
+           * light in a room down does not make the strip itself dimmer to look
+           * at, and a fixture that vanished when it was turned down would stop
+           * telling you where the light in the room is coming from.
+           *
+           * It keeps a floor so the run stays a visible line rather than
+           * disappearing into its own housing between cues. */
+          strip.material.color.copy(c).multiplyScalar(0.2 + level * 0.8);
         }
         for (const light of lights) {
           light.color.copy(c);
-          light.intensity = level * AMBIENT_WASH;
+          light.intensity = level * AMBIENT_WASH_MAX * gain.value;
         }
       },
     };
@@ -497,6 +523,7 @@ export class Room3D {
      * reads to decide whether a texture has to exist at all. */
     this.wantScreen = null;
     this.wantProjection = null;
+    this.wash = AMBIENT_WASH_DEFAULT;
     this.muted = new Set();
     this.forced = new Map();
     this.lights = 0;
@@ -536,6 +563,10 @@ export class Room3D {
      * shows as a brief freeze. Setting this flag here does not avoid it — the
      * recompile follows the light, not the flag — it just keeps renderer
      * state out of a setter that runs whenever a film changes. */
+    /* A rectangular light is not analytic: it samples precomputed tables, and
+     * without them loaded every surface it touches renders black. Once per
+     * renderer, before anything asks for one. */
+    RectAreaLightUniformsLib.init();
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMappingExposure = BASE_EXPOSURE;
@@ -1066,6 +1097,22 @@ export class Room3D {
     this.frame();
   }
 
+  /**
+   * How much of the soft wash the room wants, 0 to 1.
+   *
+   * Separate from the light slider on purpose. That one is the room's own
+   * lighting and the point of it is to be able to reach nothing; this is the
+   * strength of a thing the score is driving, and the two are asked at
+   * different times for different reasons.
+   */
+  setWash(v) {
+    this.wash = Math.max(0, Math.min(1, Number(v)));
+    if (this.washDevice && this.washDevice.setGain) {
+      this.washDevice.setGain(this.wash);
+    }
+    this.frame();
+  }
+
   /* Forced levels: id -> 0..1, overriding whatever the score says. See the
    * force panel in app.js. */
   setForced(forced) {
@@ -1083,6 +1130,7 @@ export class Room3D {
       if (d.light) this.scene.remove(d.light);
     }
     this.devices.clear();
+    this.washDevice = null;
     this.lights = 0;
 
     /* Which light is the wash.
@@ -1125,6 +1173,12 @@ export class Room3D {
       }
 
       this.scene.add(device.group);
+      /* Kept by hand as well as by id, because the slider asks for "the wash"
+       * and has no business knowing what the rig decided to call it. */
+      if (isWash) {
+        this.washDevice = device;
+        if (device.setGain) device.setGain(this.wash);
+      }
       this.devices.set(inst.id, { group: device.group, apply: device.apply, light: light, kind: inst.kind });
     }
   }

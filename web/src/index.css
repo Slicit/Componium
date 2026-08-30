@@ -459,7 +459,10 @@ button:hover { border-color: #3a4553; }
   gap: 10px;
   margin-bottom: 6px;
 }
-.lumen { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.lumen { display: inline-flex; align-items: center; gap: 6px; }
+/* Only the first one pushes; the rest ride along after it. Two elements each
+   claiming the free space share it and split the group in half. */
+.room-bar .lumen:first-of-type { margin-left: auto; }
 .lumen input[type=range] { width: 96px; accent-color: #7fa8d8; }
 
 /* The picture switch rides along after the light slider, which is the element

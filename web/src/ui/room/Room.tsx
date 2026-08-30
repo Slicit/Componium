@@ -23,12 +23,16 @@ interface RoomHandle {
   setMuted(muted: Set<string>): void;
   setForced(forced: Map<string, number>): void;
   setBrightness(v: number): void;
+  setWash(v: number): void;
   update(state: unknown): void;
   onView(fn: (view: CameraView) => void): void;
   getView(): CameraView;
   setView(view: CameraView | null): void;
   dispose(): void;
 }
+
+/* Matches the room own default, so the prop and its absence agree. */
+const WASH_DEFAULT = 30;
 
 export function Room(props: {
   score: Score;
@@ -37,6 +41,15 @@ export function Room(props: {
   muted: Set<string>;
   forced: Map<string, number>;
   brightness: number;
+  /**
+   * How strong the soft wash is, 0 to 100.
+   *
+   * Its own control rather than part of `brightness`. That one is the room's
+   * own lighting and exists to be able to reach nothing; this is the strength
+   * of something the score is driving, and they are adjusted at different
+   * times for different reasons.
+   */
+  wash?: number;
   /**
    * Where to put the camera.
    *
@@ -77,7 +90,7 @@ export function Room(props: {
    */
   revision?: number;
 }) {
-  const { score, rig, time, muted, forced, brightness, view, onView, revision, picture,
+  const { score, rig, time, muted, forced, brightness, wash, view, onView, revision, picture,
     projection } =
     props;
   const host = useRef<HTMLDivElement>(null);
@@ -140,6 +153,7 @@ export function Room(props: {
   useEffect(() => { room.current?.setMuted(muted); }, [muted, status]);
   useEffect(() => { room.current?.setForced(forced); }, [forced, status]);
   useEffect(() => { room.current?.setBrightness(brightness / 100); }, [brightness, status]);
+  useEffect(() => { room.current?.setWash((wash ?? WASH_DEFAULT) / 100); }, [wash, status]);
 
   /* The room is told the time rather than reading a clock, the same way the
    * conductor is. One thing owns the playhead. */

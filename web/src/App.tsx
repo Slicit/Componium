@@ -105,6 +105,21 @@ export function App() {
   const [overlays, setOverlays] = useState({ calm: true, latency: true });
   const [forced, setForced] = useState<Map<string, number>>(new Map());
   const [brightness, setBrightness] = useState(50);
+  /* How strong the soft wash is. Remembered, because it is a judgement about a
+   * particular screen in a particular room and re-making it every session is
+   * the sort of small tax that makes a tool tiring. */
+  const [wash, setWash] = useState(() => {
+    try {
+      const raw = localStorage.getItem('componium.roomWash');
+      if (raw === null || raw === '') return 30;
+      const v = Number(raw);
+      return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 30;
+    } catch { return 30; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('componium.roomWash', String(wash)); }
+    catch { /* private mode */ }
+  }, [wash]);
   const views = useViewport();
   const split = views.viewport;
   const stage = useRef<HTMLDivElement>(null);
@@ -680,6 +695,11 @@ export function App() {
                 <input type="range" min={0} max={100} value={brightness}
                   onChange={(e) => setBrightness(Number(e.target.value))} />
               </label>
+              <label className="lumen" title="How strong the soft ambient wash is — the two LED strips in the ceiling, carrying whatever colour the score is holding. It is a hint of the scene's colour rather than a light to see by, so it sits well below the room lighting.">
+                <span className="dim small">wash</span>
+                <input type="range" min={0} max={100} value={wash}
+                  onChange={(e) => setWash(Number(e.target.value))} />
+              </label>
               <label className="room-toggle" title="Show the film itself on the television in the room, instead of the ambient colour it is driving. The glow behind the panel keeps showing the ambient layer either way.">
                 <input type="checkbox" checked={onScreen}
                   onChange={(e) => setOnScreen(e.target.checked)} />
@@ -704,6 +724,7 @@ export function App() {
               muted={NO_MUTES}
               forced={forced}
               brightness={brightness}
+              wash={wash}
               view={views.camera}
               onView={views.onCamera}
               revision={history.version}

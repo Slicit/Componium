@@ -29,6 +29,7 @@ vi.mock('./Room3D.js', () => {
     setMuted() {}
     setForced() {}
     setBrightness() {}
+    setWash() {}
     onView() {}
     getView() { return { pos: [0, 0, 0], target: [0, 0, 0] }; }
     setView() {}
