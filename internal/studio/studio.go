@@ -783,6 +783,10 @@ func (s *Server) handleSeen(w http.ResponseWriter, r *http.Request) {
 	if versions := s.jobs.Versions(film); len(versions) > 0 {
 		out["note"] = versions[0].Note
 		out["made"] = versions[0].Made
+		// The film's own length, so a reader can see what share of it was
+		// looked at. Fifteen minutes of observations reads as a complete
+		// description until it is put next to the two hours it describes.
+		out["duration"] = versions[0].Duration
 	}
 	obs, err := s.jobs.ReadSeen(film)
 	if err != nil {

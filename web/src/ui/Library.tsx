@@ -309,11 +309,17 @@ export function Library(props: { onOpen: (film: string) => void; fps: Fps }) {
               neighbour put Rebuild — the whole column shifted from row to
               row, and the button under the pointer changed as the list
               refreshed underneath it. */}
+          {/* One span per action, always rendered, so every row lines up
+              whatever buttons it happens to have — a film with no Prepare
+              button must not put Delete where its neighbour puts Rebuild.
+              Give a new slot a slot-* class and a width in index.css.
+              Nothing counts them any more, so forgetting is a narrow slot
+              rather than a row that wraps onto a second line. */}
           <div className="lib-actions">
-            <span className="slot">
+            <span className="slot slot-open">
               {e.hasScore && <button onClick={() => props.onOpen(e.film)}>Open</button>}
             </span>
-            <span className="slot">
+            <span className="slot slot-build">
               {data.canBuild && (
                 <button
                   disabled={!!(e.job && (e.job.state === 'queued' || e.job.state === 'running'))}
@@ -329,7 +335,7 @@ export function Library(props: { onOpen: (film: string) => void; fps: Fps }) {
                 >{resumable(e.job) ? 'Resume' : e.hasScore ? 'Rebuild' : 'Analyse'}</button>
               )}
             </span>
-            <span className="slot">
+            <span className="slot slot-reset">
               {data.canBuild && (e.job?.chunks?.length ?? 0) > 0
                 && e.job?.state !== 'running' && e.job?.state !== 'queued' && (
                 <button
@@ -338,7 +344,7 @@ export function Library(props: { onOpen: (film: string) => void; fps: Fps }) {
                 >Reset</button>
               )}
             </span>
-            <span className="slot">
+            <span className="slot slot-prepare">
               {data.canPrepare && !e.preview && (
                 <button
                   disabled={!!(e.prepare && (e.prepare.state === 'queued' || e.prepare.state === 'running'))}
@@ -347,7 +353,7 @@ export function Library(props: { onOpen: (film: string) => void; fps: Fps }) {
                 >Prepare</button>
               )}
             </span>
-            <span className="slot">
+            <span className="slot slot-vision">
               {e.seen && (
                 <button
                   onClick={() => setReading(e.film)}
@@ -355,7 +361,7 @@ export function Library(props: { onOpen: (film: string) => void; fps: Fps }) {
                 >vision</button>
               )}
             </span>
-            <span className="slot">
+            <span className="slot slot-builds">
               {((e.job?.steps?.length ?? 0) > 0 || (e.builds?.length ?? 0) > 0) && (
                 <button
                   onClick={() => setOpen(open === e.film ? null : e.film)}

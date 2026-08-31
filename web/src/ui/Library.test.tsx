@@ -221,3 +221,29 @@ describe('reaching what the model said', () => {
     expect(new Set(slots).size).toBe(1);
   });
 });
+
+describe('the width of an action slot', () => {
+  it('every slot says how wide it is', async () => {
+    // The rule that kept being broken, as a test rather than as a comment.
+    //
+    // The widths used to live in one list in the stylesheet whose length had
+    // to match the number of spans here. Adding a button meant editing both,
+    // and a sixth span against five columns wrapped the whole row onto a
+    // second line. Each slot names its own width now, and this is what
+    // notices a new one that forgot to.
+    await show([film('a.mp4', { hasScore: true, seen: true, preview: true })]);
+    const slots = Array.from(document.querySelectorAll('.lib-row .slot'));
+    expect(slots.length).toBeGreaterThan(0);
+    for (const slot of slots) {
+      const named = Array.from(slot.classList).filter((c) => c.startsWith('slot-'));
+      expect(named, `a slot with no width class: ${slot.className}`).toHaveLength(1);
+    }
+  });
+
+  it('names each width only once, so two slots cannot claim the same one', async () => {
+    await show([film('a.mp4', { hasScore: true, seen: true, preview: true })]);
+    const named = Array.from(document.querySelectorAll('.lib-row .slot'))
+      .map((s) => Array.from(s.classList).find((c) => c.startsWith('slot-')));
+    expect(new Set(named).size).toBe(named.length);
+  });
+});

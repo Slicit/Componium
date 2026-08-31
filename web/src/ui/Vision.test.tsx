@@ -70,7 +70,43 @@ describe('the reading room', () => {
   it('says which model answered and when', async () => {
     show();
     await waitFor(() => expect(document.body.textContent).toContain('qwen2.5'));
-    expect(document.body.textContent).toContain('3 frames looked at');
+    expect(document.body.textContent).toContain('3 frames');
+  });
+
+  it('says how much of the film it reaches', async () => {
+    // A count of frames reads as a description of the film. Against the length
+    // it is standing in for, it reads as what it is.
+    body = { ...trace, duration: 600 };
+    show();
+    await waitFor(() => expect(document.body.textContent).toContain('covers'));
+    // Last observation is at 60s of a 600s film.
+    expect(document.body.textContent).toContain('covers 10%');
+  });
+
+  it('warns when it describes only the opening of the film', async () => {
+    // The situation this was built to make visible: a trial run of the first
+    // few minutes quietly becomes the description of a whole feature, because
+    // a rebuild reuses whatever is there.
+    body = { ...trace, duration: 600 };
+    show();
+    await waitFor(() => expect(document.body.textContent).toContain('only the first'));
+    expect(document.body.textContent).toContain('never looked at');
+  });
+
+  it('does not warn about a description that covers its film', async () => {
+    body = { ...trace, duration: 62 };
+    show();
+    await waitFor(() => expect(document.body.textContent).toContain('covers'));
+    expect(document.body.textContent).not.toContain('only the first');
+  });
+
+  it('says nothing about coverage when the length is not known', async () => {
+    // An older build with no duration recorded. Better to say nothing than to
+    // divide by a zero and report that it covers none of the film.
+    show();
+    await waitFor(() => expect(document.body.textContent).toContain('3 frames'));
+    expect(document.body.textContent).not.toContain('covers');
+    expect(document.body.textContent).not.toContain('only the first');
   });
 
   it('finds a word the model used that no label caught', async () => {
