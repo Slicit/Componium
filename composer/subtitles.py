@@ -160,7 +160,8 @@ def cues(entries, mapping=None, kinds=None):
     return cues_from_descriptions(descriptions(entries), mapping, kinds)
 
 
-def cues_from_descriptions(descs, mapping=None, kinds=None, source="subtitle"):
+def cues_from_descriptions(descs, mapping=None, kinds=None, source="subtitle",
+                           skip=()):
     """Turn (time, phrase) pairs into cue dictionaries.
 
     Shared with the vision seam on purpose. A model that says "explosion"
@@ -170,9 +171,16 @@ def cues_from_descriptions(descs, mapping=None, kinds=None, source="subtitle"):
 
     kinds maps an effect kind to the instrument id in the target rig, so
     that a rig calling its fan "wind.left" still works.
+
+    skip names kinds this seam must not produce at all. An absent key in kinds
+    is a default rather than a refusal — it falls through to "<kind>.main" —
+    so leaving one out cannot express "not from here". Scent is the case:
+    a frame containing fire is not a reason to fill a room with smoke for four
+    minutes, and the scene pass decides those instead.
     """
     mapping = mapping or DEFAULT_MAPPING
     kinds = kinds or {}
+    skip = set(skip or ())
     out = []
     for at, phrase in descs:
         words = set(re.findall(r"[a-z]+", phrase.lower()))
@@ -181,6 +189,8 @@ def cues_from_descriptions(descs, mapping=None, kinds=None, source="subtitle"):
                 continue
             for effect in effects:
                 kind = effect["kind"]
+                if kind in skip:
+                    continue
                 out.append({
                     "t": at,
                     "instrument": kinds.get(kind, f"{kind}.main"),

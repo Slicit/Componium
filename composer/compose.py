@@ -36,6 +36,7 @@ import span as span_mod
 import light
 import motion_est
 import scenes
+import scent
 import subtitles
 import vision
 import water
@@ -309,6 +310,12 @@ def render(meta, tracks, calm=()) -> str:
                     # lost on exactly the films long enough to need it.
                     said = str(cue["source"]).replace(BACKSLASH, ' ').replace('"', "'")
                     row += f', source = "{said}"'
+                if cue.get("scent"):
+                    # Which of the rig's reservoirs, by name. Not a number:
+                    # reservoir three is a different smell on every rig, and a
+                    # score is meant to outlive the hardware it was made on.
+                    smell = str(cue["scent"]).replace(BACKSLASH, ' ').replace('"', "'")
+                    row += f', scent = "{smell}"'
                 row += " },"
                 lines.append(row)
             lines.append("]")
@@ -395,6 +402,17 @@ def write_observations(args, observations, span) -> str:
             }
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     return os.path.basename(path)
+
+
+def _bank(args):
+    """The scents this rig actually holds, in bank order.
+
+    A rig with five reservoirs is not sent the sixth scent: it gets silence
+    rather than an approximation, because an approximation of a smell is a
+    different smell.
+    """
+    named = [w.strip() for w in (args.scents or "").split(",") if w.strip()]
+    return tuple(named) if named else scent.BANK
 
 
 def _kinds(args) -> dict:
@@ -559,6 +577,11 @@ def build(args) -> str:
                 subtitles.load_mapping(args.mapping), _kinds(args),
                 source="subtitle")
 
+    # Who owns scent. The scene pass when it is running, and the frame labels
+    # only when it is not — otherwise a film gets both, which is one puff every
+    # two seconds through a fire and one considered one afterwards.
+    scenting = bool(args.vlm_command and args.scent_id and args.scene_every > 0)
+
     if args.vlm_command:
         times = vision.candidates(env, args.fps, cuts, args.vlm_frames,
                                   every=args.vlm_every)
@@ -579,15 +602,37 @@ def build(args) -> str:
                    + " labels dropped for want of corroboration" + chr(10))
         labels = kept
         confirmations += labels
+        # Every kind but scent. A frame is the wrong evidence for a smell that
+        # will outlast the shot it came from, and the scene pass above is what
+        # decides those now.
         semantic += subtitles.cues_from_descriptions(
             labels, subtitles.load_mapping(args.mapping), _kinds(args),
-            source="vision")
+            source="vision", skip=("scent",) if scenting else ())
         report(f"{len(times)} keyframes labelled, {len(semantic)} semantic cues\n")
         # Written down before anything is concluded from it. This is the only
         # pass that costs a GPU and a decode, and the only one that cannot be
         # repeated once the film has been analysed and put away — so the later
         # passes read this rather than the film, and a mapping can be changed
         # and tried again in seconds.
+        # --- the scene pass -------------------------------------------------
+        #
+        # A second question at a fifth of the rate: where is this, and what is
+        # happening. Measured not to judge activity better than the frame pass
+        # does, so it does not; what it owns is place, and scent is what needs
+        # it. A frame containing fire is not a reason to fill a room with smoke
+        # for four minutes.
+        if scenting:
+            progress(0.94, "reading the scenes")
+            scene_times = vision.grid(duration, args.scene_every)
+            watched = vision.observe_scenes(
+                args.input, scene_times, args.vlm_command,
+                workers=args.vlm_workers, span=span)
+            found = scent.cues(watched, args.scent_id,
+                               bank=_bank(args), linger=args.scent_linger)
+            for cue in found:
+                add_cues(cue["instrument"], [cue])
+            report(f"{len(watched)} scenes read, {len(found)} scents\n")
+
         written = write_observations(args, observations, span)
         if written:
             report(f"{len(observations)} observations kept in {written}\n")
@@ -713,6 +758,16 @@ def main(argv=None):
                    help="the fogger, for smoke and dust (default fog.main)")
     p.add_argument("--scent-id", default="scent.main",
                    help="the scent device (default scent.main)")
+    p.add_argument("--scents", default="",
+                   help="what this rig's reservoirs hold, in order, comma "
+                        "separated. A scent not in the bank is not fired at "
+                        "all rather than approximated")
+    p.add_argument("--scene-every", type=float, default=10.0,
+                   help="how often to ask what scene this is, in seconds; "
+                        "0 turns the scene pass off (default %(default)s)")
+    p.add_argument("--scent-linger", type=float, default=scent.LINGER_SECONDS,
+                   help="how long a puff owns the room, in seconds "
+                        "(default %(default)s)")
     p.add_argument("--mist-id", default="mist.main",
                    help="instrument for confirmed water scenes")
     p.add_argument("--motion-gain", type=float, default=1.0,

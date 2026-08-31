@@ -256,6 +256,14 @@ def parse_labels(text: str) -> list[str]:
     return out
 
 
+# Comment lines a wrapper may send that are not the description.
+#
+# The sentence has ridden on a bare comment since descriptions existed, so it
+# stays bare and anything else is prefixed. A reader written before these
+# ignores them the way it has always ignored comments.
+MARKED = ("place:", "doing:", "busy:")
+
+
 def parse_seen(text: str) -> str:
     """The description a wrapper offered, if it offered one.
 
@@ -267,7 +275,7 @@ def parse_seen(text: str) -> str:
         line = line.strip()
         if line.startswith("#"):
             said = line.lstrip("#").strip()
-            if said:
+            if said and not said.lower().startswith(MARKED):
                 return said
     return ""
 
@@ -422,6 +430,72 @@ def observe(path: str, times, command: str, timeout: float = 60.0,
                     seen.append({"t": round(at, 3), "labels": labels,
                                  "seen": said})
     return sorted(seen, key=lambda o: o["t"])
+
+
+def parse_marked(text: str, key: str) -> str:
+    """One of the prefixed comment lines a scene pass sends back."""
+    want = key.lower() + ":"
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line.startswith("#"):
+            continue
+        said = line.lstrip("#").strip()
+        if said.lower().startswith(want):
+            return said.partition(":")[2].strip()
+    return ""
+
+
+# What the wrapper is told to ask about. Empty is the frame question, which is
+# what everything asked before this existed.
+ASK_ENV = "COMPONIUM_VLM_ASK"
+
+
+def observe_scenes(path: str, times, command: str, timeout: float = 60.0,
+                   workers: int = VLM_WORKERS, span=None,
+                   gap: float = PAIR_SECONDS):
+    """Ask what each moment is a scene of, rather than what is in the frame.
+
+    A fifth of the rate the frame pass runs at, because a place is a property
+    of a stretch of film and asking every two seconds buys nothing but cost.
+
+    Returns records of {"t", "place", "doing"}. Activity is deliberately not
+    among them: measured against the audio and the camera, this pass judges it
+    worse than the frame pass does even at the same resolution, so it does not
+    get to have an opinion about it.
+    """
+    seen = []
+    with tempfile.TemporaryDirectory(prefix="componium-scene-") as tmp:
+        frames = extract(path, times, tmp, span, gap)
+        if not frames:
+            return []
+
+        def look(item):
+            at, images = item
+            reply = _ask_scene(command, images, timeout)
+            return at, parse_marked(reply, "place"), parse_marked(reply, "doing")
+
+        with futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            for at, place, doing in pool.map(look, frames):
+                if place or doing:
+                    seen.append({"t": round(at, 3), "place": place, "doing": doing})
+    return sorted(seen, key=lambda o: o["t"])
+
+
+def _ask_scene(command: str, images, timeout: float) -> str:
+    """Run the seam with the scene question set in its environment."""
+    if isinstance(images, str):
+        images = [images]
+    args = [images[-1]] + list(images[:-1])
+    env = dict(os.environ)
+    env[ASK_ENV] = "scene"
+    try:
+        result = subprocess.run(
+            command.split() + args, capture_output=True, text=True,
+            errors="replace", timeout=timeout, check=False, env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout if result.returncode == 0 else ""
 
 
 def as_pairs(observations):

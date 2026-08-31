@@ -121,6 +121,17 @@ type CueSpec struct {
 	// proposed, without touching the ones the signals found, is only possible
 	// if a cue says which it was.
 	Source string `toml:"source,omitempty"`
+	// Scent names which smell this cue asks for, out of the rig's bank.
+	//
+	// A name and not a reservoir number, for the reason every other id here
+	// is a name: reservoir three is a different smell on every rig, and a
+	// score is meant to outlive the hardware it was made on. The rig says
+	// which bottle holds it, and a rig that holds none of it fires nothing.
+	//
+	// It cannot live in Params, which is numbers the conductor interpolates
+	// between — and interpolating halfway between two smells is not a thing
+	// a room can do.
+	Scent string `toml:"scent,omitempty"`
 }
 
 // Point is one sample in a curve track.

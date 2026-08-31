@@ -52,6 +52,16 @@ type InstConfig struct {
 	// Motion fields, used when Driver is "motion".
 	Format string        `toml:"format"`
 	Travel *MotionTravel `toml:"travel"`
+	// Scents is what each reservoir of a scent instrument holds, by number.
+	//
+	//     [instrument.scents]
+	//     1 = "smoke"
+	//     2 = "petrichor"
+	//
+	// Keyed by string because TOML tables are, and read back through Scent.
+	// Five bottles or fifteen is a longer table and no code: a score names a
+	// smell and this says which one that is here.
+	Scents map[string]string `toml:"scents"`
 	// sACN fields, used when Driver is "sacn".
 	Universe uint16 `toml:"universe"`
 	Start    int    `toml:"start"`

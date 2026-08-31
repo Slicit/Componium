@@ -47,6 +47,10 @@ DEBUG = bool(os.environ.get("COMPONIUM_VLM_DEBUG"))
 # handed to the model as background for the sentence it writes and for nothing
 # else. Empty is the normal case and changes nothing.
 CONTEXT = os.environ.get("COMPONIUM_VLM_CONTEXT", "").strip()
+
+# Which question to answer. Empty is the frame question — what is in this
+# frame — which is what this was for before scenes existed.
+ASK = os.environ.get("COMPONIUM_VLM_ASK", "").strip().lower()
 TIMEOUT = float(os.environ.get("COMPONIUM_VLM_TIMEOUT", "120"))
 
 # What the composer can do something with. Anything else is noise.
@@ -150,8 +154,38 @@ thrown and settles, snow falls or lies, water that splashes is water that
 moved."""
 
 
+# The other question: what scene is this, rather than what is in this frame.
+#
+# Asked at a fifth of the rate and allowed everything the frame question is
+# denied, because it is a judgement rather than evidence and because nothing
+# it produces drives a fogger. It does not ask about activity: measured against
+# the audio and the camera, this pass judges that worse than the frame pass
+# does even at the same resolution.
+SCENE_PROMPT = """You are shown two frames from a film, one second apart, to
+judge the scene they belong to rather than the frames themselves.
+
+Reply with exactly two lines and nothing else. No explanation.
+
+PLACE: <a few words for where this is — a battlefield, a forest, a kitchen, a
+        ship's corridor, a city street at night>
+DOING: <a few words for what is happening — a fight, a conversation, a chase,
+        a funeral, someone cooking>
+
+Say where it is, not what it means. If you cannot tell, say so plainly rather
+than guessing at somewhere more interesting."""
+
+
+def scene_prompt() -> str:
+    """The scene question, with the film's own context when there is any."""
+    if not CONTEXT:
+        return SCENE_PROMPT
+    return SCENE_PROMPT + CONTEXT_PROMPT % CONTEXT
+
+
 def prompt(pair: bool = False) -> str:
     """The prompt, with the film's own context when there is any."""
+    if ASK == "scene":
+        return scene_prompt()
     text = PROMPT
     if pair:
         text += PAIR_PROMPT
@@ -289,6 +323,15 @@ def ask_openai(images) -> str:
     return choices[0].get("message", {}).get("content", "") or ""
 
 
+def line_of(reply: str, head: str) -> str:
+    """One named line out of a reply, however the model decorated it."""
+    for line in (reply or "").splitlines():
+        a, _, b = line.strip().lstrip("-*# ").partition(":")
+        if a.strip().strip("*").lower() == head:
+            return " ".join(b.split())
+    return ""
+
+
 def parse(reply: str) -> list[str]:
     """Pull the permitted words out of a reply, and nothing else.
 
@@ -356,6 +399,15 @@ def main(argv: list[str]) -> int:
         return 1
     if DEBUG:
         sys.stderr.write("vlm raw: %r\n" % reply)
+    if ASK == "scene":
+        # Prefixed comments, so a reader that only knows about labels and a
+        # sentence ignores these exactly as it has always ignored comments.
+        for key in ("place", "doing"):
+            said = line_of(reply, key)
+            if said:
+                print("# %s: %s" % (key, said))
+        return 0
+
     for label in parse(reply):
         print(label)
     seen = described(reply)
