@@ -22,6 +22,8 @@ interface Seen {
   observations: Observation[];
   note?: string;
   made?: string;
+  /** What this film is, in the operator's own words. */
+  context?: string;
   /** The film's own length, so what is here can be read against it. */
   duration?: number;
 }
@@ -44,6 +46,12 @@ export function Vision(props: {
   const [data, setData] = useState<Seen | null>(null);
   const [failed, setFailed] = useState(false);
   const [query, setQuery] = useState('');
+  /* The context, held separately from the fetched copy so it can be typed in.
+   * `saved` is what the server last confirmed, which is how the button knows
+   * whether there is anything to save. */
+  const [about, setAbout] = useState('');
+  const [saved, setSaved] = useState('');
+  const [saving, setSaving] = useState(false);
   const close = useRef(onClose);
   close.current = onClose;
 
@@ -51,7 +59,12 @@ export function Vision(props: {
     let gone = false;
     fetch('/api/seen?film=' + encodeURIComponent(film))
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: Seen) => { if (!gone) setData(d); })
+      .then((d: Seen) => {
+        if (gone) return;
+        setData(d);
+        setAbout(d.context ?? '');
+        setSaved(d.context ?? '');
+      })
       .catch(() => { if (!gone) setFailed(true); });
     return () => { gone = true; };
   }, [film]);
@@ -72,6 +85,16 @@ export function Vision(props: {
   const reaches = all.length ? all[all.length - 1].t : 0;
   const covers = duration > 0 ? reaches / duration : 0;
   const partial = duration > 0 && covers < COVERS_ENOUGH;
+
+  const saveAbout = async () => {
+    setSaving(true);
+    try {
+      const r = await fetch('/api/context?film=' + encodeURIComponent(film),
+        { method: 'POST', body: about });
+      if (r.ok) setSaved((await r.json()).context ?? '');
+    } catch { /* left unsaved, and the button says so */ }
+    setSaving(false);
+  };
 
   const lookAgain = () => {
     const what = all.length
@@ -171,6 +194,37 @@ export function Vision(props: {
               {!rows.length && <p className="dim small">nothing matches that.</p>}
             </div>
           </>
+        )}
+
+        {data && (
+          /* Under the descriptions, because they are what raises the
+           * question. A model shown one frame and told nothing about the film
+           * writes "a man in a military uniform stands in a dimly lit room"
+           * for every film ever made. */
+          <div className="vis-about">
+            <label className="dim small" htmlFor="vis-about">
+              What is this film? A genre, a line of synopsis, the name of a
+              ship. Used for the descriptions only — never as evidence that
+              something is in a frame — and read by the next run that looks.
+            </label>
+            <textarea
+              id="vis-about"
+              value={about}
+              rows={2}
+              placeholder="Space opera. A farming moon under occupation; soldiers, dropships, a grain silo."
+              onChange={(e) => setAbout(e.target.value)}
+            />
+            <div className="vis-about-foot">
+              <span className="dim small">
+                {about === saved
+                  ? (saved ? 'saved' : 'nothing said about this film yet')
+                  : 'unsaved — takes effect the next time the model looks'}
+              </span>
+              <button onClick={saveAbout} disabled={saving || about === saved}>
+                {saving ? 'saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
         )}
 
         <footer className="modal-foot">

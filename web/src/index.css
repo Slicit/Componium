@@ -1021,6 +1021,17 @@ button:hover { border-color: #3a4553; }
 
 .vis-find { width: 100%; }
 
+.vis-about {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.vis-about label { max-width: 78ch; }
+.vis-about textarea { width: 100%; resize: vertical; min-height: 42px; }
+.vis-about-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
 .vis-rows { overflow-y: auto; min-height: 0; flex: 1; }
 .vis-row {
   display: grid;

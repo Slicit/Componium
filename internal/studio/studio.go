@@ -181,6 +181,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/layout", s.handleLayout)
 	mux.HandleFunc("/api/versions", s.handleVersions)
 	mux.HandleFunc("/api/seen", s.handleSeen)
+	mux.HandleFunc("/api/context", s.handleContext)
 	// The rebuilt studio, alongside the original rather than instead of it.
 	mux.Handle("/v2/", s.handleWeb())
 	mux.Handle("/v2", http.RedirectHandler("/v2/", http.StatusFound))
@@ -777,7 +778,13 @@ func (s *Server) handleSeen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := map[string]any{"film": film, "observations": []Observation{}}
+	out := map[string]any{
+		"film":         film,
+		"observations": []Observation{},
+		// What the film is, so the panel that shows the descriptions is also
+		// where the reason they read as they do can be changed.
+		"context": s.jobs.ReadContext(film),
+	}
 	// What produced it, when there is a record of it. Which model answered is
 	// the first thing anybody asks of a description they are judging.
 	if versions := s.jobs.Versions(film); len(versions) > 0 {
@@ -797,6 +804,49 @@ func (s *Server) handleSeen(w http.ResponseWriter, r *http.Request) {
 	}
 	out["observations"] = obs
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleContext records what a film is, for the model to describe it by.
+//
+// A POST rather than a PUT because everything else that changes state here is a
+// POST, and consistency inside one small API is worth more than the distinction.
+func (s *Server) handleContext(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	film := r.URL.Query().Get("film")
+	if film == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no film given"})
+		return
+	}
+	// The same rule as everywhere else: only a name that appeared in the
+	// listing, so a path cannot be walked out of the scores directory.
+	known := false
+	for _, f := range s.mediaFiles() {
+		if f.Name == film {
+			known = true
+			break
+		}
+	}
+	if !known {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such film"})
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, contextLimit*2))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := s.jobs.WriteContext(film, string(body)); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"film": film, "context": s.jobs.ReadContext(film),
+	})
 }
 
 // handlePrepare queues a browser-playable copy of a film. With all=1 it

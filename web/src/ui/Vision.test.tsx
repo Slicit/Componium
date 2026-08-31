@@ -24,12 +24,20 @@ const trace = {
 };
 
 let body: unknown;
+const saved: string[] = [];
 let ok = true;
 
 beforeEach(() => {
   body = trace;
   ok = true;
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok, json: async () => body } as Response)));
+  saved.length = 0;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url).startsWith('/api/context')) {
+      saved.push(String(init?.body ?? ''));
+      return { ok: true, json: async () => ({ context: String(init?.body ?? '') }) } as Response;
+    }
+    return { ok, json: async () => body } as Response;
+  }));
   vi.stubGlobal('confirm', vi.fn(() => true));
 });
 
@@ -172,5 +180,60 @@ describe('getting out again', () => {
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.pointerDown(document.querySelector('.modal-back')!);
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe('telling the model what the film is', () => {
+  const box = () => document.querySelector('#vis-about') as HTMLTextAreaElement;
+  const saveButton = () => Array.from(document.querySelectorAll('button'))
+    .find((b) => b.textContent === 'Save') as HTMLButtonElement;
+
+  it('shows what has been said already', async () => {
+    body = { ...trace, context: 'Space opera.' };
+    show();
+    await waitFor(() => expect(box()).not.toBeNull());
+    expect(box().value).toBe('Space opera.');
+  });
+
+  it('says when nothing has been said', async () => {
+    show();
+    await waitFor(() => expect(box()).not.toBeNull());
+    expect(document.body.textContent).toContain('nothing said about this film yet');
+  });
+
+  it('cannot be saved until it is changed', async () => {
+    body = { ...trace, context: 'Space opera.' };
+    show();
+    await waitFor(() => expect(box()).not.toBeNull());
+    expect(saveButton().disabled).toBe(true);
+  });
+
+  it('says it is unsaved, and what saving it will do', async () => {
+    // Saving changes nothing on its own. It is read by the next run that
+    // looks, and a box that appeared to take effect immediately would be a
+    // lie about an expensive pass.
+    show();
+    await waitFor(() => expect(box()).not.toBeNull());
+    fireEvent.change(box(), { target: { value: 'Space opera.' } });
+    expect(document.body.textContent).toContain('next time the model looks');
+    expect(saveButton().disabled).toBe(false);
+  });
+
+  it('saves what was typed', async () => {
+    show();
+    await waitFor(() => expect(box()).not.toBeNull());
+    fireEvent.change(box(), { target: { value: 'A heist film. Guns, trains, a loom.' } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(saved).toContain('A heist film. Guns, trains, a loom.'));
+    await waitFor(() => expect(document.body.textContent).toContain('saved'));
+  });
+
+  it('can be cleared', async () => {
+    body = { ...trace, context: 'Space opera.' };
+    show();
+    await waitFor(() => expect(box().value).toBe('Space opera.'));
+    fireEvent.change(box(), { target: { value: '' } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(saved).toContain(''));
   });
 });

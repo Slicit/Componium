@@ -276,6 +276,13 @@ func (j *Jobs) runChunk(ctx context.Context, film, source string, c Chunk,
 
 	cmd := exec.CommandContext(ctx, j.python, args...)
 	cmd.Dir = filepath.Dir(j.composer)
+	// What this film is, for the model to describe it in its own terms. The
+	// composer neither reads nor forwards this: the wrapper on the other end
+	// of --vlm-command is a child of this process and inherits it, which is
+	// how everything else the seam is configured with already arrives.
+	if about := j.ReadContext(film); about != "" {
+		cmd.Env = append(os.Environ(), "COMPONIUM_VLM_CONTEXT="+about)
+	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {

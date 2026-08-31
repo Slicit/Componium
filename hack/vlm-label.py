@@ -40,6 +40,13 @@ HOST = os.environ.get("COMPONIUM_VLM_HOST", "http://gaming.home:14242").rstrip("
 API = os.environ.get("COMPONIUM_VLM_API", "ollama").strip().lower()
 MODEL = os.environ.get("COMPONIUM_VLM_MODEL", "qwen3-vl:8b")
 DEBUG = bool(os.environ.get("COMPONIUM_VLM_DEBUG"))
+
+# What this film is, in the operator's own words.
+#
+# Free text: a genre, a line of synopsis, the names of two characters. It is
+# handed to the model as background for the sentence it writes and for nothing
+# else. Empty is the normal case and changes nothing.
+CONTEXT = os.environ.get("COMPONIUM_VLM_CONTEXT", "").strip()
 TIMEOUT = float(os.environ.get("COMPONIUM_VLM_TIMEOUT", "120"))
 
 # What the composer can do something with. Anything else is noise.
@@ -98,6 +105,40 @@ SCENE is about how much is happening to the audience, not how pretty it is:
 
 Most frames of most films are calm. Answer active only when something is
 actually happening."""
+
+
+# What the film is, added to the prompt when somebody has said.
+#
+# Only the sentence may use it, and the prompt says so twice: once as a rule and
+# once as the reason. A model told it is watching a war film will find
+# explosions in a frame that has none if it is allowed to reason that way, which
+# is the same fault as emphasising a label and getting more of that label.
+#
+# What it is for is the other half: "a man in a military uniform in a dimly lit
+# room" is what a model says when it does not know it is looking at a hangar
+# deck, and a person reading three thousand of those cannot tell the film apart
+# from any other film.
+CONTEXT_PROMPT = """
+
+About this film, from the person who set it up:
+
+  %s
+
+That is background for the SEEN line only. Use it to name what you are looking
+at more precisely — a place, a kind of vehicle, a uniform — where the frame
+actually shows it.
+
+It is not evidence. EFFECTS, WATER and SCENE are about this frame and nothing
+else. A film being a war film is not a reason to report an explosion, and a
+film set at sea is not a reason to report water. If the frame does not show it,
+it is not there."""
+
+
+def prompt() -> str:
+    """The prompt, with the film's own context when there is any."""
+    if not CONTEXT:
+        return PROMPT
+    return PROMPT + CONTEXT_PROMPT % CONTEXT
 
 # The sentence comes last, after the labels are settled.
 #
@@ -172,7 +213,7 @@ def ask(image_path: str) -> str:
         "stream": False,
         "think": False,
         "messages": [
-            {"role": "user", "content": PROMPT, "images": [encode(image_path)]},
+            {"role": "user", "content": prompt(), "images": [encode(image_path)]},
             {"role": "assistant", "content": "EFFECTS:"},
         ],
         # Zero temperature because this is a classification, and a label that
@@ -210,7 +251,7 @@ def ask_openai(image_path: str) -> str:
         "messages": [{
             "role": "user",
             "content": [
-                {"type": "text", "text": PROMPT},
+                {"type": "text", "text": prompt()},
                 {"type": "image_url",
                  "image_url": {"url": "data:image/jpeg;base64," + encode(image_path)}},
             ],
