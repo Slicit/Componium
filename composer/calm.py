@@ -36,6 +36,46 @@ import compose
 # which is worse than either answer.
 MIN_CALM_SECONDS = 8.0
 
+
+# What a busy stretch is allowed to have more of.
+#
+# Shake and wind, because those are what "this scene is bigger" feels like from
+# a seat. Not light: a flash is already at the level it was measured to be and
+# blowing one out is unpleasant rather than exciting. Not fog, mist or scent —
+# those are dosed rather than dimmed, and a fogger asked for forty per cent more
+# does not produce a slightly bigger scene, it produces a room somebody has to
+# leave.
+BOOSTED = ("shake", "wind")
+
+# How much more, at the height of it.
+#
+# Modest, and clamped to one afterwards. Everything here is normalised to a rig
+# that has declared what it can survive, so the arithmetic is asking for more of
+# what was already allowed rather than for something new — but a proposal that
+# asks for more than one is a proposal that gets clipped somewhere less careful.
+BOOST = 1.35
+
+# How much of a film may be lifted.
+#
+# The same shape as the calm budget and for the same reason: a threshold on a
+# signal nobody has calibrated moves with the film, and a share does not. A
+# sixth is enough for the two or three sequences a feature is built around.
+BOOST_SHARE = 0.15
+
+# A dip shorter than this does not end a sequence.
+#
+# A fight drops below the cut for a beat when the camera cuts to a reaction,
+# which fragments the top of the ranking into pieces that are each too short to
+# keep. Joining across the dip finds the sequence; raising the share until the
+# fragments are long enough finds the whole film.
+BUSY_GAP = 8.0
+
+# A stretch shorter than this is not a sequence.
+#
+# Longer than the calm minimum, because lifting for eight seconds and dropping
+# again is a lurch, where calming for eight seconds is merely a rest.
+MIN_BUSY_SECONDS = 20.0
+
 # How long the gate takes to open and close, in seconds.
 #
 # A curve snapped to zero at a boundary is its own event — the absence of a
@@ -291,6 +331,121 @@ def quiet(points, calm, ramp: float = RAMP_SECONDS):
     return out
 
 
+def loud_at(scores, cut: float, min_seconds: float = MIN_BUSY_SECONDS,
+            gap: float = BUSY_GAP):
+    """The stretches at or above a level, joined across dips and long enough.
+
+    A dip is not an ending: a fight drops below any cut for a beat when the
+    camera cuts to a reaction, and judging the pieces separately throws away
+    the sequence they belong to.
+    """
+    raw = []
+    start = last = None
+    for at, value in scores:
+        if value >= cut:
+            if start is None:
+                start = at
+        else:
+            if start is not None and last is not None:
+                raw.append((start, last))
+            start = None
+        last = at
+    if start is not None and last is not None:
+        raw.append((start, last))
+
+    merged = []
+    for lo, hi in raw:
+        if merged and lo - merged[-1][1] <= gap:
+            merged[-1] = (merged[-1][0], hi)
+        else:
+            merged.append((lo, hi))
+    return [(lo, hi) for lo, hi in merged if hi - lo >= min_seconds]
+
+
+def busy(scores, share: float = BOOST_SHARE,
+         min_seconds: float = MIN_BUSY_SECONDS, gap: float = BUSY_GAP):
+    """The stretches worth giving more to, and long enough to be worth it.
+
+    The mirror of threshold_for_time(): the same search over time, from the
+    other end. A share of the film rather than a threshold, because a threshold
+    on a signal nobody has calibrated moves with the film and a share does not
+    — which is the property that made the calm pass survive a signal that
+    turned out to be measuring the wrong thing.
+    """
+    rows = [r for r in scores if r]
+    if not rows or share <= 0:
+        return []
+    span = rows[-1][0] - rows[0][0]
+    if span <= 0:
+        return []
+    want = span * share
+
+    # Down through the levels the readings actually take, stopping at the first
+    # that buys the wanted time. The share is of the film, not of the readings:
+    # readings above a cut are scattered and only the runs long enough to be a
+    # sequence survive, so a sixth of the readings bought nothing at all.
+    out = []
+    for level in sorted({v for _t, v in rows}, reverse=True):
+        if level <= 0:
+            break
+        found = loud_at(rows, level, min_seconds, gap)
+        out = found
+        if sum(hi - lo for lo, hi in found) >= want:
+            break
+    return out
+
+
+
+
+def boost_at(at: float, loud, gain: float = BOOST, ramp: float = RAMP_SECONDS) -> float:
+    """How much to multiply by at a moment: 1 outside, `gain` inside.
+
+    Ramped at the edges like the gate, because a curve stepped up at a boundary
+    is its own event — and a step in a platform is one a body notices more than
+    a step in a light.
+    """
+    lift = 1.0
+    for lo, hi in loud:
+        if at <= lo - ramp or at >= hi + ramp:
+            continue
+        if lo <= at <= hi:
+            return gain
+        near = (lo - at) / ramp if at < lo else (at - hi) / ramp
+        lift = max(lift, 1.0 + (gain - 1.0) * (1.0 - clamp01(near)))
+    return lift
+
+
+def lift(points, loud, gain: float = BOOST, ramp: float = RAMP_SECONDS):
+    """Give a curve more of itself inside the loud stretches.
+
+    Points at the ramp edges for the same reason quiet() adds them: without
+    one, a stretch with no points near its boundary ramps over minutes instead
+    of over the ramp.
+
+    Clamped to one. A curve is normalised to what a rig said it can do, and
+    asking for more than that is asking somebody else's clamp to decide.
+    """
+    if not points or not loud:
+        return list(points)
+
+    edges = set()
+    for lo, hi in loud:
+        for at in (lo - ramp, lo, hi, hi + ramp):
+            if points[0][0] <= at <= points[-1][0]:
+                edges.add(round(at, 3))
+
+    have = {round(t, 3) for t, _ in points}
+    out = []
+    for at in sorted(have | edges):
+        if at in have:
+            value = next(v for t, v in points if round(t, 3) == at)
+        else:
+            value = _sample(points, at)
+        g = boost_at(at, loud, gain, ramp)
+        out.append((at, {k: round(min(1.0, v * g), 4) for k, v in value.items()}))
+    return out
+
+
 def _sample(points, at: float) -> dict:
     if at <= points[0][0]:
         return dict(points[0][1])
@@ -317,7 +472,6 @@ def inside(at: float, calm) -> bool:
 # because a sustained tilt costs the audience nothing and is often the reason
 # the scene reads as calm rather than dead.
 QUIETED = ("shake",)
-
 # A cue loud enough to be worth interrupting a quiet stretch for. A thunderclap
 # in a silent scene survives; an ambient rumble does not, because the rumble is
 # what turns a quiet scene into an averagely busy one.
@@ -333,12 +487,14 @@ def loudness(cue: dict) -> float:
     return max(values) if values else 0.0
 
 
-def apply_to(score: dict, calm, ramp: float = RAMP_SECONDS) -> dict:
-    """Quiet a score inside the calm stretches, and record where they were.
+def apply_to(score: dict, calm, ramp: float = RAMP_SECONDS, loud=()) -> dict:
+    """Quiet a score inside the calm stretches, lift it inside the loud ones.
 
-    Returns a new score. The regions are written into it as well as acted on,
-    because a reviewer looking at a quiet stretch wants to know whether the rig
-    is quiet because the film is or because nothing was found.
+    Returns a new score. Both sets of regions are written into it as well as
+    acted on, because a reviewer looking at a quiet stretch wants to know
+    whether the rig is quiet because the film is or because nothing was found —
+    and the same question is worth asking of a stretch that is louder than the
+    one before it.
     """
     import remap
 
@@ -348,12 +504,16 @@ def apply_to(score: dict, calm, ramp: float = RAMP_SECONDS) -> dict:
         fresh = dict(track)
         kind = kind_of(track.get("instrument"))
 
-        if track.get("type") == "curve" and kind in QUIETED:
+        if track.get("type") == "curve" and (kind in QUIETED or kind in BOOSTED):
             points = [(remap.seconds_of(p["t"]), dict(p.get("value") or {}))
                       for p in track.get("points") or []]
+            if kind in QUIETED:
+                points = quiet(points, calm, ramp)
+            if loud and kind in BOOSTED:
+                points = lift(points, loud, ramp=ramp)
             fresh["points"] = [
                 {"t": compose.timecode(at), "value": value}
-                for at, value in quiet(points, calm, ramp)
+                for at, value in points
             ]
         elif track.get("type") == "cue" and kind in QUIETED:
             kept = []
@@ -369,6 +529,9 @@ def apply_to(score: dict, calm, ramp: float = RAMP_SECONDS) -> dict:
                     if t.get("type") != "cue" or t.get("cues")]
     out["calm"] = [{"from": compose.timecode(lo), "to": compose.timecode(hi)}
                    for lo, hi in calm]
+    if loud:
+        out["loud"] = [{"from": compose.timecode(lo), "to": compose.timecode(hi)}
+                       for lo, hi in loud]
     return out
 
 
@@ -389,6 +552,10 @@ def main(argv=None):
                         "Left alone, it is chosen from how active the film is.")
     p.add_argument("--smooth", type=float, default=SMOOTH_SECONDS,
                    help="how long a window the activity is averaged over")
+    p.add_argument("--boost-share", type=float, default=BOOST_SHARE,
+                   help="how much of a film may be lifted, 0 to 1; 0 turns "
+                        "the lift off and leaves the pass only taking away "
+                        "(default %(default)s)")
     p.add_argument("--min-seconds", type=float, default=MIN_CALM_SECONDS,
                    help="the shortest stretch worth calming")
     p.add_argument("--ramp", type=float, default=RAMP_SECONDS,
@@ -421,6 +588,10 @@ def main(argv=None):
     floor = args.floor if args.floor > 0 else floor_for(observations)
     threshold = threshold_for_time(scores, floor, args.min_seconds)
     calm = regions(scores, threshold, args.min_seconds)
+    # The same ranking read from the other end. A film has a shape, and a pass
+    # that only ever holds back leaves every sequence at the level of the scene
+    # before it.
+    loud = busy(scores, args.boost_share) if args.boost_share > 0 else []
 
     span = observations[-1]["t"] - observations[0]["t"]
     quieted = sum(hi - lo for lo, hi in calm)
@@ -431,8 +602,14 @@ def main(argv=None):
         "%d stretches, %.0fs of %.0fs (%.0f%%), longest %.0fs\n"
         % (len(calm), quieted, span, 100 * quieted / span if span else 0,
            max((hi - lo for lo, hi in calm), default=0)))
+    if loud:
+        lifted = sum(hi - lo for lo, hi in loud)
+        sys.stderr.write(
+            "%d lifted, %.0fs of %.0fs (%.0f%%), longest %.0fs\n"
+            % (len(loud), lifted, span, 100 * lifted / span if span else 0,
+               max((hi - lo for lo, hi in loud), default=0)))
 
-    out = apply_to(score, calm, args.ramp)
+    out = apply_to(score, calm, args.ramp, loud)
 
     text = remap.dump(out)
     if args.out:

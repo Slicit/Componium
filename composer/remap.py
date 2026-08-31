@@ -214,6 +214,14 @@ def dump(score: dict) -> str:
                   'from = %s' % _quote(region.get("from", "00:00:00.000")),
                   'to = %s' % _quote(region.get("to", "00:00:00.000"))]
 
+    # Where the film was given more, recorded for the same reason as where it
+    # was given less: so a reviewer can tell a film that is bigger here from a
+    # signal that decided it was.
+    for region in score.get("loud") or []:
+        lines += ["", "[[loud]]",
+                  'from = %s' % _quote(region.get("from", "00:00:00.000")),
+                  'to = %s' % _quote(region.get("to", "00:00:00.000"))]
+
     for track in score.get("track") or []:
         lines += ["", "[[track]]", 'instrument = %s' % _quote(track.get("instrument", ""))]
         kind = track.get("type", "cue")

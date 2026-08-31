@@ -26,6 +26,14 @@ from __future__ import annotations
 # whole reason the scene was silent; suppressing it would be exactly backwards.
 LOUD_ACTIONS = frozenset({"hit", "flash", "explosion", "thunder"})
 
+# Kinds a calm stretch has no opinion about.
+#
+# Calm exists so a quiet scene is not shaken or flashed through. A smell is not
+# intrusive in that way, and the scenes worth a scent are very often the calm
+# ones — a forest, a church, a kitchen. Dropping those was the pass working as
+# designed and the design being wrong about one kind.
+UNGATED_KINDS = frozenset({"scent"})
+
 
 def normalise(values):
     """Scale to 0..1 by the maximum, which keeps a quiet film usable.
@@ -136,15 +144,25 @@ def intensity_of(cue) -> float:
     return max(abs(v) for v in params.values())
 
 
+def kind_of(cue) -> str:
+    return str(cue.get("instrument") or "").split(".")[0]
+
+
 def protect_calm(cues, regions, keep_above: float = 0.75):
     """Drop cues inside calm regions, except the ones worth interrupting for.
 
     Returns (kept, dropped). A thunderclap in a silent scene survives; a gentle
     ambient rumble does not, because the rumble is what turns a quiet scene into
     an averagely busy one.
+
+    A scent survives regardless. See UNGATED_KINDS: calm is about not shaking
+    and not flashing, and the scenes most worth a smell are the quiet ones.
     """
     kept, dropped = [], []
     for cue in cues:
+        if kind_of(cue) in UNGATED_KINDS:
+            kept.append(cue)
+            continue
         if not in_region(cue["t"], regions):
             kept.append(cue)
             continue
