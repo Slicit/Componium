@@ -104,17 +104,20 @@ export function App() {
   const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
   const [overlays, setOverlays] = useState({ calm: true, latency: true });
   const [forced, setForced] = useState<Map<string, number>>(new Map());
-  const [brightness, setBrightness] = useState(50);
+  /* Low, because the room is for judging what the score is doing and a room
+   * lit like a showroom hides it. The slider reaches nothing at all from here,
+   * which is the state most of this is worth looking at in. */
+  const [brightness, setBrightness] = useState(15);
   /* How strong the soft wash is. Remembered, because it is a judgement about a
    * particular screen in a particular room and re-making it every session is
    * the sort of small tax that makes a tool tiring. */
   const [wash, setWash] = useState(() => {
     try {
       const raw = localStorage.getItem('componium.roomWash');
-      if (raw === null || raw === '') return 30;
+      if (raw === null || raw === '') return 75;
       const v = Number(raw);
-      return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 30;
-    } catch { return 30; }
+      return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 75;
+    } catch { return 75; }
   });
   useEffect(() => {
     try { localStorage.setItem('componium.roomWash', String(wash)); }

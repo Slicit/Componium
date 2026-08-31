@@ -32,7 +32,7 @@ interface RoomHandle {
 }
 
 /* Matches the room own default, so the prop and its absence agree. */
-const WASH_DEFAULT = 30;
+const WASH_DEFAULT = 75;
 
 export function Room(props: {
   score: Score;

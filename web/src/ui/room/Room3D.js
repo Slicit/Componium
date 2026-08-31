@@ -48,6 +48,28 @@ const ON = 0.02;
  * the frame it happened. */
 const RESIZE_EVERY = 10;
 
+/* How far a platform actually moves the couch, at full pose.
+ *
+ * The pose the composer sends is normalised to plus or minus one, meaning "as
+ * far as this rig goes", and this is what that is in metres and radians. It
+ * used to be half a metre and 0.6 radians — 34 degrees, and a heave taller
+ * than the couch's own seat — which is two to five times a real platform.
+ *
+ * That is worth being strict about. The room is where "is this too brutal"
+ * gets judged, so a preview that overstates motion pushes an operator to tune
+ * down until the room looks right and arrive at a rig that under-delivers.
+ * Being visible is not worth being wrong about, and 75mm is what a fairly
+ * serious home platform has.
+ *
+ * The tilt is derived rather than chosen. Three actuators under a triangle
+ * tilt by driving one leg up and another down, so the angle follows from the
+ * travel and the spacing: 150mm of difference across about 1.2m of spacing is
+ * atan(0.15 / 1.2), a little under seven degrees. A platform with more travel
+ * or a wider base tilts further, and the rig is the thing that knows.
+ */
+const SEAT_TRAVEL = 0.075;
+const SEAT_TILT = 0.1244;
+
 /* Parsed colours, kept.
  *
  * colourOf hands back a CSS string and THREE.Color parses one with a regular
@@ -101,7 +123,7 @@ const AMBIENT_STRIP_LENGTH = 4.6;
  * having somewhere to go is the whole reason it is a slider.
  */
 const AMBIENT_WASH_MAX = 600;
-const AMBIENT_WASH_DEFAULT = 0.3;
+const AMBIENT_WASH_DEFAULT = 0.75;
 
 /* A recessed lamp lit, and the same lamp dark. Its lens is drawn unlit, so
  * nothing in the scene can dim it and the fixture has to do it itself. */
@@ -1296,10 +1318,16 @@ export class Room3D {
     }
 
     const pose = readSeat(this.state, this.forced, now);
-    /* Scaled down: real platform travel is centimetres, and centimetres at
-     * room scale is a couch that appears not to move at all. */
-    this.seat.position.set(pose.sway * 0.5, pose.heave * 0.5, this.seatRest + pose.surge * 0.5);
-    this.seat.rotation.set(pose.pitch * 0.6, pose.yaw * 0.6, pose.roll * 0.6);
+    /* Life size. See SEAT_TRAVEL: the pose is normalised to what a rig can do,
+     * and this is what that is in metres. Small on purpose — 75mm across a
+     * room is a few pixels — because the alternative is a preview that lies
+     * about the one question it exists to answer. */
+    this.seat.position.set(pose.sway * SEAT_TRAVEL,
+                           pose.heave * SEAT_TRAVEL,
+                           this.seatRest + pose.surge * SEAT_TRAVEL);
+    this.seat.rotation.set(pose.pitch * SEAT_TILT,
+                           pose.yaw * SEAT_TILT,
+                           pose.roll * SEAT_TILT);
     /* A held tilt is not movement. The couch resting off centre looks the same
      * every frame, so what matters is whether the pose changed, not whether it
      * is at rest. */

@@ -185,7 +185,7 @@ describe('how strong the wash is', () => {
             brightness={50} />,
     );
     await waitFor(() => expect(washed.length).toBeGreaterThan(0));
-    expect(washed[washed.length - 1]).toBeCloseTo(0.3, 6);
+    expect(washed[washed.length - 1]).toBeCloseTo(0.75, 6);
   });
 
   it('follows the slider', async () => {
