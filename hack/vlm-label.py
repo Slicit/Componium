@@ -134,11 +134,30 @@ film set at sea is not a reason to report water. If the frame does not show it,
 it is not there."""
 
 
-def prompt() -> str:
+# What the second frame is for, added only when there is one.
+#
+# Deliberately says which frame the answer is about and what the other one
+# settles. It does not say "if nothing changed, nothing is happening" — that
+# was tried, and it suppressed so hard that active fell to eight frames of 444
+# on a film with a dragon fight. The second frame does the work; a sentence
+# telling the model what to conclude from it does not.
+PAIR_PROMPT = """
+
+You are given two frames from the same shot, one second apart: the first is
+earlier, the second is later. Answer about the LATER frame. The earlier one is
+there so you can tell what is moving from what is merely present — dust is
+thrown and settles, snow falls or lies, water that splashes is water that
+moved."""
+
+
+def prompt(pair: bool = False) -> str:
     """The prompt, with the film's own context when there is any."""
-    if not CONTEXT:
-        return PROMPT
-    return PROMPT + CONTEXT_PROMPT % CONTEXT
+    text = PROMPT
+    if pair:
+        text += PAIR_PROMPT
+    if CONTEXT:
+        text += CONTEXT_PROMPT % CONTEXT
+    return text
 
 # The sentence comes last, after the labels are settled.
 #
@@ -188,7 +207,7 @@ def encode(path: str) -> str:
         return base64.b64encode(f.read()).decode("ascii")
 
 
-def ask(image_path: str) -> str:
+def ask(images) -> str:
     """Ask the model about one frame, with the answer already begun.
 
     The reply is prefilled with "EFFECTS:" as an assistant turn the model
@@ -206,14 +225,15 @@ def ask(image_path: str) -> str:
     failure in five, against 0.5 to 1.4 seconds and none.
     """
     if API in ("openai", "vllm"):
-        return ask_openai(image_path)
+        return ask_openai(images)
 
     body = json.dumps({
         "model": MODEL,
         "stream": False,
         "think": False,
         "messages": [
-            {"role": "user", "content": prompt(), "images": [encode(image_path)]},
+            {"role": "user", "content": prompt(len(images) > 1),
+             "images": [encode(p) for p in images]},
             {"role": "assistant", "content": "EFFECTS:"},
         ],
         # Zero temperature because this is a classification, and a label that
@@ -231,7 +251,7 @@ def ask(image_path: str) -> str:
     return "EFFECTS:" + reply
 
 
-def ask_openai(image_path: str) -> str:
+def ask_openai(images) -> str:
     """The same question, in the shape vLLM and friends expect.
 
     Two differences worth naming. The image travels as a data URI inside the
@@ -251,9 +271,10 @@ def ask_openai(image_path: str) -> str:
         "messages": [{
             "role": "user",
             "content": [
-                {"type": "text", "text": prompt()},
-                {"type": "image_url",
-                 "image_url": {"url": "data:image/jpeg;base64," + encode(image_path)}},
+                {"type": "text", "text": prompt(len(images) > 1)},
+                # One part per frame, earlier first.
+                *[{"type": "image_url", "image_url": {
+                    "url": "data:image/jpeg;base64," + encode(p)}} for p in images],
             ],
         }],
     }).encode()
@@ -319,10 +340,14 @@ def described(reply: str) -> str:
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
-        sys.stderr.write("usage: vlm-label.py IMAGE\n")
+        sys.stderr.write("usage: vlm-label.py FRAME [EARLIER-FRAME]\n")
         return 2
+    # The composer hands the frame in question first. The model is shown the
+    # earlier one first, which is the order the trial measured, so they are
+    # reversed here and nowhere else.
+    images = list(reversed(argv[1:3]))
     try:
-        reply = ask(argv[1])
+        reply = ask(images)
     except (urllib.error.URLError, OSError, TimeoutError) as e:
         # Silence on stdout, complaint on stderr. The composer treats a
         # failed frame as an unlabelled one and carries on, which is what it

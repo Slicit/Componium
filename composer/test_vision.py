@@ -179,14 +179,21 @@ class TestExtractUsesFilmTime(unittest.TestCase):
         vision.keyframe = self.original
 
     def test_a_seeked_frame_is_asked_for_in_film_time(self):
+        # Two moments now: the frame, and the one a second before it that says
+        # what was moving. Both in the film's clock.
         with tempfile.TemporaryDirectory() as tmp:
             vision.extract("film.mkv", [4.0], tmp, span=self.Span(3600.0))
+        self.assertEqual(self.seeked, [3603.0, 3604.0])
+
+    def test_one_frame_when_no_gap_is_asked_for(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vision.extract("film.mkv", [4.0], tmp, span=self.Span(3600.0), gap=0)
         self.assertEqual(self.seeked, [3604.0])
 
     def test_without_a_span_the_time_is_already_film_time(self):
         with tempfile.TemporaryDirectory() as tmp:
             vision.extract("film.mkv", [4.0], tmp, span=None)
-        self.assertEqual(self.seeked, [4.0])
+        self.assertEqual(self.seeked, [3.0, 4.0])
 
     def test_the_grid_pass_starts_at_the_chunk_not_the_film(self):
         # The grid does not go through keyframe(); it is one ffmpeg over the
@@ -206,6 +213,26 @@ class TestExtractUsesFilmTime(unittest.TestCase):
                                span=self.Span(3600.0))
         finally:
             vision.subprocess.run = real_run
+        # An hour in, and a second before the first grid frame so that frame
+        # has a predecessor to be compared against.
+        self.assertEqual(seen.get("ss"), 3600.0)
+
+    def test_the_grid_pass_still_lands_on_the_chunk_without_a_pair(self):
+        seen = {}
+        real_run = vision.subprocess.run
+
+        def watching(args, **kwargs):
+            if "-ss" in args:
+                seen["ss"] = float(args[args.index("-ss") + 1])
+            return real_run(["true"], **kwargs)
+
+        vision.subprocess.run = watching
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                vision.extract("film.mkv", [1.0, 3.0, 5.0, 7.0], tmp,
+                               span=self.Span(3600.0), gap=0)
+        finally:
+            vision.subprocess.run = real_run
         self.assertEqual(seen.get("ss"), 3601.0)
 
     def test_observations_stay_in_chunk_time(self):
@@ -216,7 +243,7 @@ class TestExtractUsesFilmTime(unittest.TestCase):
             got = vision.observe("film.mkv", [4.0], "echo dust",
                                  span=self.Span(3600.0), workers=1)
         self.assertEqual([o["t"] for o in got], [4.0])
-        self.assertEqual(self.seeked, [3604.0])
+        self.assertEqual(self.seeked, [3603.0, 3604.0])
 
 
 class TestObserveInParallel(unittest.TestCase):
@@ -254,6 +281,105 @@ class TestObserveInParallel(unittest.TestCase):
         finally:
             vision.keyframe = original
         self.assertEqual(got, [])
+
+
+class TestPairs(unittest.TestCase):
+    """A frame, and the one before it.
+
+    Every question the model gets wrong is temporal — dust is thrown and snow
+    is settled, a splash needs water that moved, activity is motion — and none
+    of those is answerable from a still. Measured on sintel: SCENE settles from
+    114 changes to 40 while EFFECTS does not move.
+    """
+
+    def setUp(self):
+        self.given = []
+        self.original = vision.subprocess.run
+
+        def watching(args, **kwargs):
+            # Everything after the command is an image path.
+            self.given.append([a for a in args if a.endswith(".jpg")])
+            return self.original(["true"], **kwargs)
+
+        vision.subprocess.run = watching
+
+    def tearDown(self):
+        vision.subprocess.run = self.original
+
+    def test_the_frame_in_question_is_handed_over_first(self):
+        # The whole of the seam's compatibility. A wrapper written when this
+        # passed one image reads argument one and gets the frame being asked
+        # about, not the context frame, and ignores the rest.
+        vision.observe_frame("look", ["/tmp/early.jpg", "/tmp/late.jpg"])
+        self.assertEqual(self.given[-1], ["/tmp/late.jpg", "/tmp/early.jpg"])
+
+    def test_a_single_image_still_works(self):
+        vision.observe_frame("look", "/tmp/one.jpg")
+        self.assertEqual(self.given[-1], ["/tmp/one.jpg"])
+
+    def test_a_list_of_one_is_the_same_thing(self):
+        vision.observe_frame("look", ["/tmp/one.jpg"])
+        self.assertEqual(self.given[-1], ["/tmp/one.jpg"])
+
+
+class TestPairsCostOneDecode(unittest.TestCase):
+    """The grid is sampled at the gap, not extracted twice.
+
+    ffmpeg decodes every frame whatever rate is asked of it — the fps filter
+    only chooses which to keep — so a second pass shifted by a second would pay
+    for the whole film again to gain frames it already had in its hands.
+    """
+
+    def setUp(self):
+        self.calls = []
+        self.original = vision.subprocess.run
+
+        def watching(args, **kwargs):
+            self.calls.append(list(args))
+            return self.original(["true"], **kwargs)
+
+        vision.subprocess.run = watching
+
+    def tearDown(self):
+        vision.subprocess.run = self.original
+
+    def passes(self):
+        return [c for c in self.calls if any("fps=" in str(a) for a in c)]
+
+    def test_one_pass_over_the_film(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vision.extract("film.mkv", [1.0, 3.0, 5.0, 7.0], tmp, gap=1.0)
+        self.assertEqual(len(self.passes()), 1)
+
+    def test_sampled_at_the_gap_rather_than_the_grid(self):
+        # A two second grid with a one second gap has to be sampled at 1Hz, or
+        # the frame before each one was never decoded.
+        with tempfile.TemporaryDirectory() as tmp:
+            vision.extract("film.mkv", [1.0, 3.0, 5.0, 7.0], tmp, gap=1.0)
+        graph = " ".join(str(a) for a in self.passes()[0])
+        self.assertIn("fps=1.000000000", graph)
+
+    def test_sampled_at_the_grid_when_no_gap_is_wanted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vision.extract("film.mkv", [1.0, 3.0, 5.0, 7.0], tmp, gap=0)
+        graph = " ".join(str(a) for a in self.passes()[0])
+        self.assertIn("fps=0.500000000", graph)
+
+    def test_it_starts_a_gap_early(self):
+        # The first grid frame needs a predecessor too, so the pass begins
+        # before the grid does.
+        with tempfile.TemporaryDirectory() as tmp:
+            vision.extract("film.mkv", [4.0, 6.0, 8.0], tmp, gap=1.0)
+        args = self.passes()[0]
+        self.assertEqual(float(args[args.index("-ss") + 1]), 3.0)
+
+    def test_it_does_not_start_before_the_film_does(self):
+        # A grid beginning at one second has no room for a predecessor, and
+        # asking ffmpeg for a negative seek is not a way to find out.
+        with tempfile.TemporaryDirectory() as tmp:
+            vision.extract("film.mkv", [1.0, 3.0, 5.0], tmp, gap=1.0)
+        args = self.passes()[0]
+        self.assertGreaterEqual(float(args[args.index("-ss") + 1]), 0.0)
 
 
 class TestParseLabels(unittest.TestCase):

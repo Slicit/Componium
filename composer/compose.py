@@ -567,7 +567,8 @@ def build(args) -> str:
         # in asks for the frame one second from the film's beginning, gets it,
         # and files it under the hour mark.
         observations = vision.observe(args.input, times, args.vlm_command,
-                                      workers=args.vlm_workers, span=span)
+                                      workers=args.vlm_workers, span=span,
+                                      gap=args.vlm_gap)
         labels = vision.as_pairs(observations)
         # A splash is only a splash where the model also saw water. It cannot
         # tell spray from kicked sand in a still, and it can tell a sea from a
@@ -743,6 +744,9 @@ def main(argv=None):
                    help="how often to look, in seconds (default %(default)s)")
     p.add_argument("--vlm-workers", type=int, default=vision.VLM_WORKERS,
                    help="frames labelled at once (default %(default)s)")
+    p.add_argument("--vlm-gap", type=float, default=vision.PAIR_SECONDS,
+                   help="seconds back for the second frame shown with each "
+                        "one; 0 sends a single frame (default %(default)s)")
     p.add_argument("--scene-threshold", type=float, default=0.35,
                    help="scene change sensitivity, higher is fewer cuts (default 0.35)")
     args = p.parse_args(argv)

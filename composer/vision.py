@@ -51,6 +51,23 @@ GRID_SECONDS = 2.0
 # a third of the demand, and the number is a flag for anyone who knows better.
 VLM_WORKERS = 8
 
+# How far back the second frame is taken from, in seconds. Zero sends one.
+#
+# Every question the model gets wrong is a temporal one. Dust is thrown and
+# snow is settled; a splash needs water that is moving; activity is motion. A
+# still cannot answer any of them, which is why three different attempts to fix
+# it by rewording the prompt each made it worse — emphasis produced more
+# splashes, room to reason produced dust on snow, and naming the near-misses as
+# not-effects produced rain in a bamboo forest.
+#
+# A second frame is evidence rather than instruction, and it is the one change
+# that worked: on sintel it settles SCENE from 114 changes to 40 and leaves
+# EFFECTS where it was, for 1.4x the time.
+#
+# One second because that is what was measured. Shorter risks nothing having
+# moved; longer risks the shot having cut.
+PAIR_SECONDS = 1.0
+
 
 def cadence(duration: float, every: float = GRID_SECONDS, limit: int = 0):
     """The spacing actually used, once a budget has had its say.
@@ -255,16 +272,24 @@ def parse_seen(text: str) -> str:
     return ""
 
 
-def observe_frame(command: str, image_path: str, timeout: float = 60.0):
-    """Run the command against one image, keeping the labels and the sentence.
+def observe_frame(command: str, images, timeout: float = 60.0):
+    """Run the command against one frame, or a frame and the one before it.
+
+    Takes a path or a list of them. The frame being asked about goes first, so
+    a wrapper written when this passed a single image reads the right one and
+    ignores the context it was also handed.
 
     Returns (labels, seen). A failure is an empty pair rather than an
     exception: a model that chokes on one JPEG must not cost the analysis
     every frame after it.
     """
+    if isinstance(images, str):
+        images = [images]
+    # Last is the frame in question; the seam is handed it first.
+    args = [images[-1]] + list(images[:-1])
     try:
         result = subprocess.run(
-            command.split() + [image_path],
+            command.split() + args,
             capture_output=True, text=True, errors="replace",
             timeout=timeout, check=False,
         )
@@ -290,20 +315,24 @@ def label_frame(command: str, image_path: str, timeout: float = 60.0) -> list[st
     return parse_labels(result.stdout)
 
 
-def extract(path: str, times, into: str, span=None):
-    """Pull every wanted frame out of the film. Returns [(t, image_path)].
+def extract(path: str, times, into: str, span=None,
+            gap: float = PAIR_SECONDS):
+    """Pull every wanted frame out of the film. Returns [(t, [images])].
+
+    Each entry carries the frame asked about last, and — when a gap is asked
+    for — the frame that many seconds before it first, which is the order the
+    model is shown them in.
 
     Times are counted from the start of what was decoded; the span turns them
     into the film's own clock. Without that, a chunk starting an hour in asks
-    the film for the frame one second from its beginning, gets it, and files
-    it under the hour mark — which is what used to happen, and meant every
-    chunk of a feature after the first described the opening of the film.
+    the film for the frame one second from its beginning, gets it, and files it
+    under the hour mark.
 
-    The evenly spaced run comes out in one pass. A seek pays for finding the
-    frame, and finding it a hundred times costs a hundred times as much as
-    decoding past it once: measured at 0.231s a frame seeking against 0.100s
-    in one pass, and the gap widens as the grid gets denser. Everything else
-    is seeked to individually, because there is only ever a handful.
+    The evenly spaced run comes out in one pass, sampled at the gap rather than
+    at the grid so that each frame's predecessor is already in hand. ffmpeg
+    decodes every frame whichever rate is asked for — the fps filter only
+    chooses which to keep — so pairing costs a few more JPEGs and not a second
+    decode. Everything off the grid is seeked to individually.
     """
     exe = shutil.which("ffmpeg")
     if not exe:
@@ -314,30 +343,52 @@ def extract(path: str, times, into: str, span=None):
 
     if run:
         step = run[1] - run[0]
+        paired = gap > 0.0 and step > gap
+        rate = gap if paired else step
+        first = (run[0] - gap) if paired else run[0]
+        if first < 0.0:
+            # No room for a predecessor at the very start of the film. The
+            # grid keeps its place and the first frame simply goes alone.
+            first = run[0]
+        count = int(round((run[-1] - first) / rate)) + 1
         pattern = os.path.join(into, "grid-%05d.jpg")
         subprocess.run(
             [exe, "-v", "error", "-y",
-             "-ss", "%.3f" % (start + run[0]), "-i", path,
-             "-vf", "fps=%.9f,scale=%d:-2" % (1.0 / step, KEYFRAME_WIDTH),
-             "-q:v", "3", "-frames:v", str(len(run)), pattern],
+             "-ss", "%.3f" % (start + first), "-i", path,
+             "-vf", "fps=%.9f,scale=%d:-2" % (1.0 / rate, KEYFRAME_WIDTH),
+             "-q:v", "3", "-frames:v", str(count), pattern],
             capture_output=True, check=False,
         )
-        for i, at in enumerate(run):
-            image = pattern % (i + 1)
-            if os.path.exists(image):
-                out.append((at, image))
+        for at in run:
+            j = int(round((at - first) / rate))
+            here = pattern % (j + 1)
+            if not os.path.exists(here):
+                continue
+            images = [here]
+            if paired and j > 0:
+                before = pattern % j
+                if os.path.exists(before):
+                    images = [before, here]
+            out.append((at, images))
 
     for i, at in enumerate(rest):
-        image = os.path.join(into, "seek-%05d.jpg" % i)
         film_time = span.to_film_time(at) if span is not None else at
-        if keyframe(path, film_time, image):
-            out.append((at, image))
+        images = []
+        if gap > 0.0 and film_time - gap >= 0.0:
+            before = os.path.join(into, "seek-%05d-a.jpg" % i)
+            if keyframe(path, film_time - gap, before):
+                images.append(before)
+        here = os.path.join(into, "seek-%05d-b.jpg" % i)
+        if keyframe(path, film_time, here):
+            images.append(here)
+            out.append((at, images))
 
     return sorted(out)
 
 
 def observe(path: str, times, command: str, timeout: float = 60.0,
-            workers: int = VLM_WORKERS, span=None):
+            workers: int = VLM_WORKERS, span=None,
+            gap: float = PAIR_SECONDS):
     """Look at a set of moments. Returns one record per frame seen.
 
     Each record is {"t", "labels", "seen"}, timed from the start of what was
@@ -356,13 +407,13 @@ def observe(path: str, times, command: str, timeout: float = 60.0,
     """
     seen = []
     with tempfile.TemporaryDirectory(prefix="componium-vlm-") as tmp:
-        frames = extract(path, times, tmp, span)
+        frames = extract(path, times, tmp, span, gap)
         if not frames:
             return []
 
         def look(item):
-            at, image = item
-            labels, said = observe_frame(command, image, timeout)
+            at, images = item
+            labels, said = observe_frame(command, images, timeout)
             return at, labels, said
 
         with futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
