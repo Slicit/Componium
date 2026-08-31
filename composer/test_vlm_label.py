@@ -94,7 +94,7 @@ class TestPrompt(unittest.TestCase):
     def test_asks_for_as_many_lines_as_it_wants(self):
         # The count is load bearing: with the prompt still saying two, the
         # water line was never emitted at all.
-        self.assertIn("exactly four lines", vlm.PROMPT)
+        self.assertIn("exactly five lines", vlm.PROMPT)
         for head in ("EFFECTS:", "WATER:", "SCENE:", "SEEN:"):
             self.assertIn(head, vlm.PROMPT)
 
@@ -119,3 +119,90 @@ class TestPrompt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEvidenceAndJudgement(unittest.TestCase):
+    """Two of the four answers are facts and two are opinions.
+
+    EFFECTS and WATER fire machinery: a false explosion is a fogger going off
+    in a quiet scene, and biasing them was measured — emphasising splash in
+    this prompt produced more splashes rather than better ones.
+
+    SCENE is not the same kind of question. "How much is happening to the
+    audience" is a judgement about the moment a frame came from, and one still
+    is a poor sample of movement. It is also half of what decides where a film
+    is quieted, and calm.py records what starving it costs: on sintel the model
+    changed its mind 113 times in fifteen minutes.
+    """
+
+    @staticmethod
+    def flat(text):
+        """The text with its wrapping taken out."""
+        return " ".join(text.split())
+
+    def test_the_evidence_lines_are_told_not_to_infer(self):
+        self.assertIn("EFFECTS and WATER are evidence", self.flat(vlm.PROMPT))
+        self.assertIn("plainly visible IN THIS FRAME", self.flat(vlm.PROMPT))
+
+    def test_a_genre_is_named_as_not_being_evidence(self):
+        # The exact failure this guards against: a model reasoning from the
+        # kind of film to the contents of a frame.
+        self.assertIn("war film is not a", self.flat(vlm.PROMPT))
+
+    def test_the_scene_line_is_allowed_to_judge(self):
+        self.assertIn("SCENE is a judgement", self.flat(vlm.PROMPT))
+        self.assertIn("One frame is a poor sample of movement", self.flat(vlm.PROMPT))
+
+    def test_the_guess_has_somewhere_of_its_own_to_go(self):
+        self.assertIn("LIKELY", vlm.PROMPT)
+        self.assertIn("It drives nothing", self.flat(vlm.PROMPT))
+
+
+class TestContextReachesJudgementOnly(unittest.TestCase):
+    @staticmethod
+    def flat(text):
+        return " ".join(text.split())
+
+    def test_it_is_offered_to_the_judgement_lines(self):
+        self.assertIn("SEEN, SCENE and LIKELY", self.flat(vlm.CONTEXT_PROMPT))
+
+    def test_it_is_refused_to_the_evidence_lines(self):
+        self.assertIn("not evidence for EFFECTS or WATER",
+                      self.flat(vlm.CONTEXT_PROMPT))
+
+    def test_a_film_with_nothing_said_is_asked_exactly_as_before(self):
+        # The whole safety of the feature. An empty context has to leave the
+        # prompt byte for byte as it was, or every film changes when one film
+        # is described.
+        self.assertEqual(vlm.prompt() if not vlm.CONTEXT else vlm.PROMPT, vlm.PROMPT)
+
+
+class TestInferred(unittest.TestCase):
+    REPLY = """EFFECTS: dust
+WATER: no
+SCENE: active
+SEEN: Two figures in armour move across rubble.
+LIKELY: a firefight in a ruined street"""
+
+    def test_reads_the_guess(self):
+        self.assertEqual(vlm.inferred(self.REPLY), "a firefight in a ruined street")
+
+    def test_the_sentence_and_the_guess_stay_apart(self):
+        # A reader has to be able to tell what was seen from what was assumed.
+        # Run together, the guess reads as the observation.
+        self.assertEqual(vlm.described(self.REPLY),
+                         "Two figures in armour move across rubble.")
+
+    def test_none_is_nothing(self):
+        self.assertEqual(vlm.inferred("LIKELY: none"), "")
+        self.assertEqual(vlm.inferred("LIKELY:"), "")
+
+    def test_a_reply_without_one_is_not_an_error(self):
+        # An older model, or one that ignored the line.
+        self.assertEqual(vlm.inferred("EFFECTS: none\nSEEN: A room."), "")
+
+    def test_the_guess_does_not_become_a_label(self):
+        # LIKELY is free text and the vocabulary is closed. A firefight must
+        # not turn into an explosion because the word appears in a guess.
+        self.assertEqual(vlm.parse("EFFECTS: none\nLIKELY: an explosion at sea"),
+                         [])

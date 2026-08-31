@@ -188,7 +188,16 @@ export function Vision(props: {
                       .filter((l) => !l.startsWith('scene-'))
                       .map((l) => <span key={l} className="vis-chip">{l}</span>)}
                   </span>
-                  <span className="vis-said">{o.seen}</span>
+                  <span className="vis-said">
+                    <span className="vis-sentence">{o.seen}</span>
+                    {o.likely && (
+                      /* Marked, and dimmer. It is a guess sitting beside an
+                       * observation, and running them together would read as
+                       * though the model had seen a battle rather than
+                       * inferred one. */
+                      <span className="vis-likely"> — likely {o.likely}</span>
+                    )}
+                  </span>
                 </div>
               ))}
               {!rows.length && <p className="dim small">nothing matches that.</p>}

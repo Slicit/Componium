@@ -89,6 +89,12 @@ type Observation struct {
 	T      float64  `json:"t"`
 	Labels []string `json:"labels,omitempty"`
 	Seen   string   `json:"seen,omitempty"`
+	// Likely is what the model thought the frame was part of — a battle, a
+	// chase, a briefing. Kept apart from Seen because they are different
+	// claims: one is what was in the frame and the other is a guess about it,
+	// and a reader who cannot tell them apart trusts the description less
+	// rather than more. It drives nothing.
+	Likely string `json:"likely,omitempty"`
 }
 
 // HasSeen reports whether a description is kept for this film.

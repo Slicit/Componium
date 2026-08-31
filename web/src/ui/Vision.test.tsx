@@ -18,7 +18,7 @@ const trace = {
   note: 'vision qwen2.5, 96 frames',
   observations: [
     { t: 1, labels: ['water', 'scene-calm'], seen: 'A serene island.' },
-    { t: 39.5, labels: ['dust', 'splash', 'scene-active'], seen: 'Crabs kicking up sand.' },
+    { t: 39.5, labels: ['dust', 'splash', 'scene-active'], seen: 'Crabs kicking up sand.' , likely: 'crabs swarming a beach' },
     { t: 60, labels: ['scene-calm'], seen: 'Red crabs on the shore.' },
   ],
 };
@@ -54,7 +54,9 @@ function show(over: Partial<Parameters<typeof Vision>[0]> = {}) {
   return { onClose, onLookAgain };
 }
 
-const said = () => Array.from(document.querySelectorAll('.vis-said')).map((n) => n.textContent);
+/* The sentence, not the whole cell: the cell also carries the model's guess,
+ * and reading them together is the very confusion the guess is marked out of. */
+const said = () => Array.from(document.querySelectorAll('.vis-sentence')).map((n) => n.textContent);
 
 describe('the reading room', () => {
   it('shows every frame the model was given', async () => {
@@ -235,5 +237,37 @@ describe('telling the model what the film is', () => {
     fireEvent.change(box(), { target: { value: '' } });
     fireEvent.click(saveButton());
     await waitFor(() => expect(saved).toContain(''));
+  });
+});
+
+describe('what the model guessed, beside what it saw', () => {
+  it('shows the guess', async () => {
+    show();
+    await waitFor(() => expect(document.querySelectorAll('.vis-sentence').length).toBe(3));
+    expect(document.body.textContent).toContain('crabs swarming a beach');
+  });
+
+  it('marks it as a guess rather than running it into the sentence', async () => {
+    // A reader has to be able to tell what was observed from what was
+    // inferred. Merged, the guess reads as the observation, and a description
+    // that cannot be trusted is worse than a plain one.
+    show();
+    await waitFor(() => expect(document.querySelector('.vis-likely')).not.toBeNull());
+    expect(document.querySelector('.vis-likely')!.textContent).toContain('likely');
+  });
+
+  it('is searchable, since that is what makes a scene findable', async () => {
+    show();
+    await waitFor(() => expect(document.querySelectorAll('.vis-sentence').length).toBe(3));
+    fireEvent.change(document.querySelector('.vis-find')!, { target: { value: 'swarming' } });
+    await waitFor(() => expect(document.querySelectorAll('.vis-sentence').length).toBe(1));
+  });
+
+  it('says nothing where the model offered nothing', async () => {
+    // Most frames suggest nothing beyond themselves, and an empty guess on
+    // every line would be three thousand em dashes.
+    show();
+    await waitFor(() => expect(document.querySelectorAll('.vis-sentence').length).toBe(3));
+    expect(document.querySelectorAll('.vis-likely').length).toBe(1);
   });
 });
