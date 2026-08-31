@@ -12,14 +12,6 @@ export interface Observation {
   t: number;
   labels?: string[];
   seen?: string;
-  /**
-   * What the model thought the frame was part of — a battle, a chase.
-   *
-   * Separate from `seen` because they are different claims. One is what was in
-   * the frame; this is a guess about it, and a reader who cannot tell them
-   * apart ends up trusting the description less rather than more.
-   */
-  likely?: string;
 }
 
 /** Labels that describe the scene rather than name an effect in it. */
@@ -80,7 +72,6 @@ export function matching(
   if (!want) return [...(observations ?? [])];
   return (observations ?? []).filter((o) =>
     (o.seen ?? '').toLowerCase().includes(want)
-    || (o.likely ?? '').toLowerCase().includes(want)
     || (o.labels ?? []).some((l) => l.toLowerCase().includes(want)));
 }
 

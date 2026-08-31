@@ -239,15 +239,6 @@ def parse_labels(text: str) -> list[str]:
     return out
 
 
-# Comment lines a wrapper may send that are not the description.
-#
-# The sentence has ridden on a bare comment since descriptions existed, so it
-# stays bare and anything new is prefixed. That way a wrapper written before
-# this still works, and a reader written before this ignores the new line the
-# way it has always ignored comments.
-MARKED = ("likely:",)
-
-
 def parse_seen(text: str) -> str:
     """The description a wrapper offered, if it offered one.
 
@@ -259,32 +250,15 @@ def parse_seen(text: str) -> str:
         line = line.strip()
         if line.startswith("#"):
             said = line.lstrip("#").strip()
-            if said and not said.lower().startswith(MARKED):
+            if said:
                 return said
     return ""
 
 
-def parse_likely(text: str) -> str:
-    """What the wrapper thought the frame was part of, if it said.
-
-    Its own line rather than part of the sentence. SEEN is evidence and this is
-    a guess, and a description that ran them together would read as though the
-    model had seen a battle rather than inferred one.
-    """
-    for line in (text or "").splitlines():
-        line = line.strip()
-        if not line.startswith("#"):
-            continue
-        said = line.lstrip("#").strip()
-        if said.lower().startswith("likely:"):
-            return said.partition(":")[2].strip()
-    return ""
-
-
 def observe_frame(command: str, image_path: str, timeout: float = 60.0):
-    """Run the command against one image, keeping everything it said.
+    """Run the command against one image, keeping the labels and the sentence.
 
-    Returns (labels, seen, likely). A failure is empty rather than an
+    Returns (labels, seen). A failure is an empty pair rather than an
     exception: a model that chokes on one JPEG must not cost the analysis
     every frame after it.
     """
@@ -295,11 +269,10 @@ def observe_frame(command: str, image_path: str, timeout: float = 60.0):
             timeout=timeout, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return [], "", ""
+        return [], ""
     if result.returncode != 0:
-        return [], "", ""
-    return (parse_labels(result.stdout), parse_seen(result.stdout),
-            parse_likely(result.stdout))
+        return [], ""
+    return parse_labels(result.stdout), parse_seen(result.stdout)
 
 
 def label_frame(command: str, image_path: str, timeout: float = 60.0) -> list[str]:
@@ -389,19 +362,14 @@ def observe(path: str, times, command: str, timeout: float = 60.0,
 
         def look(item):
             at, image = item
-            labels, said, guess = observe_frame(command, image, timeout)
-            return at, labels, said, guess
+            labels, said = observe_frame(command, image, timeout)
+            return at, labels, said
 
         with futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-            for at, labels, said, guess in pool.map(look, frames):
-                if labels or said or guess:
-                    record = {"t": round(at, 3), "labels": labels, "seen": said}
-                    # Only when there is one, so a wrapper that does not offer
-                    # a guess leaves no empty field behind in every line of a
-                    # three thousand line file.
-                    if guess:
-                        record["likely"] = guess
-                    seen.append(record)
+            for at, labels, said in pool.map(look, frames):
+                if labels or said:
+                    seen.append({"t": round(at, 3), "labels": labels,
+                                 "seen": said})
     return sorted(seen, key=lambda o: o["t"])
 
 

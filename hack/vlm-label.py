@@ -73,10 +73,10 @@ SCENES = ("calm", "active")
 PROMPT = """You are labelling one frame from a film so a machine can drive
 physical effects — fans, lights, water, smoke — for the audience watching it.
 
-Two of the lines below are evidence and two are judgement. They are answered
-differently and the difference matters.
+Report only what is plainly visible IN THIS FRAME. You are not describing the
+story, guessing what happens next, or inferring from context.
 
-Reply with exactly five lines and nothing else. No explanation.
+Reply with exactly four lines and nothing else. No explanation.
 
 EFFECTS: <comma-separated words from the list below, or the word none>
 WATER: <yes if any sea, lake, river or large stretch of water is visible
@@ -84,13 +84,6 @@ WATER: <yes if any sea, lake, river or large stretch of water is visible
 SCENE: <calm or active>
 SEEN: <one plain sentence describing what is in the frame and what is
        happening, as you would tell someone who cannot see it>
-LIKELY: <what this frame appears to be part of, in a few words, or the word
-         none if it suggests nothing beyond itself>
-
-EFFECTS and WATER are evidence. Report only what is plainly visible IN THIS
-FRAME. Do not infer them from the story, from what a film of this kind usually
-contains, or from your own answers on the lines below. A war film is not a
-reason to report an explosion, and a frame with no fireball in it has none.
 
 The only permitted effect words:
 
@@ -105,24 +98,13 @@ The only permitted effect words:
 
 If none of those are plainly visible, answer exactly: EFFECTS: none
 
-SCENE is a judgement rather than evidence: how much is happening to the
-audience, not how pretty the frame is.
+SCENE is about how much is happening to the audience, not how pretty it is:
 
   calm    conversation, stillness, scenery, walking, slow camera movement.
   active  impact, fast motion, combat, chaos, a vehicle at speed, destruction.
 
-One frame is a poor sample of movement, so judge the moment the frame comes
-from rather than the pixels alone. Two figures frozen mid-stride with weapons
-in a ruined street is active, though nothing in the still is blurred; the same
-two seated at a table is calm.
-
 Most frames of most films are calm. Answer active only when something is
-actually happening.
-
-LIKELY is where anything you have inferred belongs — a battle, a chase, a
-funeral, a briefing, a landing. It drives nothing at all. It is there so that
-a person reading several thousand of these can tell one scene from another
-without watching the film."""
+actually happening."""
 
 
 # What the film is, added to the prompt when somebody has said.
@@ -142,13 +124,14 @@ About this film, from the person who set it up:
 
   %s
 
-Use it for SEEN, SCENE and LIKELY: to name what you are looking at, and to
-judge whether the moment is calm or active.
+That is background for the SEEN line only. Use it to name what you are looking
+at more precisely — a place, a kind of vehicle, a uniform — where the frame
+actually shows it.
 
-It is not evidence for EFFECTS or WATER. Those are about this frame and
-nothing else. A film being a war film is not a reason to report an explosion,
-and a film set at sea is not a reason to report water. If the frame does not
-show it, it is not there."""
+It is not evidence. EFFECTS, WATER and SCENE are about this frame and nothing
+else. A film being a war film is not a reason to report an explosion, and a
+film set at sea is not a reason to report water. If the frame does not show it,
+it is not there."""
 
 
 def prompt() -> str:
@@ -235,7 +218,7 @@ def ask(image_path: str) -> str:
         ],
         # Zero temperature because this is a classification, and a label that
         # changes between runs makes a score that cannot be reproduced.
-        "options": {"temperature": 0, "num_predict": 220},
+        "options": {"temperature": 0, "num_predict": 160},
     }).encode()
     req = urllib.request.Request(
         HOST + "/api/chat", data=body,
@@ -264,7 +247,7 @@ def ask_openai(image_path: str) -> str:
     body = json.dumps({
         "model": MODEL,
         "temperature": 0,
-        "max_tokens": 220,
+        "max_tokens": 160,
         "messages": [{
             "role": "user",
             "content": [
@@ -334,22 +317,6 @@ def described(reply: str) -> str:
     return ""
 
 
-def inferred(reply: str) -> str:
-    """What the model thought the frame was part of, or nothing.
-
-    Kept apart from the sentence because they are different claims. SEEN is
-    what is there; this is what it looks like it belongs to, and a reader has
-    to be able to tell which is which — otherwise the guess reads as the
-    observation and the description becomes less trustworthy rather than more.
-    """
-    for line in reply.splitlines():
-        head, _, rest = line.strip().lstrip("-*# ").partition(":")
-        if head.strip().strip("*").lower() == "likely":
-            said = " ".join(rest.split())
-            return "" if said.lower() in ("", "none", "nothing") else said
-    return ""
-
-
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         sys.stderr.write("usage: vlm-label.py IMAGE\n")
@@ -372,13 +339,6 @@ def main(argv: list[str]) -> int:
         # description costs nothing to anything that was reading labels before
         # this existed, and the composer picks it up only because it now looks.
         print("# " + seen)
-    guess = inferred(reply)
-    if guess:
-        # Prefixed, where the sentence is bare. The seam has carried one
-        # unmarked comment since descriptions existed, so leaving that alone
-        # keeps every older reader working and gives the new line somewhere
-        # unambiguous to go.
-        print("# likely: " + guess)
     return 0
 
 

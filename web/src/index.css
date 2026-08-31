@@ -1046,8 +1046,6 @@ button:hover { border-color: #3a4553; }
 .vis-t { font-family: var(--mono); font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .vis-labels { display: flex; flex-wrap: wrap; gap: 4px; }
 .vis-said { color: var(--muted); }
-/* A guess, and it has to look like one beside the thing that was observed. */
-.vis-likely { opacity: 0.66; font-style: italic; }
 
 @media (max-width: 720px) {
   /* Three columns of twelve characters each is not a table, it is a puzzle. */

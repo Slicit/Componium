@@ -393,11 +393,6 @@ def write_observations(args, observations, span) -> str:
                 "labels": o.get("labels") or [],
                 "seen": o.get("seen") or "",
             }
-            # What the model thought the frame was part of, when it said. Kept
-            # separate from the sentence: one is what was there and the other
-            # is a guess about it.
-            if o.get("likely"):
-                row["likely"] = o["likely"]
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     return os.path.basename(path)
 
