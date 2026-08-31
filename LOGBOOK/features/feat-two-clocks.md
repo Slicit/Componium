@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 branch: feat-two-clocks
 ---
 
@@ -59,6 +59,16 @@ Everything that has gone wrong sits on that line. Scent lingers for minutes and
 was being driven by a frame. Wind wants a chase and was being driven by two
 frames of pixels. SCENE is a judgement about a moment and was being asked of a
 still, which is why it changes its mind 113 times in fifteen minutes.
+
+## Where this stands
+
+| stage | state |
+|---|---|
+| 1 · frame pass | **done**, and it was two frames that did it. Absorbing categories were falsified; so was every other wording. See `experiments/README-stage-one.md`. |
+| 2 · scene pass | **not built, deliberately.** Its activity half is cancelled — measured worse than the frame pass at equal resolution. Its place-and-situation half is worth having and belongs with stage 4, where something consumes it. See `experiments/README-stage-two.md`. |
+| 3 · wind | **done.** Expansion rather than translation, on an absolute per-second scale. |
+| 4 · scent | not started. Needs the scene pass built alongside it. |
+| 5 · dynamics | not started. Same. |
 
 ## Stage 1 · the frame pass keeps its job and gets better at it
 
