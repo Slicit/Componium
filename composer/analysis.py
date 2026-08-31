@@ -272,6 +272,28 @@ class Decoded:
         return False
 
 
+def has_audio(path: str) -> bool:
+    """Whether this file has an audio stream at all.
+
+    Asked before building the decode rather than discovered during it. `-map
+    0:a?` makes the mapping optional and the output file mandatory, so a film
+    without audio produces an output with no streams — which ffmpeg treats as
+    fatal to the whole command, taking the video with it.
+    """
+    exe = shutil.which("ffprobe")
+    if not exe:
+        # Without ffprobe, assume there is audio: asking for it and getting
+        # nothing is the situation this is avoiding, but guessing the other way
+        # would throw away the audio of every film on a box missing a tool.
+        return True
+    result = subprocess.run(
+        [exe, "-v", "error", "-select_streams", "a", "-show_entries",
+         "stream=index", "-of", "csv=p=0", path],
+        capture_output=True, text=True, check=False,
+    )
+    return bool(result.stdout.strip())
+
+
 def decode(path: str, fps: float, flash_fps: float = 0.0, span=None,
            w: int = GRAY_W, h: int = GRAY_H,
            cw: int = COLOUR_W, ch: int = COLOUR_H,
@@ -325,16 +347,25 @@ def decode(path: str, fps: float, flash_fps: float = 0.0, span=None,
     graph = "[0:v]split=%d%s;%s" % (
         len(labels), "".join("[%s]" % x for x in labels), ";".join(branches))
 
-    audio_out = ["-map", "0:a?", "-af", "lowpass=f=%d" % audio_cutoff,
-                 "-ac", "1", "-ar", str(audio_rate), "-f", "s16le",
-                 os.path.join(tmp, "audio.raw")]
+    # Only when there is audio to take. An output file with no streams in it
+    # is fatal to the whole ffmpeg command, not just to itself.
+    audio_out = []
+    if has_audio(path):
+        audio_out = ["-map", "0:a?", "-af", "lowpass=f=%d" % audio_cutoff,
+                     "-ac", "1", "-ar", str(audio_rate), "-f", "s16le",
+                     os.path.join(tmp, "audio.raw")]
 
     cmd = ([_ffmpeg(), "-v", "info"] + seek + ["-i", path,
             "-filter_complex", graph] + outputs + audio_out)
 
     result = subprocess.run(cmd, capture_output=True, text=True,
                             errors="replace", check=False)
-    if result.returncode != 0 and not os.path.exists(os.path.join(tmp, "gray.raw")):
+    grey = os.path.join(tmp, "gray.raw")
+    # Empty counts as missing. ffmpeg creates its outputs before it fails, so
+    # a decode that produced nothing leaves a file of zero bytes behind and the
+    # analysis carries on with no frames and no complaint.
+    empty = not os.path.exists(grey) or os.path.getsize(grey) == 0
+    if result.returncode != 0 and empty:
         shutil.rmtree(tmp, ignore_errors=True)
         raise RuntimeError("ffmpeg could not read %s: %s"
                            % (path, (result.stderr or "").strip()[-400:]))

@@ -55,8 +55,12 @@ class TestShift(unittest.TestCase):
 
 
 class FakeMovement:
-    def __init__(self, dx, dy, speed, confidence=1.0):
+    def __init__(self, dx, dy, speed, confidence=1.0, expansion=0.0):
         self.dx, self.dy, self.speed, self.confidence = dx, dy, speed, confidence
+        # How much the image grew about its centre. Wind is made of this now:
+        # a pan is translation and a forward move is expansion, and only the
+        # second is air rushing past.
+        self.expansion = expansion
 
 
 class TestPlunge(unittest.TestCase):
@@ -321,11 +325,22 @@ class TestPose(unittest.TestCase):
 
 
 class TestWindSeries(unittest.TestCase):
-    def test_scales_to_the_fastest_moment(self):
+    def test_a_fast_pan_is_not_wind(self):
+        # This used to be test_scales_to_the_fastest_moment, and it asserted
+        # the fault: normalising to the film's own peak guaranteed that
+        # whatever a film did most became full wind, so two people talking in
+        # a room had the mildest camera move rendered as a gale. It also meant
+        # a pan — which is all translation and no travel — read maximal.
         moves = [FakeMovement(0, 0, 0.02)] * 20 + [FakeMovement(9, 0, 0.4)] * 20
         wind = motion_est.wind_series(moves, fps=4.0)
-        self.assertAlmostEqual(max(wind), 1.0, places=3)
-        self.assertLess(min(wind), 0.3)
+        self.assertEqual(max(wind), 0.0)
+
+    def test_moving_forward_is(self):
+        moves = [FakeMovement(0, 0, 0.0)] * 10 + [
+            FakeMovement(0, 0, 0.0, expansion=motion_est.FULL_WIND_RATE / 4.0)
+        ] * 30
+        wind = motion_est.wind_series(moves, fps=4.0)
+        self.assertGreater(max(wind), 0.8)
 
     def test_a_still_film_asks_for_no_wind(self):
         wind = motion_est.wind_series([FakeMovement(0, 0, 0.0)] * 20, fps=4.0)

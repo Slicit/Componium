@@ -76,15 +76,22 @@ def best_shift(a, b, max_shift: int) -> tuple[int, float]:
 class Movement:
     """Apparent movement between two sampled frames."""
 
-    __slots__ = ("dx", "dy", "speed", "confidence")
+    __slots__ = ("dx", "dy", "speed", "confidence", "expansion")
 
-    def __init__(self, dx: int, dy: int, confidence: float, width: int):
+    def __init__(self, dx: int, dy: int, confidence: float, width: int,
+                 expansion: float = 0.0):
         self.dx = dx
         self.dy = dy
         self.confidence = confidence
         # Normalised by frame width so the number means the same thing whatever
         # resolution the analysis ran at.
         self.speed = math.hypot(dx, dy) / float(width)
+        # How much the image grew about its centre, in the same units.
+        #
+        # This is the only thing here that says whether the camera is moving
+        # *through* the scene rather than across it, which is the difference
+        # between air rushing past and a head turning. Positive is forward.
+        self.expansion = expansion / float(width)
 
 
 def track(frames, max_shift: int = 8, width: int = 64,
@@ -100,12 +107,24 @@ def track(frames, max_shift: int = 8, width: int = 64,
         dx, cx = best_shift(prev.cols, cur.cols, max_shift)
         dy, cy = best_shift(prev.rows, cur.rows, max_shift)
         confidence = min(cx, cy)
+
+        # The halves, matched apart. A pan shifts both the same way; moving
+        # forward pushes them apart, which one shift over the whole frame
+        # cannot express and so has always read as no movement at all.
+        half = len(prev.cols) // 2
+        expansion = 0.0
+        if half >= 8:
+            left, cl = best_shift(prev.cols[:half], cur.cols[:half], max_shift)
+            right, cr = best_shift(prev.cols[half:], cur.cols[half:], max_shift)
+            if min(cl, cr) >= min_confidence:
+                expansion = (right - left) / 2.0
+
         if confidence < min_confidence:
             # No evidence of movement is reported as no movement, not as
             # whatever the search happened to land on. Missing a pan across
             # a featureless sky is better than inventing one.
             dx = dy = 0
-        out.append(Movement(dx, dy, confidence, width))
+        out.append(Movement(dx, dy, confidence, width, expansion))
     return out
 
 
@@ -336,21 +355,59 @@ def clamp(v: float) -> float:
     return max(-1.0, min(1.0, v))
 
 
-def wind_series(movements, fps: float, smooth_seconds: float = 1.5):
-    """Wind from apparent speed.
+# How much expansion a frame is worth full output.
+#
+# An absolute scale rather than the film's own peak. Normalising to the loudest
+# thing present guarantees wind is never absent: a film of two people talking
+# had its mildest camera move rendered as a gale, because that move was the
+# most the film ever did.
+#
+# How fast the image has to grow, per second, to earn full wind.
+#
+# Per second and not per frame pair. Expansion is measured between two sampled
+# frames, so it scales with the gap between them — the same dolly reads three
+# times larger at four samples a second than at twelve — and a constant in
+# those units is secretly a function of --fps. This one is not.
+#
+# Set from the distribution across four films, smoothed exactly as below and
+# sampled at the rate the pipeline uses. The forward rate runs 0.018 at the
+# median, 0.085 at the ninetieth percentile, 0.129 at the ninety-seventh and
+# 0.281 at its highest.
+#
+# 0.22 puts the ninetieth percentile just under two fifths output, the very
+# strongest moves at full, and the median at almost nothing. A fan that stirs
+# during movement, blows hard occasionally, and is off most of the time. The
+# first guess here was 1.4, which is ten times the whole range — see
+# hack/winddist.py, which is how that was found rather than argued about.
+FULL_WIND_RATE = 0.22
 
-    A fast moving camera is the closest thing an image has to airflow, and it
-    is what a fan can honestly react to. Smoothed hard, because a fan takes
-    over a second to change speed and driving it from a twitchy signal just
-    wastes the movement.
+
+def wind_series(movements, fps: float, smooth_seconds: float = 1.5,
+                full: float = FULL_WIND_RATE):
+    """Wind from moving through the scene, not across it.
+
+    Apparent speed was the obvious signal and it is the wrong one. A pan across
+    a static room is pure translation and reads maximal; a forward dolly —
+    driving, running, flying, the one case where air actually rushes past —
+    expands the image about its centre and cancels, reading as nothing. Measured
+    on synthetic clips: pan 0.0156, dolly 0.0004, static 0.0000.
+
+    Expansion is what separates them, and only forward counts: pulling back is
+    also movement through air but it is not what a fan in front of a seat is
+    for, and treating it the same would blow on every cut to a wider shot.
+
+    Smoothed hard, because a fan takes over a second to change speed and
+    driving it from a twitchy signal just wastes the movement.
     """
     if not movements:
         return []
-    speeds = smooth([m.speed for m in movements], max(2, int(smooth_seconds * fps)))
-    peak = max(speeds) if speeds else 0.0
-    if peak <= 0:
+    # Per second, so the answer does not depend on how often the film was
+    # sampled. Expansion is measured across the gap between two frames.
+    forward = [max(0.0, m.expansion) * fps for m in movements]
+    speeds = smooth(forward, max(2, int(smooth_seconds * fps)))
+    if full <= 0:
         return [0.0] * len(speeds)
-    return [round(v / peak, 4) for v in speeds]
+    return [round(min(1.0, v / full), 4) for v in speeds]
 
 
 # The axes a three actuator platform can actually produce. Three linear
