@@ -1,5 +1,5 @@
 ---
-status: active
+status: shipped
 branch: feat-two-clocks
 ---
 
@@ -65,10 +65,10 @@ still, which is why it changes its mind 113 times in fifteen minutes.
 | stage | state |
 |---|---|
 | 1 · frame pass | **done**, and it was two frames that did it. Absorbing categories were falsified; so was every other wording. See `experiments/README-stage-one.md`. |
-| 2 · scene pass | **not built, deliberately.** Its activity half is cancelled — measured worse than the frame pass at equal resolution. Its place-and-situation half is worth having and belongs with stage 4, where something consumes it. See `experiments/README-stage-two.md`. |
+| 2 · scene pass | **built with stage 4**, where it has a consumer. Its activity half stays cancelled — measured worse than the frame pass at equal resolution. See `experiments/README-stage-two.md`. |
 | 3 · wind | **done.** Expansion rather than translation, on an absolute per-second scale. |
-| 4 · scent | not started. Needs the scene pass built alongside it. |
-| 5 · dynamics | not started. Same. |
+| 4 · scent | **done**, and it took the scene pass with it — a bank of fifteen is unreachable when two frame labels can address it. Named not numbered, chosen by scene, and mostly refused. |
+| 5 · dynamics | **done.** The same ranking read from the other end, budgeted in time like the calm side. A quiet forest also smells of pine now. |
 
 ## Stage 1 · the frame pass keeps its job and gets better at it
 
