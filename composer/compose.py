@@ -378,10 +378,18 @@ def write_observations(args, observations, span) -> str:
     path = args.out + ".seen.jsonl"
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         for o in observations:
+            # Into the film's clock, and dropping the lead in.
+            #
+            # The same move span.place() makes for every track, made here
+            # because this does not go through it — it is written straight to
+            # a file. Without it each chunk recorded its frames counted from
+            # its own start and the merge piled every chunk into the first
+            # chunk-length of the film.
+            at = span.to_film_time(o["t"]) if span is not None else o["t"]
+            if span is not None and not span.contains(at):
+                continue
             row = {
-                # Already in the film's own clock: observe is handed absolute
-                # times, and the span has done its work by then.
-                "t": o["t"],
+                "t": round(at, 3),
                 "labels": o.get("labels") or [],
                 "seen": o.get("seen") or "",
             }
