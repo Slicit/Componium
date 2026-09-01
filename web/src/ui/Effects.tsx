@@ -59,6 +59,8 @@ export function Effects(props: {
   /** The instrument the presets are for, and its kind. */
   instrument: string | null;
   kind: string;
+  /** What the track holds, which decides what can be built into it. */
+  holds: 'cue' | 'curve';
   /** Where an insert would land. */
   at: number;
   fps: number;
@@ -69,12 +71,12 @@ export function Effects(props: {
   /** Overridable so a test need not wait three seconds to watch one finish. */
   loops?: number;
 }) {
-  const { instrument, kind, at, fps, canInsert, onInsert, onPreview } = props;
+  const { instrument, kind, holds, at, fps, canInsert, onInsert, onPreview } = props;
   const loops = props.loops ?? PREVIEW_LOOPS;
   const [chosen, setChosen] = useState<Preset | null>(null);
   const [playing, setPlaying] = useState(false);
   const [pass, setPass] = useState(0);
-  const presets = presetsFor(kind);
+  const presets = presetsFor(kind, holds);
   const frame = useRef(0);
 
   const stop = useCallback(() => setPlaying(false), []);

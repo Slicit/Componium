@@ -47,6 +47,7 @@ function show(over: Partial<Parameters<typeof Effects>[0]> = {}) {
     <Effects
       instrument="wind.main"
       kind="wind"
+      holds="curve"
       at={12}
       fps={24}
       canInsert

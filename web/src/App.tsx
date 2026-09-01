@@ -740,6 +740,7 @@ export function App() {
                 <Effects
                   instrument={target?.instrument ?? null}
                   kind={targetKind}
+                  holds={target?.type === 'cue' ? 'cue' : 'curve'}
                   at={time}
                   fps={fps}
                   canInsert={!!target}

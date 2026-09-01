@@ -98,6 +98,59 @@ function decay(steps = 6): Node[] {
   return out;
 }
 
+/**
+ * The stretches of a shape that are above zero: [from, to, peak] in fractions.
+ *
+ * A shape is either one gesture or several, and which it is decides what it
+ * becomes on a device driven by events rather than levels. A strobe is not a
+ * two-second flash held at full — it is twelve flashes — and collapsing it into
+ * one is not a simplification of the preset, it is a different preset.
+ */
+export function pulses(shape: readonly Node[]): [number, number, number][] {
+  const out: [number, number, number][] = [];
+  let from: number | null = null;
+  let peak = 0;
+  let last = 0;
+  for (const [f, v] of shape) {
+    const level = Math.abs(v);
+    if (level > 0) {
+      /* Open at the zero edge before the rise, so a square pulse keeps its
+       * width instead of starting a hair late. */
+      if (from === null) from = last;
+      peak = Math.max(peak, level);
+    } else if (from !== null) {
+      out.push([from, f, peak]);
+      from = null;
+      peak = 0;
+    }
+    last = f;
+  }
+  if (from !== null) out.push([from, last, peak]);
+  return out;
+}
+
+/**
+ * Channels a preset's number is a level for, rather than a colour or an axis.
+ *
+ * A preset says how hard, once. `i` is a level and `h` is a hue: writing the
+ * same number into both turns a white flash into a saturated red one, and a
+ * fade up into a sweep through the spectrum. Where a track names none of these
+ * — red, green, blue — every channel takes the number, which is white at full
+ * and the honest reading of "brighter".
+ */
+const LEVEL_KEYS = ['i', 'intensity', 'output'];
+
+export function levelKey(channels: readonly string[]): string | null {
+  return channels.find((c) => LEVEL_KEYS.includes(c)) ?? null;
+}
+
+/* What a colour channel is worth when the preset has nothing to say about it
+ * and the track has nothing to keep: no saturation, so no hue to argue over. */
+const NEUTRAL: Record<string, number> = { h: 0, s: 0 };
+
+/** The shortest a pulse can become a cue as. Below this it is not an event. */
+const MIN_CUE_SECONDS = 0.02;
+
 /* --- the library -------------------------------------------------------- */
 
 export const PRESETS: readonly Preset[] = [
@@ -237,9 +290,21 @@ export const PRESETS: readonly Preset[] = [
   },
 ];
 
-/** The presets that suit a kind, in the order the library lists them. */
-export function presetsFor(kind: string): Preset[] {
-  return PRESETS.filter((p) => p.kinds.length === 0 || p.kinds.includes(kind));
+/**
+ * The presets that suit a kind and the track in front of you.
+ *
+ * A cue track can only be sent verbs, and there is no truthful verb for a
+ * platform: you do not tell a motion rig to "move", you tell it where to be.
+ * Offering a shape that cannot be built is an insert that silently does
+ * nothing, so the picker declines it here rather than the insert declining it
+ * later and telling nobody.
+ */
+export function presetsFor(kind: string, holds: 'cue' | 'curve' = 'curve'): Preset[] {
+  return PRESETS.filter((p) => {
+    if (p.kinds.length && !p.kinds.includes(kind)) return false;
+    if (holds === 'cue' && !(p.action ?? actionForKind(kind))) return false;
+    return true;
+  });
 }
 
 export function presetById(id: string): Preset | null {
@@ -339,23 +404,43 @@ export function build(
     /* No action and none offered: there is nothing truthful to send. Better to
      * refuse than to invent a verb the instrument has never heard. */
     if (!action) return null;
-    /* An event device is told one thing: how hard, for how long. The envelope
-     * still decides how hard — its peak is the dose — but the shape itself is
-     * the instrument's business once the burst has started. */
-    let peak = 0;
-    for (const [, v] of preset.shape) peak = Math.max(peak, Math.abs(v));
-    const params: Params = {};
-    for (const c of channels) params[c] = round3(Math.min(1, peak * scale));
-    return {
-      from, to,
-      cues: [{ t: from, action, params, duration: round3(seconds) }],
-    };
+    /* One cue per pulse. An event device is told how hard and for how long, so
+     * a single gesture is still a single cue carrying its peak — the shape
+     * inside it is the instrument's business once the burst has started. But a
+     * shape whose whole identity is repetition has to arrive as repetition:
+     * twelve pulses arrived as one flash, and the preset is called Strobe. */
+    const level = levelKey(channels);
+    const made: Cue[] = [];
+    for (const [a, b, peak] of pulses(preset.shape)) {
+      const params: Params = {};
+      for (const c of channels) {
+        params[c] = level && c !== level
+          ? round3(opts.base?.[c] ?? NEUTRAL[c] ?? 0)
+          : round3(Math.min(1, peak * scale));
+      }
+      made.push({
+        t: round3(at + a * seconds),
+        action,
+        params,
+        duration: round3(Math.max(MIN_CUE_SECONDS, (b - a) * seconds)),
+      });
+    }
+    if (!made.length) return null;
+    return { from, to, cues: made };
   }
 
+  const level = levelKey(channels);
   const points: Point[] = preset.shape.map(([f, v]) => {
     const value: Params = {};
     for (const c of channels) {
       const base = opts.base?.[c];
+      /* Colour is not a level: a fade up asks a lamp to get brighter, not
+       * redder. Where the track names a level, everything else holds what the
+       * curve already had under the playhead. */
+      if (level && c !== level) {
+        value[c] = round3(base ?? NEUTRAL[c] ?? 0);
+        continue;
+      }
       /* A shape of zero means "leave it where the track already was" only for
        * a preset that starts and ends at rest; anything else would make a fade
        * to black impossible to author. So the base is a floor, not a mixer. */

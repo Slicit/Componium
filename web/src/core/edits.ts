@@ -7,7 +7,7 @@
  */
 
 import { batch, insertCues, insertPoints, movePoints, moveCues, removeCues, removePoints, resizeCues, type Command } from './history';
-import { actionForKind, build, type Preset } from './presets';
+import { actionForKind, build, levelKey, type Preset } from './presets';
 import { clamp, clamp01, round3, type Seconds } from './time';
 import { cueEnd, isHSI, isSpan, kindOf, valueAt, channelsOf, type Cue, type Instrument, type Point, type Rig, type Score, type Track } from './score';
 
@@ -305,7 +305,17 @@ export function insertPreset(
    * cues on a curve track, so building by the preset's own nature wrote a cue
    * the timeline never drew and a score that would not have saved. */
   const as = track.type === 'cue' ? 'cue' : 'curve';
+  /* What the track reads under the playhead, kept only for the channels the
+   * shape does not drive: a fade up should brighten a lamp without moving its
+   * hue. Only those — a base under the level itself would quietly turn every
+   * insert into a blend with the curve it is replacing. */
+  const level = levelKey(channels);
+  const base = level && track.points?.length
+    ? Object.fromEntries(Object.entries(valueAt(track.points, at, [...channels]))
+        .filter(([c]) => c !== level))
+    : undefined;
   const made = build(preset, at, channels, {
+    base,
     ...opts,
     as,
     action: actionForKind(kindOf(track.instrument, rig)) ?? undefined,

@@ -53,3 +53,28 @@ silently skips every later step. Use `sudo rm -rf`, and prefer running
 containers as the checkout owner in the first place.
 
 ## Anti-patterns
+
+### 2026-09-01 · A library that describes and a consumer that guesses
+
+Presets are declarative (a normalised envelope and a list of kinds) and the
+insert translated them into a track. Every field the insert had to guess at
+became a place the two could disagree, and all three of them did at once:
+a twelve pulse strobe collapsed into a single flash, the levels landed in
+`r`/`g`/`b` on a track written in `h`/`s`/`i`, and the peak was written into
+the hue as well as the intensity. The picker also offered five motion presets
+the insert then refused, so the button did nothing and said nothing.
+
+The rule, and it generalises past this one library: **anything an index offers
+must be usable where it is offered, and the check belongs in a test that walks
+the index rather than in a comment asking the next person to remember.** See
+`web/src/core/parity.test.ts` and `LOGBOOK/features/feat-effect-parity.md`.
+
+Two details worth carrying elsewhere:
+
+- Assert **both directions**. "Everything offered works" is satisfied by
+  offering nothing. Pair it with "everything withheld would genuinely have
+  failed" or the filter becomes the bug.
+- A **default is not a refusal**. `CHANNELS_BY_KIND[kind] ?? ['intensity']`
+  and `kinds.get(kind, kind + ".main")` are the same mistake in two languages:
+  a missing entry produces a plausible answer instead of a complaint, and the
+  plausible answer travels a long way before anybody notices.

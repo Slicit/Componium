@@ -213,6 +213,14 @@ export function channelsOf(track: Track, rig?: Rig | null): string[] {
   for (const p of track.points ?? []) {
     for (const k of Object.keys(p.value ?? {})) seen.add(k);
   }
+  /* Cues carry levels too, and a cue track has no points at all to read. Left
+   * out, every insertion into one fell back to the kind's default names: a
+   * flash dropped into a track of h/s/i cues arrived carrying r/g/b, so the
+   * editor offered no intensity and the score held one cue that agreed with
+   * none of its neighbours. */
+  for (const c of track.cues ?? []) {
+    for (const k of Object.keys(c.params ?? {})) seen.add(k);
+  }
   if (seen.size) {
     /* Hue, then saturation, then intensity — the order they are thought about
      * — or red, green, blue for a track written the older way. */
