@@ -56,7 +56,9 @@ func (s *Server) handleRigSave(w http.ResponseWriter, r *http.Request) {
 		out.ID = in.ID
 		out.Kind = in.Kind
 		out.Driver = in.Driver
-		out.Addr = in.Addr
+		// Forgiving on the way in: a device's address is very often first met
+		// as a URL in a browser, and the driver already knows its own port.
+		out.Addr = rig.NormaliseAddr(in.Addr, out.Driver)
 		out.Universe = in.Universe
 		out.Start = in.Start
 		out.Mode = in.Mode

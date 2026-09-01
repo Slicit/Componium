@@ -122,8 +122,12 @@ func indexZero(b []byte) int {
 	return -1
 }
 
+// Port is where E1.31 lives. Fixed by the standard, so a fixture that does not
+// listen here is a fixture that is not speaking sACN.
+const Port = 5568
+
 // MulticastAddr returns the address a universe is conventionally sent to,
 // 239.255.<high>.<low> on port 5568.
 func MulticastAddr(universe uint16) string {
-	return fmt.Sprintf("239.255.%d.%d:5568", byte(universe>>8), byte(universe))
+	return fmt.Sprintf("239.255.%d.%d:%d", byte(universe>>8), byte(universe), Port)
 }

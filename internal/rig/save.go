@@ -111,11 +111,19 @@ func (c *Config) Validate() []string {
 			// An address is the whole point of these two: without one there is
 			// nothing to send to and the rig fails at startup rather than here.
 			if in.Addr == "" {
-				problems = append(problems, where+": needs an address, host:port")
+				want := "host:port"
+				if p := DefaultPort(driver); p != "" {
+					want = "something like 192.168.1.145:" + p
+				}
+				problems = append(problems, where+": needs an address, "+want)
 			}
 		}
-		if in.Addr != "" && !strings.Contains(in.Addr, ":") {
-			problems = append(problems, where+": address "+quoted(in.Addr)+" has no port")
+		// Asked properly. "Contains a colon" said yes to http://192.168.1.145/,
+		// which was then written to the rig and failed when the show started.
+		if in.Addr != "" {
+			if bad := addrProblem(in.Addr, driver); bad != "" {
+				problems = append(problems, where+": "+bad)
+			}
 		}
 	}
 	return problems
