@@ -134,6 +134,78 @@ describe('the playhead follows the film', () => {
  * this file exists to catch. jsdom has no requestVideoFrameCallback, so the
  * element is given one, which is also what the browser will hand it.
  */
+/* Who the keyboard belongs to.
+ *
+ * Reported as: the browser flasher's Wi-Fi form would not take a backspace.
+ * Two faults met in one symptom, and neither is visible from inside the
+ * studio, which is why they are tested from outside it.
+ *
+ * The form lives in a shadow root. An event crossing a shadow boundary is
+ * retargeted to the host, so the guard reading `target.tagName` saw a custom
+ * element rather than an input and let the keystroke through to the transport
+ * shortcuts, which cancelled it. Characters typed; you could not correct one.
+ *
+ * And the studio stays mounted behind the admin section so it keeps its score
+ * and its undo history. A global key listener does not care that its own
+ * subtree is hidden, so Delete was still deleting a selection while somebody
+ * was two sections away filling in a form.
+ */
+describe('the keyboard belongs to whatever is being typed into', () => {
+  it('leaves an ordinary input alone', async () => {
+    const video = await openFilm();
+    video.currentTime = 30;
+    fireEvent.seeked(video);
+    await waitFor(() => expect(timecode()).toBe('00:00:30:00'));
+
+    const field = document.createElement('input');
+    document.body.append(field);
+    fireEvent.keyDown(field, { key: 'ArrowRight' });
+    expect(timecode()).toBe('00:00:30:00');
+    field.remove();
+  });
+
+  it('leaves an input inside a shadow root alone', async () => {
+    const video = await openFilm();
+    video.currentTime = 30;
+    fireEvent.seeked(video);
+    await waitFor(() => expect(timecode()).toBe('00:00:30:00'));
+
+    /* Exactly the shape of the flasher's dialog. */
+    const host = document.createElement('some-widget');
+    document.body.append(host);
+    const field = document.createElement('input');
+    host.attachShadow({ mode: 'open' }).append(field);
+
+    fireEvent.keyDown(field, { key: 'ArrowRight', bubbles: true, composed: true });
+    fireEvent.keyDown(field, { key: 'Backspace', bubbles: true, composed: true });
+    expect(timecode()).toBe('00:00:30:00');
+    host.remove();
+  });
+
+  it('still answers the keyboard where it should', async () => {
+    // The guard must not be so broad that the studio stops working.
+    const video = await openFilm();
+    video.currentTime = 30;
+    fireEvent.seeked(video);
+    await waitFor(() => expect(timecode()).toBe('00:00:30:00'));
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    await waitFor(() => expect(timecode()).toBe('00:00:30:01'));
+  });
+});
+
+describe('a studio nobody is looking at', () => {
+  it('does not answer the keyboard', async () => {
+    /* Mounted, holding its score and its history, and silent. */
+    render(<App active={false} />);
+    await screen.findByText(/Componium/);
+    await waitFor(() => expect(document.querySelector('.tc')).toBeTruthy());
+    const before = timecode();
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    fireEvent.keyDown(document.body, { key: 'End' });
+    expect(timecode()).toBe(before);
+  });
+});
+
 describe('the playhead follows the film frame by frame', () => {
   /** Give the element a frame callback and return a way to present frames. */
   function presents(video: HTMLVideoElement) {

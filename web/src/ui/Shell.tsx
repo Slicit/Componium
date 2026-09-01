@@ -22,7 +22,7 @@ export function Shell() {
       <Nav route={route} />
       <div className="shell-body">
         <div className={admin ? 'shell-away' : 'shell-here'} aria-hidden={admin || undefined}>
-          <App />
+          <App active={!admin} />
         </div>
         {admin && <Admin route={route} />}
       </div>

@@ -28,6 +28,7 @@ import { insertPreset } from './core/edits';
 import { channelsOf, kindOf } from './core/score';
 import { followFrames } from './ui/frameClock';
 import { settingOf, writeSetting } from './core/settings';
+import { isTyping } from './core/typing';
 import type { Preset } from './core/presets';
 import { canCollapse } from './core/layout';
 import { menuFor } from './ui/menuItems';
@@ -46,7 +47,7 @@ interface Film { name: string; size: number; preview?: boolean }
  */
 const NO_MUTES = new Set<string>();
 
-export function App() {
+export function App({ active = true }: { active?: boolean } = {}) {
   const [score, setScore] = useState<Score | null>(null);
   const [rig, setRig] = useState<Rig | null>(null);
   const [films, setFilms] = useState<Film[]>([]);
@@ -332,9 +333,19 @@ export function App() {
    * editing model.
    */
   useEffect(() => {
+    /* Not while somebody is somewhere else. The studio stays mounted behind
+     * the admin so that it keeps its score and its undo history, and a global
+     * key listener does not care that its own subtree is hidden: Delete was
+     * still deleting the selection while a person was filling in a form two
+     * sections away. */
+    if (!active) return;
+
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+      /* composedPath, not target. An event crossing a shadow boundary is
+       * retargeted to the host, so an input inside a web component arrives
+       * claiming to be that component and a guard written against tagName
+       * waves it straight through. See core/typing.ts. */
+      if (isTyping(e)) return;
       /* Nothing to act on before the score arrives, and every branch below
        * assumes there is one. */
       if (!score) return;
@@ -462,7 +473,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [time, fps, duration, seek, view, onView, history, edit, save, score, rig, clipboard]);
+  }, [active, time, fps, duration, seek, view, onView, history, edit, save, score, rig, clipboard]);
 
   /* The shuttle itself. Runs the transport at a multiple of speed when the
    * video can do it, and moves the playhead directly when there is no film —

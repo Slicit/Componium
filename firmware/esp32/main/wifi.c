@@ -53,6 +53,23 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data)
         if (!s_have_target) {
             return;
         }
+        /* The reason code, because without it every failure looks identical
+         * from the outside: a wrong password, a network out of range and a
+         * 5GHz-only SSID all present as a board that does not come up. This
+         * board has no screen, so the log is the only place it can say which.
+         *
+         * 15 is a handshake that failed, which almost always means the
+         * password. 201 is no such network, which on an ESP32 very often means
+         * the network is 5GHz: there is no 5GHz radio in this chip and there
+         * never was. */
+        wifi_event_sta_disconnected_t *why = (wifi_event_sta_disconnected_t *)data;
+        ESP_LOGW(TAG, "disconnected, reason %d%s", why->reason,
+                 why->reason == WIFI_REASON_NO_AP_FOUND
+                     ? " (no such network; this chip is 2.4GHz only)"
+                 : why->reason == WIFI_REASON_HANDSHAKE_TIMEOUT
+                     || why->reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT
+                     ? " (handshake failed; usually the password)"
+                     : "");
         if (s_limit && ++s_tries >= s_limit) {
             ESP_LOGW(TAG, "gave up after %d attempts", s_tries);
             xEventGroupSetBits(s_state, FAILED_BIT);
@@ -107,9 +124,18 @@ static void aim(const char *ssid, const char *pass, int limit)
     wifi_config_t cfg = { 0 };
     strlcpy((char *)cfg.sta.ssid, ssid, sizeof(cfg.sta.ssid));
     strlcpy((char *)cfg.sta.password, pass, sizeof(cfg.sta.password));
-    /* Open networks exist and are legitimate here: a dedicated cinema VLAN
-     * with no internet route is a reasonable thing to put a node on. */
-    cfg.sta.threshold.authmode = pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+    /* The weakest security to accept, not the expected one. WPA2 as a floor
+     * refuses a mixed WPA/WPA2 access point that would have worked perfectly
+     * well, and refusing to join is a worse outcome here than joining an older
+     * network somebody deliberately pointed us at.
+     *
+     * Open networks are legitimate: a dedicated cinema VLAN with no route to
+     * the internet is a reasonable thing to put a node on. */
+    cfg.sta.threshold.authmode = pass[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
+    /* Capable, not required. WPA3 and some WPA2 networks want management frame
+     * protection; requiring it would refuse the many that do not offer it. */
+    cfg.sta.pmf_cfg.capable = true;
+    cfg.sta.pmf_cfg.required = false;
 
     s_tries = 0;
     s_limit = limit;
