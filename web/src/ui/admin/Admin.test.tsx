@@ -189,25 +189,65 @@ describe('devices', () => {
     expect(sent.instruments[0].position).toEqual([0, 1.4, -0.1]);
   });
 
-  it('says what was wrong rather than pretending it saved', async () => {
+  /** A refusal, shaped the way a real Response is: one body, read once. */
+  function refusesWith(status: number, body: string) {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/rig/options')) {
         return { ok: true, json: async () => options } as Response;
       }
       if (init?.method === 'PUT') {
+        let read = false;
         return {
           ok: false,
-          json: async () => ({ problems: ['wind.main: needs an address, host:port'] }),
-        } as Response;
+          status,
+          /* A body is a stream and can only be read once. The first version of
+           * this mock offered json() and no text(), which let the page get
+           * away with reading it twice; the real thing threw on the second
+           * read and turned every server message into "the studio refused
+           * it". A mock is only worth its accuracy. */
+          text: async () => {
+            if (read) throw new TypeError('body stream already read');
+            read = true;
+            return body;
+          },
+          json: async () => {
+            if (read) throw new TypeError('body stream already read');
+            read = true;
+            return JSON.parse(body);
+          },
+        } as unknown as Response;
       }
       return { ok: true, json: async () => rig } as Response;
     }));
+  }
+
+  async function tryToSave() {
     await devices();
-    fireEvent.change(screen.getByLabelText('Instrument 2 address'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Instrument 2 address'),
+                     { target: { value: '10.0.0.1:5570' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save the rig' }));
-    await waitFor(() =>
-      expect(screen.getByText(/needs an address/)).toBeTruthy());
+  }
+
+  it('lists what was wrong rather than pretending it saved', async () => {
+    refusesWith(400, JSON.stringify({ problems: ['wind.main: needs an address, host:port'] }));
+    await tryToSave();
+    await waitFor(() => expect(screen.getByText(/needs an address/)).toBeTruthy());
     expect(screen.getByText('Not saved')).toBeTruthy();
+  });
+
+  it('shows a plain message from the server, which is most of them', async () => {
+    /* The one that was invisible. Every failure that was not a validation list
+     * came out as "the studio refused it", while the server had been saying
+     * "permission denied" on every save for a day. */
+    refusesWith(500, 'open /opt/componium/deploy-rig.toml.tmp: permission denied\n');
+    await tryToSave();
+    await waitFor(() => expect(screen.getByText(/permission denied/)).toBeTruthy());
+  });
+
+  it('says something useful even when the server says nothing', async () => {
+    refusesWith(502, '');
+    await tryToSave();
+    await waitFor(() => expect(screen.getByText(/status 502/)).toBeTruthy());
   });
 
   it('is read only when there is no file to write', async () => {

@@ -164,15 +164,35 @@ func Save(path string, c *Config) error {
 			len(c.Instruments), len(back.Instruments))
 	}
 
+	return writeFile(path, []byte(text))
+}
+
+// writeFile puts the bytes there, atomically where the filesystem allows it.
+//
+// The preferred way is a temp file beside the target and a rename, so that an
+// interrupted save leaves the previous rig rather than half of a new one: a
+// rig file is what the conductor reads to decide what is on the end of every
+// wire, and a truncated one is worse than a stale one.
+//
+// That needs a writable *directory*, and there is a normal way to run this
+// where the directory is read only and the file is not: a single file bind
+// mount, which is how the deployment hands the studio its rig. The temp file
+// cannot be created, and even if it could, renaming over the target would
+// replace a mount point rather than a file. There is no atomic option there,
+// so the fallback is an ordinary write in place, with the small risk that
+// comes with it.
+//
+// Discovered the way these things are: the studio refused every save with
+// "permission denied" on a file it had just been told was writable.
+func writeFile(path string, data []byte) error {
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(text), 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := os.WriteFile(tmp, data, 0o644); err == nil {
+		if err := os.Rename(tmp, path); err == nil {
+			return nil
+		}
 		os.Remove(tmp)
-		return err
 	}
-	return nil
+	return os.WriteFile(path, data, 0o644)
 }
 
 const header = `# Written by the Componium studio. Editing it by hand is fine and always was:

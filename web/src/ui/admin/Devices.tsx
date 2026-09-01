@@ -135,9 +135,16 @@ export function Devices() {
       await load();
       return;
     }
-    const body = await res.json().catch(() => null);
-    if (body?.problems) { setProblems(body.problems); return; }
-    setError(await res.text().catch(() => 'the studio refused it'));
+    /* Read once. A response body is a stream: calling json() consumes it, so
+     * the text() that used to follow threw on an already read stream and every
+     * failure that was not a validation list surfaced as "the studio refused
+     * it". The server had been saying exactly what was wrong the whole time. */
+    const said = await res.text().catch(() => '');
+    try {
+      const body = JSON.parse(said);
+      if (Array.isArray(body?.problems)) { setProblems(body.problems); return; }
+    } catch { /* not JSON, so it is a plain message and shown as one */ }
+    setError(said.trim() || ('the studio refused it, with status ' + res.status));
   };
 
   const editable = rig?.editable ?? false;
