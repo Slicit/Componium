@@ -126,5 +126,10 @@ export function useLive() {
     return () => window.removeEventListener('pagehide', go);
   }, [armed]);
 
-  return { state, armed, arm, disarm, follow };
+  /** Put a refusal away once it has been read. */
+  const forget = useCallback(() => {
+    setState((was) => ({ ...was, problem: undefined }));
+  }, []);
+
+  return { state, armed, arm, disarm, follow, forget };
 }

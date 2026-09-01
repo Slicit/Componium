@@ -628,6 +628,21 @@ button:hover { border-color: #3a4553; }
 .adm-set p { margin: 6px 0 8px; line-height: 1.5; }
 .adm-reset { font-size: 11px; padding: 2px 8px; }
 
+/* A refusal gets a line of its own, because a refusal in a tooltip is a
+   refusal nobody reads. */
+.bar-problem {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  padding: 7px 16px;
+  background: color-mix(in srgb, var(--warn, #c1121f) 12%, var(--ground));
+  border-bottom: 1px solid var(--warn, #c1121f);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.bar-dismiss { margin-left: auto; font-size: 11px; padding: 2px 8px; flex: 0 0 auto; }
+
 /* Armed is a state worth seeing from across a room, because the hazard is
    somebody wandering off with it on. */
 .toggle.live.on {

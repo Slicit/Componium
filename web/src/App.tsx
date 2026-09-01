@@ -600,6 +600,13 @@ export function App({ active = true }: { active?: boolean } = {}) {
 
   return (
     <div className="app">
+      {live.state.problem && !live.armed && (
+        <p className="bar-problem" role="alert">
+          <strong>Not live:</strong> {live.state.problem}
+          <button className="bar-dismiss" onClick={live.forget}
+                  aria-label="Dismiss">dismiss</button>
+        </p>
+      )}
       <header className="bar">
         <h1>Componium <span className="dim">studio</span> <span className="tag">v2</span></h1>
         <select
@@ -676,9 +683,6 @@ export function App({ active = true }: { active?: boolean } = {}) {
               ? 'all virtual'
               : live.state.real + ' live'}
           </span>
-        )}
-        {live.state.problem && !live.armed && (
-          <span className="chip warn" title={live.state.problem}>live refused</span>
         )}
         <button
           className={'toggle' + (overlays.calm ? ' on' : '')}

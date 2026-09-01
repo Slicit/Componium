@@ -275,6 +275,39 @@ describe('driving the room from the studio', () => {
       .toEqual([{ armed: true }, { armed: false }]);
   });
 
+  it('says why it would not arm, where somebody will read it', async () => {
+    /* Reported as "go live = live refused", which is exactly as much as the
+     * chip said out loud: the server's reason was on a title attribute, three
+     * seconds of hovering away. A diagnosis that exists and is not where
+     * anybody is looking is the same as no diagnosis. */
+    const why = 'wind.main and light.ambient are both CIP at 192.168.1.145:5570';
+    /* Everything that is not about live still has to work, or the studio
+     * cannot even open a film to press the button in. */
+    const rest = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/live' && init?.method === 'POST') {
+        return {
+          ok: false,
+          json: async () => ({ armed: false, problem: why, real: 0, silent: true,
+                               media: 0, precision: 0, cues: 0, curves: 0 }),
+        } as Response;
+      }
+      if (url === '/api/live') {
+        return { ok: true, json: async () => ({ armed: false, real: 0, silent: true,
+                 media: 0, precision: 0, cues: 0, curves: 0 }) } as Response;
+      }
+      return (rest as typeof fetch)(url, init);
+    }));
+    await openFilm();
+    fireEvent.click(screen.getByRole('button', { name: /go live/ }));
+    await waitFor(() => expect(screen.getByText(new RegExp('both CIP'))).toBeTruthy());
+    expect(screen.getByRole('alert')).toBeTruthy();
+
+    // And it can be put away once it has been read.
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
   it('says when an armed rig will not move anything', async () => {
     /* An armed rig of nothing but virtual devices looks identical to a broken
      * one from across a room, and this is the room where somebody is about to

@@ -122,6 +122,54 @@ func TestARigThatWouldNotLoadIsNotWritten(t *testing.T) {
 	}
 }
 
+func TestTwoCipEntriesOnOneBoardAreRefusedAtSaveTime(t *testing.T) {
+	/* The obvious first move when you have one board and two effects, and the
+	 * studio used to let it be saved: nothing noticed until arming, because
+	 * the collision only exists once the manifests come back from the device.
+	 * It is visible in the file, though. Two entries, one address. */
+	bad := &Config{Instruments: []InstConfig{
+		{ID: "wind.main", Kind: "wind", Driver: "cip", Addr: "192.168.1.145:5570"},
+		{ID: "light.ambient", Kind: "light", Driver: "cip", Addr: "192.168.1.145:5570"},
+	}}
+	problems := bad.Validate()
+	if len(problems) != 1 {
+		t.Fatalf("problems: %v", problems)
+	}
+	said := problems[0]
+	for _, want := range []string{"wind.main", "light.ambient", "one node is one", "sACN"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("did not mention %q: %s", want, said)
+		}
+	}
+}
+
+func TestOneBoardWithTwoProtocolsIsFine(t *testing.T) {
+	/* And the shape that actually works, which the message points at: the fan
+	 * on CIP and the strip on sACN, same board, different ports. */
+	ok := &Config{Instruments: []InstConfig{
+		{ID: "wind.main", Kind: "wind", Driver: "cip", Addr: "192.168.1.145:5570"},
+		{ID: "light.ambient", Kind: "light", Driver: "sacn",
+			Addr: "192.168.1.145:5568", Universe: 1, Start: 1, Mode: "rgb"},
+	}}
+	if problems := ok.Validate(); len(problems) != 0 {
+		t.Errorf("refused a rig that works: %v", problems)
+	}
+}
+
+func TestTwoSacnFixturesOnOneAddressAreFine(t *testing.T) {
+	// A DMX universe is meant to carry several fixtures at different start
+	// addresses. Only CIP has the one node one instrument rule.
+	ok := &Config{Instruments: []InstConfig{
+		{ID: "light.ambient", Kind: "light", Driver: "sacn",
+			Addr: "192.168.1.90:5568", Universe: 1, Start: 1, Mode: "rgb"},
+		{ID: "light.event", Kind: "light", Driver: "sacn",
+			Addr: "192.168.1.90:5568", Universe: 1, Start: 4, Mode: "rgb"},
+	}}
+	if problems := ok.Validate(); len(problems) != 0 {
+		t.Errorf("refused two fixtures on one universe: %v", problems)
+	}
+}
+
 func TestWhichDriversSuitWhichKinds(t *testing.T) {
 	// sACN builds a DMX light and nothing else. Offering it for a fogger is
 	// offering a rig that will not start.

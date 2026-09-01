@@ -61,6 +61,8 @@ func DriversFor(kind string) []string {
 func (c *Config) Validate() []string {
 	var problems []string
 	seen := map[string]bool{}
+	// Which entry already claimed a CIP address.
+	speaksFor := map[string]string{}
 
 	for i, in := range c.Instruments {
 		where := fmt.Sprintf("instrument %d", i+1)
@@ -123,6 +125,21 @@ func (c *Config) Validate() []string {
 		if in.Addr != "" {
 			if bad := addrProblem(in.Addr, driver); bad != "" {
 				problems = append(problems, where+": "+bad)
+			}
+		}
+
+		// One node is one instrument. A CIP node reports its own manifest, so
+		// two entries at one address come back as the same instrument and the
+		// rig refuses to start. Caught here, where the address is being typed,
+		// rather than at the moment somebody presses go.
+		if driver == "cip" && in.Addr != "" {
+			if first, twice := speaksFor[in.Addr]; twice {
+				problems = append(problems, fmt.Sprintf(
+					"%s and %s are both CIP at %s, and one node is one "+
+						"instrument. An LED strip on that board is reached by "+
+						"sACN on its own port, not by CIP", first, where, in.Addr))
+			} else {
+				speaksFor[in.Addr] = where
 			}
 		}
 	}
