@@ -51,6 +51,14 @@ Four parts, in the order they bite:
    under the playhead. Where it names none, every channel takes it.
 4. **Offered means buildable.** A kind with no cue action gets no cue presets.
    Silence in the picker beats a button that does nothing.
+5. **Offered means faithful.** Buildable is not the same as survivable. A cue
+   carries when, for how long, and how hard; everything else in a shape is
+   lost. So a shape becomes cues only when that is all it ever was: a preset
+   that declares an action is an event, and the instrument owns the envelope
+   once the burst starts; a preset without one is a level shape, and the only
+   level shape a cue track can carry is a rhythm, several pulses arriving as
+   several cues. Flatten a single one and what is left is "on at full for
+   three seconds", which is not a fade up.
 
 ## Where the rule lives
 
@@ -63,6 +71,23 @@ The both-directions part is the load bearing half. Asserting only that what is
 offered can be built is satisfied by offering nothing, so it also asserts that
 everything *not* offered would genuinely have been refused.
 
+## The clause that was missing, and came back a day later
+
+Clauses 1 to 4 shipped first and the report came straight back: fade and
+firelight on a light event track produce a stripe at full brightness. Correct,
+and the same fault one step along. The rule asked whether a preset could be
+built into a track. It did not ask whether the preset was still itself
+afterwards, and a ramp flattened to its peak is not.
+
+Three presets turned out to be events wearing no label, so they now declare
+one: Flash, Impact and Gust. The rest of the light, wind and shake library is
+level shapes, which a dimmer can hold and a cue track cannot. A `light.event`
+track is offered Flash and Strobe. A `light.ambient` track is still offered all
+seven, because a dimmer can do all seven.
+
+Worth saying plainly, since it is what the first pass got wrong: **a test that
+walks an index still only asks the question you wrote down.**
+
 ## Decisions
 
 - **2026-09-01 · One cue per pulse rather than a `repeats` flag on the preset.**
@@ -74,6 +99,18 @@ everything *not* offered would genuinely have been refused.
   for motion because there is no truthful verb for a platform; you do not tell
   it to "move", you tell it where to be. The fix was to stop offering motion
   presets on cue tracks, not to make up a word for an instrument to ignore.
+- **2026-09-01 · `action` means what it always said it meant.** The field was
+  documented as "an action name, for the devices driven by events rather than
+  levels" and was set on foggers and misters only, while `actionForKind` let
+  every other kind's presets onto a cue track through the back door. Making
+  three presets declare it, rather than adding a second flag beside it, is the
+  smaller change and the truer one: there was never a missing concept, only
+  three entries that had not used the one that was there.
+- **2026-09-01 · Lightning stays a curve.** It is conceptually two strikes and
+  mechanically one pulse: the gaps between them sit at 0.1 and 0.05 rather than
+  at zero, which is the afterglow that makes it read as lightning. Zeroing them
+  to win two cues would trade the shape for the count on the track where the
+  shape actually works.
 - **2026-09-01 · The base holds colour, and only colour.** Feeding the track's
   value under the playhead into the level channel too would have turned every
   insert into a blend with the curve it replaces. An existing test caught that

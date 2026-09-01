@@ -110,7 +110,10 @@ describe('valueOf', () => {
 
 describe('build', () => {
   const fade = presetById('fog-fade')!;
-  const gust = presetById('wind-gust')!;
+  /* A level shape, deliberately: these check what build does with a shape
+   * nothing can flatten into an event. Gust is an event now and would take
+   * the other branch. */
+  const rising = presetById('wind-build')!;
 
   it('makes a cue for a dosed device, lasting the whole span', () => {
     const out = must(build(fade, 100, ['output']));
@@ -123,11 +126,11 @@ describe('build', () => {
   });
 
   it('makes points for a dimmed device', () => {
-    const out = must(build(gust, 60, ['intensity']));
+    const out = must(build(rising, 60, ['intensity']));
     expect(out.cues).toBeUndefined();
-    expect(out.points!.length).toBe(gust.shape.length);
+    expect(out.points!.length).toBe(rising.shape.length);
     expect(out.points![0].t).toBe(60);
-    expect(out.points![out.points!.length - 1].t).toBeCloseTo(60 + gust.seconds);
+    expect(out.points![out.points!.length - 1].t).toBeCloseTo(60 + rising.seconds);
   });
 
   it('follows the target when it disagrees with the preset', () => {
@@ -141,12 +144,12 @@ describe('build', () => {
   });
 
   it('makes a cue from a preset with no action of its own, when told one', () => {
-    const out = must(build(gust, 10, ['intensity'], { as: 'cue', action: 'gust' }));
+    const out = must(build(rising, 10, ['intensity'], { as: 'cue', action: 'gust' }));
     expect(out.cues![0].action).toBe('gust');
   });
 
   it('refuses a cue it has no action for, rather than inventing a verb', () => {
-    expect(build(gust, 10, ['intensity'], { as: 'cue' })).toBeNull();
+    expect(build(rising, 10, ['intensity'], { as: 'cue' })).toBeNull();
   });
 
   it('gives every channel the envelope', () => {
@@ -160,24 +163,24 @@ describe('build', () => {
   });
 
   it('reports the span it occupies', () => {
-    const out = must(build(gust, 30));
+    const out = must(build(rising, 30));
     expect(out.from).toBe(30);
-    expect(out.to).toBeCloseTo(30 + gust.seconds);
+    expect(out.to).toBeCloseTo(30 + rising.seconds);
   });
 
   it('takes a length that overrides the default', () => {
-    const out = must(build(gust, 0, ['intensity'], { seconds: 20 }));
+    const out = must(build(rising, 0, ['intensity'], { seconds: 20 }));
     expect(out.to).toBe(20);
     expect(out.points![out.points!.length - 1].t).toBe(20);
   });
 
   it('ignores a length of zero or less rather than collapsing the shape', () => {
-    expect(must(build(gust, 0, ['intensity'], { seconds: 0 })).to).toBeCloseTo(gust.seconds);
-    expect(must(build(gust, 0, ['intensity'], { seconds: -5 })).to).toBeCloseTo(gust.seconds);
+    expect(must(build(rising, 0, ['intensity'], { seconds: 0 })).to).toBeCloseTo(rising.seconds);
+    expect(must(build(rising, 0, ['intensity'], { seconds: -5 })).to).toBeCloseTo(rising.seconds);
   });
 
   it('scales how hard it is', () => {
-    const out = must(build(gust, 0, ['intensity'], { scale: 0.5 }));
+    const out = must(build(rising, 0, ['intensity'], { scale: 0.5 }));
     const peak = Math.max(...out.points!.map((p) => p.value.intensity));
     expect(peak).toBeCloseTo(0.5);
   });
@@ -192,7 +195,7 @@ describe('build', () => {
   });
 
   it('builds with no channels without throwing', () => {
-    expect(() => build(gust, 0, [])).not.toThrow();
+    expect(() => build(rising, 0, [])).not.toThrow();
     expect(() => build(fade, 0, [])).not.toThrow();
   });
 });

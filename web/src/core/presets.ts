@@ -189,9 +189,11 @@ export const PRESETS: readonly Preset[] = [
     shape: HOLD,
   },
 
-  /* Wind: a fan is dimmed, so these are curves. */
+  /* Wind: a fan is dimmed, so these are curves, except the one that is an
+     event. A gust is a thing that happens; a breeze building over twelve
+     seconds is a level, and no cue can say that. */
   {
-    id: 'wind-gust', name: 'Gust', kinds: ['wind'], seconds: 4,
+    id: 'wind-gust', name: 'Gust', kinds: ['wind'], seconds: 4, action: 'gust',
     hint: 'Up fast, down slowly.', shape: HIT,
   },
   {
@@ -213,7 +215,7 @@ export const PRESETS: readonly Preset[] = [
 
   /* Shake. */
   {
-    id: 'shake-hit', name: 'Impact', kinds: ['shake'], seconds: 1.2,
+    id: 'shake-hit', name: 'Impact', kinds: ['shake'], seconds: 1.2, action: 'hit',
     hint: 'One jolt with a short ring-out.', shape: HIT,
   },
   {
@@ -230,9 +232,14 @@ export const PRESETS: readonly Preset[] = [
   },
 
   /* Light. Shapes only: the colour is whatever the track already carries, so
-   * these are about how it moves rather than what colour it is. */
+   * these are about how it moves rather than what colour it is.
+   *
+   * Two of them are events and the rest are levels, which is the difference
+   * between what a flash bulb can be told and what a dimmer can. A flash is
+   * one instant and a strobe is twelve of them; a fade, a breath and a
+   * flicker are shapes, and a cue cannot hold a shape. */
   {
-    id: 'light-flash', name: 'Flash', kinds: ['light'], seconds: 0.3,
+    id: 'light-flash', name: 'Flash', kinds: ['light'], seconds: 0.3, action: 'flash',
     hint: 'One bright instant.', shape: HIT,
   },
   {
@@ -302,8 +309,21 @@ export const PRESETS: readonly Preset[] = [
 export function presetsFor(kind: string, holds: 'cue' | 'curve' = 'curve'): Preset[] {
   return PRESETS.filter((p) => {
     if (p.kinds.length && !p.kinds.includes(kind)) return false;
-    if (holds === 'cue' && !(p.action ?? actionForKind(kind))) return false;
-    return true;
+    if (holds !== 'cue') return true;
+    /* Nothing to send it. */
+    if (!(p.action ?? actionForKind(kind))) return false;
+    /* A cue carries three facts: when, for how long, and how hard. Anything
+     * else in the shape is lost, so a shape may only become cues when that is
+     * all it ever was.
+     *
+     * A preset with an action is an event by declaration — the instrument owns
+     * the envelope once the burst has started, which is what a fogger and a
+     * shaker and a flash bulb actually do with one. A preset without an action
+     * is a level shape, and the only level shape a cue track can carry is a
+     * rhythm: several pulses arriving as several cues. Flatten a single one
+     * and what is left is "on at full for three seconds". That is not a fade
+     * up. It is a stripe, which is exactly how it was reported. */
+    return !!p.action || pulses(p.shape).length > 1;
   });
 }
 

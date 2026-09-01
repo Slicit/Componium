@@ -21,6 +21,7 @@
 import { describe, it, expect } from 'vitest';
 import { insertPreset } from './edits';
 import { PRESETS, presetsFor, presetById, pulses, actionForKind } from './presets';
+import type { Preset } from './presets';
 import { History } from './history';
 import { channelsForKind, channelsOf } from './score';
 import type { Rig, Track } from './score';
@@ -45,7 +46,11 @@ const track = (kind: string, type: 'cue' | 'curve'): Track =>
 
 /* --- what is offered is what can be built ------------------------------- */
 
-describe('the picker offers exactly what the insert can build', () => {
+/** Whether a cue could carry this shape without losing what it is. */
+const carries = (preset: Preset) =>
+  !!preset.action || pulses(preset.shape).length > 1;
+
+describe('the picker offers exactly what a track can hold faithfully', () => {
   for (const kind of KINDS) {
     for (const holds of ['curve', 'cue'] as const) {
       const offered = new Set(presetsFor(kind, holds).map((p) => p.id));
@@ -57,13 +62,49 @@ describe('the picker offers exactly what the insert can build', () => {
           const built = insertPreset(t, preset, 10, channelsOf(t, rig), {}, rig);
           /* Both directions. Offering something that refuses is an insert that
            * silently does nothing; refusing something that would have worked
-           * is a shape a person cannot reach. */
-          expect(!!built, preset.id + ' on a ' + kind + ' ' + holds + ' track')
-            .toBe(offered.has(preset.id));
+           * is a shape a person cannot reach. On a cue track there is a second
+           * clause: buildable is not the same as faithful, and a shape that
+           * arrives as a single full-level block is not the shape that was
+           * picked. */
+          const want = holds === 'cue' ? !!built && carries(preset) : !!built;
+          expect(offered.has(preset.id),
+                 preset.id + ' on a ' + kind + ' ' + holds + ' track').toBe(want);
         }
       });
     }
   }
+});
+
+describe('a level shape never arrives as a block', () => {
+  /* Reported as "fade or fire produce only a stripe at 100% light". A cue
+   * carries when, how long and how hard; a fade up carries a journey between
+   * two levels, and flattening it leaves "on at full for three seconds". */
+  for (const kind of KINDS) {
+    for (const preset of presetsFor(kind, 'cue')) {
+      it(preset.id + ' on a ' + kind + ' cue track is not a stripe', () => {
+        const t = track(kind, 'cue');
+        run(insertPreset(t, preset, 10, channelsOf(t, rig), {}, rig));
+        /* Either the instrument owns the envelope, having been sent a verb it
+         * declared, or the shape survives as several cues. Never one cue
+         * standing in for a shape it cannot represent. */
+        expect(!!preset.action || t.cues!.length > 1).toBe(true);
+      });
+    }
+  }
+
+  it('keeps the light presets that are events and drops the ones that are not',
+     () => {
+       const ids = presetsFor('light', 'cue').map((p) => p.id);
+       expect(ids).toEqual(['light-flash', 'light-strobe']);
+       /* And a dimmer still gets all seven. */
+       expect(presetsFor('light', 'curve')).toHaveLength(7);
+     });
+
+  it('offers a fade only where a fade means something', () => {
+    expect(presetsFor('light', 'curve').map((p) => p.id)).toContain('light-fade-in');
+    expect(presetsFor('light', 'cue').map((p) => p.id)).not.toContain('light-fade-in');
+    expect(presetsFor('light', 'cue').map((p) => p.id)).not.toContain('light-firelight');
+  });
 });
 
 /* --- the shape survives the trip ---------------------------------------- */

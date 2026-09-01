@@ -26,6 +26,7 @@ import { useVersions } from './ui/useVersions';
 import { Effects } from './ui/Effects';
 import { insertPreset } from './core/edits';
 import { channelsOf, kindOf } from './core/score';
+import { followFrames } from './ui/frameClock';
 import type { Preset } from './core/presets';
 import { canCollapse } from './core/layout';
 import { menuFor } from './ui/menuItems';
@@ -309,6 +310,27 @@ export function App() {
     setTime(t);
     view.reveal(t);
   }, [view]);
+
+  /* Held in a ref because the loop below must not be restarted when `follow`
+   * is rebuilt. It is rebuilt whenever the viewport changes, which is once per
+   * scroll, and a loop torn down and started again mid-scroll drops frames for
+   * a reason that has nothing to do with the film. */
+  const followRef = useRef(follow);
+  followRef.current = follow;
+
+  /* While the film plays, the playhead comes from the film's own frames.
+   *
+   * `timeupdate` is throttled to about four a second by every browser, which
+   * is below what any of this is for: a strobe of twelve pulses over two
+   * seconds is a 6Hz square wave, and four samples a second cannot reconstruct
+   * it. The room was never struggling to draw it — it was being handed four
+   * light values a second. See ui/frameClock.ts. */
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    const v = video.current;
+    if (!playing || !v) return;
+    return followFrames(v, (t) => followRef.current(t));
+  }, [playing, film]);
 
   /* --- keyboard ---
    *
@@ -664,9 +686,18 @@ export function App() {
             controls
             preload="metadata"
             data-testid="film"
-            onTimeUpdate={(e) => follow(e.currentTarget.currentTime)}
+            /* Only while stopped. Playing, the frame clock owns the
+               playhead, and `currentTime` is a slightly later number than the
+               presented frame's own — interleaving the two makes a playhead
+               that steps backwards several times a second. */
+            onTimeUpdate={(e) => {
+              if (e.currentTarget.paused) follow(e.currentTarget.currentTime);
+            }}
             onSeeked={(e) => follow(e.currentTarget.currentTime)}
             onLoadedMetadata={(e) => follow(e.currentTarget.currentTime)}
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onEnded={() => setPlaying(false)}
           />
         ) : (
           <p className="dim small hint">

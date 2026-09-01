@@ -123,6 +123,104 @@ describe('the playhead follows the film', () => {
   });
 });
 
+/* Playing is the case timeupdate cannot serve.
+ *
+ * Browsers throttle it to about four a second, which is below what any of this
+ * is for: a strobe of twelve pulses over two seconds is a 6Hz square wave and
+ * four samples a second cannot reconstruct it. Nothing was struggling to draw
+ * it — the room was being handed four light values a second.
+ *
+ * The frame clock is the fix and it is pure wiring, which is the kind of thing
+ * this file exists to catch. jsdom has no requestVideoFrameCallback, so the
+ * element is given one, which is also what the browser will hand it.
+ */
+describe('the playhead follows the film frame by frame', () => {
+  /** Give the element a frame callback and return a way to present frames. */
+  function presents(video: HTMLVideoElement) {
+    let cb: ((now: number, meta: { mediaTime: number }) => void) | null = null;
+    let cancelled = 0;
+    Object.assign(video, {
+      requestVideoFrameCallback(fn: (now: number, meta: { mediaTime: number }) => void) {
+        cb = fn;
+        return 1;
+      },
+      cancelVideoFrameCallback() { cancelled++; },
+    });
+    return {
+      frame(t: number) { cb?.(0, { mediaTime: t }); },
+      get wired() { return cb !== null; },
+      get cancelled() { return cancelled; },
+    };
+  }
+
+  /** jsdom never actually plays, so say so where the code asks. */
+  function playing(video: HTMLVideoElement, is: boolean) {
+    Object.defineProperty(video, 'paused', { value: !is, configurable: true });
+  }
+
+  it('starts on play and follows the presented frame', async () => {
+    const video = await openFilm();
+    const film = presents(video);
+    playing(video, true);
+    fireEvent.play(video);
+
+    await waitFor(() => expect(film.wired).toBe(true));
+    film.frame(61.5);
+    await waitFor(() => expect(timecode()).toBe('00:01:01:12'));
+  });
+
+  it('keeps following frame after frame', async () => {
+    const video = await openFilm();
+    const film = presents(video);
+    playing(video, true);
+    fireEvent.play(video);
+    await waitFor(() => expect(film.wired).toBe(true));
+
+    for (const [at, want] of [[1, '00:00:01:00'], [2.5, '00:00:02:12'], [4, '00:00:04:00']] as const) {
+      film.frame(at);
+      await waitFor(() => expect(timecode()).toBe(want));
+    }
+  });
+
+  it('lets go on pause', async () => {
+    const video = await openFilm();
+    const film = presents(video);
+    playing(video, true);
+    fireEvent.play(video);
+    await waitFor(() => expect(film.wired).toBe(true));
+
+    playing(video, false);
+    fireEvent.pause(video);
+    await waitFor(() => expect(film.cancelled).toBe(1));
+  });
+
+  it('ignores timeupdate while playing', async () => {
+    /* currentTime is a slightly later number than the presented frame's own,
+     * so a playhead fed by both steps backwards several times a second. While
+     * the film runs, the frames own the clock. */
+    const video = await openFilm();
+    const film = presents(video);
+    playing(video, true);
+    fireEvent.play(video);
+    await waitFor(() => expect(film.wired).toBe(true));
+
+    film.frame(30);
+    await waitFor(() => expect(timecode()).toBe('00:00:30:00'));
+    video.currentTime = 90;
+    fireEvent.timeUpdate(video);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(timecode()).toBe('00:00:30:00');
+  });
+
+  it('still listens to timeupdate once the film is stopped', async () => {
+    const video = await openFilm();
+    playing(video, false);
+    video.currentTime = 12;
+    fireEvent.timeUpdate(video);
+    await waitFor(() => expect(timecode()).toBe('00:00:12:00'));
+  });
+});
+
 describe('the timeline drives the film', () => {
   /* The other direction: a keystroke moves the playhead, and the picture has
    * to go with it or the two are showing different moments. */
