@@ -112,8 +112,16 @@ type MotionTravel struct {
 	Yaw   float64 `toml:"yaw"`
 }
 
-// Load reads a rig file.
+// Load reads a rig file, or the chosen rig from a directory of them.
+//
+// Taking a directory here rather than only in the studio is what makes the
+// choice shared: `componium play -rig /rigs` reads whatever was picked in the
+// browser, and nothing had to tell it.
 func Load(path string) (*Config, error) {
+	path, err := Resolve(path)
+	if err != nil {
+		return nil, err
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

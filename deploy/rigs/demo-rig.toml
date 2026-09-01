@@ -1,0 +1,105 @@
+# Written by the Componium studio. Editing it by hand is fine and always was:
+# this is the file, not a copy of it, and the studio reads whatever is here the
+# next time it starts.
+#
+# The conductor reads this once, when it starts. A change here reaches a running
+# show only when that show is restarted.
+
+[rig]
+name = "demonstration, no hardware"
+
+[[instrument]]
+id = "wind.main"
+kind = "wind"
+driver = "cip"
+addr = "192.168.1.145:5570"
+
+[instrument.position]
+x = 0.0
+y = 1.7
+z = 0.7
+
+[[instrument]]
+id = "light.ambient"
+kind = "light"
+driver = "cip"
+addr = "192.168.1.145:5570"
+latency = "20ms"
+
+[instrument.position]
+x = 0.0
+y = 1.4
+z = -0.1
+
+[[instrument]]
+id = "light.event"
+kind = "light"
+driver = "virtual"
+latency = "20ms"
+
+[instrument.position]
+x = 0.0
+y = 2.5
+z = 1.2
+
+[[instrument]]
+id = "shake.seat"
+kind = "shake"
+driver = "virtual"
+latency = "5ms"
+
+[instrument.position]
+x = 0.0
+y = 0.35
+z = 3.0
+
+[[instrument]]
+id = "motion.platform"
+kind = "motion"
+driver = "virtual"
+latency = "60ms"
+
+[instrument.position]
+x = 0.0
+y = 0.5
+z = 3.0
+
+[[instrument]]
+id = "mist.main"
+kind = "mist"
+driver = "virtual"
+latency = "200ms"
+
+[instrument.position]
+x = 0.0
+y = 2.4
+z = 2.2
+
+[[instrument]]
+id = "fog.left"
+kind = "fog"
+driver = "virtual"
+latency = "2s"
+
+[instrument.position]
+x = -1.8
+y = 0.15
+z = 1.0
+
+[[instrument]]
+id = "scent.main"
+kind = "scent"
+driver = "virtual"
+latency = "1s"
+
+[instrument.position]
+x = 1.8
+y = 1.1
+z = 2.6
+
+[instrument.scents]
+1 = "smoke"
+2 = "petrichor"
+3 = "sea"
+4 = "pine"
+5 = "earth"

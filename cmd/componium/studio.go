@@ -13,7 +13,7 @@ import (
 func studioCmd(args []string) error {
 	fs := flag.NewFlagSet("studio", flag.ExitOnError)
 	scorePath := fs.String("score", "", "score to open; with -media a directory, defaults to the selected film's score")
-	rigPath := fs.String("rig", "", "rig file, so the room preview knows what is in it")
+	rigPath := fs.String("rig", "", "rig file, or a directory of them to pick from")
 	mediaPath := fs.String("media", "", "a film, or a directory of them")
 	scoresPath := fs.String("scores", "", "where generated scores live (default: beside the films)")
 	composer := fs.String("composer", "", "path to compose.py, so the library can analyse films")

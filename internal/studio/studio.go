@@ -74,7 +74,10 @@ type Server struct {
 	// back. Empty when no rig was given, and then the rig is not editable
 	// rather than editable into nowhere.
 	rigPath string
-	jobs    *Jobs
+	// rigDir is the shelf the rig came off, when -rig named a directory of
+	// them. Empty for a single file, and the picker then has nothing to offer.
+	rigDir string
+	jobs   *Jobs
 }
 
 // New opens a studio.
@@ -90,6 +93,16 @@ func New(o Options) (*Server, error) {
 		s.sc = sc
 	}
 	if o.Rig != "" {
+		// A directory is a shelf of rigs with one of them chosen; a path is
+		// that one rig. Both are ordinary things to pass.
+		if rig.Shelf(o.Rig) {
+			s.rigDir = o.Rig
+			resolved, err := rig.Resolve(o.Rig)
+			if err != nil {
+				return nil, err
+			}
+			s.rigPath = resolved
+		}
 		rc, err := rig.Load(o.Rig)
 		if err != nil {
 			return nil, err
@@ -187,6 +200,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/score", s.handleScore)
 	mux.HandleFunc("/api/rig", s.handleRig)
 	mux.HandleFunc("/api/rig/options", s.handleRigOptions)
+	mux.HandleFunc("/api/rigs", s.handleRigs)
 	mux.HandleFunc("/media", s.handleMedia)
 	mux.HandleFunc("/api/media", s.handleMediaList)
 	mux.HandleFunc("/api/library", s.handleLibrary)

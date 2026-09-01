@@ -45,7 +45,7 @@ go build -o /tmp/componium-shot ./cmd/...
 
 /tmp/componium-shot studio \
   -score="$SCORE" \
-  -rig=deploy/demo-rig.toml \
+  -rig=deploy/rigs/demo-rig.toml \
   -media="${COMPONIUM_MEDIA:-/home/claude/componium-media}" \
   -scores="${COMPONIUM_SCORES:-/home/claude/componium-scores}" \
   -addr="127.0.0.1:$PORT" >/tmp/componium-shot.log 2>&1 &

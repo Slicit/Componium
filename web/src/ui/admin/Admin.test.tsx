@@ -49,10 +49,34 @@ const options = {
 /** Every rig PUT the page made. */
 const saves: unknown[] = [];
 
+/* A shelf of rigs, as /api/rigs describes one.
+ *
+ * Stateful, because the real one is: a GET after a switch reports the rig that
+ * was switched to. A fixture that forgets is a fixture that fails a page for
+ * behaving correctly. */
+const shelf = {
+  shelf: true,
+  current: 'bench.toml',
+  rigs: ['bench.toml', 'demo.toml', 'room.toml'],
+};
+
+/** Every rig the page asked to switch to. */
+const chosen: string[] = [];
+
 beforeEach(() => {
   localStorage.clear();
   saves.length = 0;
+  chosen.length = 0;
+  shelf.current = 'bench.toml';
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith('/api/rigs')) {
+      if (init?.method === 'POST') {
+        const want = JSON.parse(init.body as string).rig;
+        chosen.push(want);
+        shelf.current = want;
+      }
+      return { ok: true, json: async () => ({ ...shelf }) } as Response;
+    }
     if (url.startsWith('/api/rig/options')) {
       return { ok: true, json: async () => options } as Response;
     }
@@ -294,6 +318,47 @@ describe('devices', () => {
     fireEvent.change(screen.getByLabelText('Instrument 4 kind'), { target: { value: 'light' } });
     fireEvent.change(screen.getByLabelText('Instrument 4 driver'), { target: { value: 'sacn' } });
     expect(value('Instrument 4 DMX address')).toBe('1');
+  });
+
+  it('offers the rigs on the shelf, with the one in use selected', async () => {
+    await devices();
+    const picker = screen.getByLabelText('Rig in use') as HTMLSelectElement;
+    expect([...picker.querySelectorAll('option')].map((o) => o.value))
+      .toEqual(['bench.toml', 'demo.toml', 'room.toml']);
+    expect(picker.value).toBe('bench.toml');
+  });
+
+  it('switches, and reloads what it switched to', async () => {
+    await devices();
+    fireEvent.change(screen.getByLabelText('Rig in use'), { target: { value: 'room.toml' } });
+    await waitFor(() => expect(chosen).toEqual(['room.toml']));
+    await waitFor(() =>
+      expect((screen.getByLabelText('Rig in use') as HTMLSelectElement).value)
+        .toBe('room.toml'));
+  });
+
+  it('will not switch away from unsaved edits', async () => {
+    /* Switching reloads from the file, so an unsaved address would go without
+     * a word. Blocked rather than warned about: there is nowhere to put the
+     * warning that is harder to miss than the control being unavailable. */
+    await devices();
+    fireEvent.change(screen.getByLabelText('Instrument 2 address'),
+                     { target: { value: '10.0.0.5:5570' } });
+    expect((screen.getByLabelText('Rig in use') as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it('has no picker when there is only one rig', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/rigs')) {
+        return { ok: true, json: async () => ({ shelf: false, current: 'rig.toml', rigs: [] }) } as Response;
+      }
+      if (url.startsWith('/api/rig/options')) {
+        return { ok: true, json: async () => options } as Response;
+      }
+      return { ok: true, json: async () => rig } as Response;
+    }));
+    await devices();
+    expect(screen.queryByLabelText('Rig in use')).toBeNull();
   });
 
   it('says that a running show will not notice', async () => {

@@ -100,12 +100,15 @@ services:
         done
         exec componium play \
           -score /scores/demo.componium \
-          -rig /opt/componium/deploy-rig.toml \
+          -rig /rigs \
           -socket /run/componium/mpv.sock
     volumes:
       - ipc:/run/componium:ro
       - ${COMPONIUM_SCORES:-./scores}:/scores:ro
-      - ./demo-rig.toml:/opt/componium/deploy-rig.toml:ro
+      # The shelf, read only. A directory rather than a file, so this plays
+      # whichever rig was picked in the studio without either of them having
+      # been told anything.
+      - ${COMPONIUM_RIGS:-./rigs}:/rigs:ro
     depends_on:
       player:
         condition: service_started
@@ -121,7 +124,7 @@ services:
     command:
       - studio
       - -score=/scores/demo.componium
-      - -rig=/opt/componium/deploy-rig.toml
+      - -rig=/rigs
       - -media=/media
       - -scores=/scores
       # Images the admin page can flash to a board over USB. A build artifact
@@ -141,11 +144,15 @@ services:
       COMPONIUM_VLM_API: ${COMPONIUM_VLM_API:-}
     volumes:
       - ${COMPONIUM_MEDIA:-./media}:/media
-      # Writable, and only here. The admin edits the rig file rather than
-      # keeping a copy of it, which is what stops the studio and the conductor
-      # ending up with different ideas about what is on the end of a wire.
-      # The conductor keeps its read only mount: it reads this, never writes it.
-      - ./demo-rig.toml:/opt/componium/deploy-rig.toml
+      # Writable, and only here. The admin edits the rig files rather than
+      # keeping copies of them, which is what stops the studio and the
+      # conductor ending up with different ideas about what is on the end of a
+      # wire. The conductor keeps its read only mount: it reads these, never
+      # writes them.
+      #
+      # A directory rather than a file, which also restores the atomic save: a
+      # single file bind mount has no writable directory to put a temp file in.
+      - ${COMPONIUM_RIGS:-./rigs}:/rigs
       - ${COMPONIUM_SCORES:-./scores}:/scores
       - ${COMPONIUM_FIRMWARE:-../firmware/esp32/web}:/firmware:ro
     ports:

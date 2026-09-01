@@ -39,6 +39,13 @@ interface Options {
   editable: boolean;
 }
 
+interface Shelf {
+  /** Whether there is a directory of rigs to pick from at all. */
+  shelf: boolean;
+  current: string;
+  rigs: string[];
+}
+
 /** A device that is not virtual is a device that will move something. */
 const isReal = (d: Device) => (d.driver || 'virtual') !== 'virtual';
 
@@ -75,6 +82,7 @@ function blank(kind: string, drivers: string[]): Device {
 export function Devices() {
   const [rig, setRig] = useState<Rig | null>(null);
   const [options, setOptions] = useState<Options | null>(null);
+  const [shelf, setShelf] = useState<Shelf | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [name, setName] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -84,12 +92,14 @@ export function Devices() {
 
   const load = useCallback(async () => {
     try {
-      const [r, o] = await Promise.all([
+      const [r, o, sh] = await Promise.all([
         fetch('/api/rig').then((x) => (x.ok ? x.json() : Promise.reject(new Error('none loaded')))),
         fetch('/api/rig/options').then((x) => (x.ok ? x.json() : { kinds: [], modes: [] })),
+        fetch('/api/rigs').then((x) => (x.ok ? x.json() : { shelf: false, current: '', rigs: [] })),
       ]);
       setRig(r);
       setOptions(o);
+      setShelf(sh);
       setDevices(r.instruments ?? []);
       setName(r.name ?? '');
       setDirty(false);
@@ -147,6 +157,22 @@ export function Devices() {
     setError(said.trim() || ('the studio refused it, with status ' + res.status));
   };
 
+  const choose = async (name: string) => {
+    setError(null);
+    setProblems([]);
+    const res = await fetch('/api/rigs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rig: name }),
+    });
+    if (!res.ok) {
+      setError((await res.text().catch(() => '')).trim() || 'could not switch rig');
+      return;
+    }
+    setShelf(await res.json());
+    await load();
+  };
+
   const editable = rig?.editable ?? false;
   const real = devices.filter(isReal).length;
 
@@ -171,6 +197,32 @@ export function Devices() {
 
       {rig && (
         <>
+          {shelf?.shelf && (
+            <section className="adm-card">
+              <div className="adm-set-head">
+                <label htmlFor="rig-file">Rig in use</label>
+                <span className="dim small">{shelf.rigs.length} on the shelf</span>
+              </div>
+              <select
+                id="rig-file"
+                value={shelf.current}
+                onChange={(e) => void choose(e.target.value)}
+                disabled={dirty}
+                title={dirty
+                  ? 'Save or reload first: switching now would lose the edits'
+                  : 'Which rig this installation is using'}
+              >
+                {shelf.rigs.map((f) => <option key={f} value={f}>{f}</option>)}
+              </select>
+              <p className="dim small">
+                The choice is a file on the shelf, not a setting in this browser,
+                so a conductor pointed at the same directory plays whichever rig
+                is picked here. It reads it when it starts, so a running show
+                keeps the one it opened with.
+              </p>
+            </section>
+          )}
+
           <section className="adm-card">
             <div className="adm-set-head">
               <label htmlFor="rig-name">Rig name</label>

@@ -36,7 +36,7 @@ func (l logging) Dispatch(d instrument.Dispatch) error {
 func playCmd(args []string) error {
 	fs := flag.NewFlagSet("play", flag.ExitOnError)
 	scorePath := fs.String("score", "", "score file (required)")
-	rigPath := fs.String("rig", "", "rig file (required)")
+	rigPath := fs.String("rig", "", "rig file, or a directory of them; a directory plays whichever the studio chose (required)")
 	socket := fs.String("socket", "/tmp/mpv.sock", "mpv IPC socket path")
 	poll := fs.Duration("poll", show.DefaultPollInterval, "player polling interval")
 	curveRate := fs.Duration("curve-rate", 20*time.Millisecond, "how often to send curve values")
