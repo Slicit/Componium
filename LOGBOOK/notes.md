@@ -52,6 +52,25 @@ then fails on hundreds of them, and under `set -e` a script dies there and
 silently skips every later step. Use `sudo rm -rf`, and prefer running
 containers as the checkout owner in the first place.
 
+### 2026-09-01 · CI has no ffmpeg, and neither does anything that stubs it
+
+A test that stands in for the decoder has to stand in for the decision to call
+it. `vision.ffmpeg()` is that seam; patch it, not just `keyframe` and
+`subprocess.run`, or the test is green where ffmpeg is installed and vacuous
+where it is not. Nine tests were in that state for three commits, one of them
+asserting an empty list and being handed one for free.
+
+To check before pushing, hide it from `PATH` rather than trusting the box:
+
+```sh
+mkdir -p /tmp/noffbin
+for f in /usr/bin/* /bin/*; do
+  b=$(basename "$f")
+  case "$b" in ffmpeg|ffprobe) ;; *) ln -sf "$f" "/tmp/noffbin/$b" ;; esac
+done
+(cd composer && PATH=/tmp/noffbin python3 -m unittest discover -p 'test_*.py')
+```
+
 ## Anti-patterns
 
 ### 2026-09-01 · A library that describes and a consumer that guesses

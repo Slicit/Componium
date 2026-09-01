@@ -34,6 +34,10 @@ Nothing is implemented yet. Intended shape, revisit before committing to it:
   conductor deliberately killed.
 - **Every instrument kind needs a virtual implementation** before its hardware
   driver is written. Contributors without a rig must be able to run everything.
+- **The library and the timeline stay in parity.** Anything an index offers
+  must be usable where it is offered, and the check belongs in a test that
+  walks the index rather than in a comment asking the next person to
+  remember. See `web/src/core/parity.test.ts`.
 - **Everything runs on `claude-machine-02`.** Builds, tests, git and GitHub
   operations all happen there. `gh` is authenticated on the box as of
   2026-08-29, so pull requests, workflow runs and repository settings are
