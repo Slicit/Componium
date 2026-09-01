@@ -46,11 +46,30 @@ const isReal = (d: Device) => (d.driver || 'virtual') !== 'virtual';
 const wantsAddress = (driver: string) => driver === 'cip' || driver === 'motion';
 const wantsUniverse = (driver: string) => driver === 'sacn';
 
+/**
+ * The fields a driver cannot go without, filled in when it is chosen.
+ *
+ * Held rather than merely shown. A DMX fixture with no start address is not a
+ * fixture with a start address of 1, it is a rig the conductor will refuse, and
+ * an input displaying `value ?? 1` over an undefined number tells somebody it
+ * is set when nothing is set at all.
+ */
+function withDriverDefaults(d: Device, driver: string): Device {
+  const next: Device = { ...d, driver };
+  if (driver === 'sacn') {
+    next.universe = d.universe ?? 1;
+    next.start = d.start ?? 1;
+    next.mode = d.mode || 'rgb';
+  }
+  return next;
+}
+
 function blank(kind: string, drivers: string[]): Device {
-  return {
-    id: kind + '.new', kind, driver: drivers[0] ?? 'virtual',
+  const driver = drivers[0] ?? 'virtual';
+  return withDriverDefaults({
+    id: kind + '.new', kind, driver,
     latency: 0, position: [0, 1, 1],
-  };
+  }, driver);
 }
 
 export function Devices() {
@@ -82,7 +101,11 @@ export function Devices() {
   useEffect(() => { void load(); }, [load]);
 
   const change = (i: number, patch: Partial<Device>) => {
-    setDevices((was) => was.map((d, n) => (n === i ? { ...d, ...patch } : d)));
+    setDevices((was) => was.map((d, n) => {
+      if (n !== i) return d;
+      const next = { ...d, ...patch };
+      return patch.driver !== undefined ? withDriverDefaults(next, patch.driver) : next;
+    }));
     setDirty(true);
     setSaved(false);
   };
@@ -95,7 +118,7 @@ export function Devices() {
   const changeKind = (i: number, kind: string) => {
     const allowed = driversFor(kind);
     const keep = allowed.includes(devices[i].driver) ? devices[i].driver : allowed[0];
-    change(i, { kind, driver: keep });
+    change(i, { kind, driver: keep });   // change() fills in what `keep` needs
   };
 
   const save = async () => {
@@ -214,19 +237,19 @@ export function Devices() {
                               onChange={(e) => change(i, { addr: e.target.value })}
                             />
                             <input
-                              type="number" min={1} max={63999} value={d.universe ?? 1}
+                              type="number" min={1} max={63999} value={d.universe ?? ''}
                               disabled={!editable}
                               aria-label={'Instrument ' + (i + 1) + ' universe'}
                               onChange={(e) => change(i, { universe: Number(e.target.value) })}
                             />
                             <input
-                              type="number" min={1} max={512} value={d.start ?? 1}
+                              type="number" min={1} max={512} value={d.start ?? ''}
                               disabled={!editable}
                               aria-label={'Instrument ' + (i + 1) + ' DMX address'}
                               onChange={(e) => change(i, { start: Number(e.target.value) })}
                             />
                             <select
-                              value={d.mode || 'rgb'} disabled={!editable}
+                              value={d.mode ?? ''} disabled={!editable}
                               aria-label={'Instrument ' + (i + 1) + ' mode'}
                               onChange={(e) => change(i, { mode: e.target.value })}
                             >

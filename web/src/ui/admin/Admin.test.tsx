@@ -223,6 +223,39 @@ describe('devices', () => {
     expect(screen.queryByRole('button', { name: 'Save the rig' })).toBeNull();
   });
 
+  it('sends the numbers it is showing when a driver is chosen', async () => {
+    /* Reported as: the studio refuses the device. Turning the virtual light
+     * into an sACN fixture showed a universe of 1 and a DMX address of 1 and
+     * sent neither, because both were display fallbacks over an undefined
+     * value. Go read the absent numbers as zero and refused the rig for a
+     * start address of 0, which the page had just said was 1. */
+    await devices();
+    fireEvent.change(screen.getByLabelText('Instrument 3 kind'), { target: { value: 'light' } });
+    fireEvent.change(screen.getByLabelText('Instrument 3 driver'), { target: { value: 'sacn' } });
+    expect(value('Instrument 3 universe')).toBe('1');
+    expect(value('Instrument 3 DMX address')).toBe('1');
+    expect(value('Instrument 3 mode')).toBe('rgb');
+
+    fireEvent.change(screen.getByLabelText('Instrument 3 address'),
+                     { target: { value: '192.168.1.145' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save the rig' }));
+    await waitFor(() => expect(saves).toHaveLength(1));
+
+    const sent = (saves[0] as typeof rig).instruments[2];
+    expect(sent.driver).toBe('sacn');
+    expect(sent.start).toBe(1);
+    expect(sent.universe).toBe(1);
+    expect(sent.mode).toBe('rgb');
+  });
+
+  it('a device added from nothing arrives complete', async () => {
+    await devices();
+    fireEvent.click(screen.getByRole('button', { name: 'Add a device' }));
+    fireEvent.change(screen.getByLabelText('Instrument 4 kind'), { target: { value: 'light' } });
+    fireEvent.change(screen.getByLabelText('Instrument 4 driver'), { target: { value: 'sacn' } });
+    expect(value('Instrument 4 DMX address')).toBe('1');
+  });
+
   it('says that a running show will not notice', async () => {
     /* The conductor reads the rig once, when it starts. A page that let you
      * change an address and said nothing would be lying by omission. */
