@@ -57,6 +57,13 @@ func playCmd(args []string) error {
 	}
 	defer built.Close()
 
+	// Two entries that turned out to be one device. Caught here rather than
+	// left to the conductor, which can only see manifests and so refuses the
+	// second one by an id that appears once in the rig file.
+	if err := built.Collisions(); err != nil {
+		return err
+	}
+
 	sc, err := score.Load(*scorePath)
 	if err != nil {
 		return err
