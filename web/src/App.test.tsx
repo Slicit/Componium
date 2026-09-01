@@ -193,6 +193,100 @@ describe('the keyboard belongs to whatever is being typed into', () => {
   });
 });
 
+/* Arming drives real hardware, so the wiring matters more here than usual.
+ *
+ * A switch that posts nothing, or a playhead that never leaves the page, is
+ * exactly the sort of thing that typechecks perfectly and does nothing, which
+ * is what this file exists to catch.
+ */
+describe('driving the room from the studio', () => {
+  /** What the server was told, and what it says back. */
+  function armable() {
+    const posts: { url: string; body: unknown }[] = [];
+    const state = {
+      armed: false, real: 2, silent: false, media: 0, precision: 0.004,
+      cues: 0, curves: 0, rig: 'bench.toml',
+    };
+    const real = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/live' && init?.method === 'POST') {
+        const body = JSON.parse(init.body as string);
+        posts.push({ url, body });
+        state.armed = body.armed;
+        return { ok: true, json: async () => ({ ...state }) } as Response;
+      }
+      if (url === '/api/live') {
+        return { ok: true, json: async () => ({ ...state }) } as Response;
+      }
+      if (url === '/api/live/at') {
+        posts.push({ url, body: JSON.parse(init!.body as string) });
+        return { ok: true, status: 204, json: async () => ({}) } as unknown as Response;
+      }
+      return (real as typeof fetch)(url, init);
+    }));
+    return { posts, state };
+  }
+
+  const armButton = () => screen.getByRole('button', { name: /go live|^live$/ });
+
+  it('does not arm itself', async () => {
+    const { posts } = armable();
+    await openFilm();
+    expect(posts.filter((p) => p.url === '/api/live')).toHaveLength(0);
+    expect(armButton().textContent).toBe('go live');
+  });
+
+  it('arms when asked, and says so', async () => {
+    const { posts } = armable();
+    await openFilm();
+    fireEvent.click(armButton());
+    await waitFor(() => expect(posts[0]).toEqual({ url: '/api/live', body: { armed: true } }));
+    await waitFor(() => expect(armButton().textContent).toBe('live'));
+    expect(screen.getByText('2 live')).toBeTruthy();
+  });
+
+  it('sends the playhead only once it is armed', async () => {
+    const { posts } = armable();
+    const video = await openFilm();
+
+    video.currentTime = 20;
+    fireEvent.seeked(video);
+    expect(posts.filter((p) => p.url === '/api/live/at')).toHaveLength(0);
+
+    fireEvent.click(armButton());
+    await waitFor(() => expect(armButton().textContent).toBe('live'));
+
+    video.currentTime = 30;
+    fireEvent.seeked(video);
+    await waitFor(() => {
+      const sent = posts.filter((p) => p.url === '/api/live/at');
+      expect(sent[sent.length - 1].body).toEqual({ at: 30, playing: false });
+    });
+  });
+
+  it('stops when told to', async () => {
+    const { posts } = armable();
+    await openFilm();
+    fireEvent.click(armButton());
+    await waitFor(() => expect(armButton().textContent).toBe('live'));
+    fireEvent.click(armButton());
+    await waitFor(() => expect(armButton().textContent).toBe('go live'));
+    expect(posts.filter((p) => p.url === '/api/live').map((p) => p.body))
+      .toEqual([{ armed: true }, { armed: false }]);
+  });
+
+  it('says when an armed rig will not move anything', async () => {
+    /* An armed rig of nothing but virtual devices looks identical to a broken
+     * one from across a room, and this is the room where somebody is about to
+     * conclude the hardware is dead. */
+    const { state } = armable();
+    state.real = 0;
+    await openFilm();
+    fireEvent.click(armButton());
+    await waitFor(() => expect(screen.getByText('all virtual')).toBeTruthy());
+  });
+});
+
 describe('a studio nobody is looking at', () => {
   it('does not answer the keyboard', async () => {
     /* Mounted, holding its score and its history, and silent. */

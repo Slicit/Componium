@@ -77,7 +77,14 @@ type Server struct {
 	// rigDir is the shelf the rig came off, when -rig named a directory of
 	// them. Empty for a single file, and the picker then has nothing to offer.
 	rigDir string
-	jobs   *Jobs
+
+	// Live output is separate from the editing lock on purpose: the show loop
+	// reports a reading every five milliseconds and must never wait behind
+	// somebody saving a score.
+	liveMu      sync.Mutex
+	live        *live
+	liveProblem string
+	jobs        *Jobs
 }
 
 // New opens a studio.
@@ -201,6 +208,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/rig", s.handleRig)
 	mux.HandleFunc("/api/rig/options", s.handleRigOptions)
 	mux.HandleFunc("/api/rigs", s.handleRigs)
+	mux.HandleFunc("/api/live", s.handleLive)
+	mux.HandleFunc("/api/live/at", s.handleLiveAt)
 	mux.HandleFunc("/media", s.handleMedia)
 	mux.HandleFunc("/api/media", s.handleMediaList)
 	mux.HandleFunc("/api/library", s.handleLibrary)

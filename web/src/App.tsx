@@ -29,6 +29,7 @@ import { channelsOf, kindOf } from './core/score';
 import { followFrames } from './ui/frameClock';
 import { settingOf, writeSetting } from './core/settings';
 import { isTyping } from './core/typing';
+import { useLive } from './ui/useLive';
 import type { Preset } from './core/presets';
 import { canCollapse } from './core/layout';
 import { menuFor } from './ui/menuItems';
@@ -299,9 +300,21 @@ export function App({ active = true }: { active?: boolean } = {}) {
    * React attaches this to whatever element is actually mounted, whenever that
    * happens, which makes the whole failure unrepresentable.
    */
+  /* Whether the film is running, readable from callbacks that must not be
+   * rebuilt every time it changes. */
+  const playingNow = useRef(false);
+
+  const live = useLive();
+  const liveRef = useRef(live.follow);
+  liveRef.current = live.follow;
+
   const follow = useCallback((t: number) => {
     setTime(t);
     view.reveal(t);
+    /* And to the room itself, when it is armed. The same playhead drives the
+     * preview and the hardware, which is the entire point: an effect that
+     * lands wrong in the room lands wrong on the wall. */
+    liveRef.current(t, playingNow.current);
   }, [view]);
 
   /* Held in a ref because the loop below must not be restarted when `follow`
@@ -319,6 +332,7 @@ export function App({ active = true }: { active?: boolean } = {}) {
    * it. The room was never struggling to draw it — it was being handed four
    * light values a second. See ui/frameClock.ts. */
   const [playing, setPlaying] = useState(false);
+  playingNow.current = playing;
   useEffect(() => {
     const v = video.current;
     if (!playing || !v) return;
@@ -641,6 +655,32 @@ export function App({ active = true }: { active?: boolean } = {}) {
           onReset={views.reset}
         />
         <button
+          className={'toggle live' + (live.armed ? ' on' : '')}
+          onClick={() => (live.armed ? live.disarm() : live.arm())}
+          title={live.armed
+            ? 'Driving the rig from this playhead. Click to stop.'
+            : 'Drive the real rig from this playhead, through the same clock '
+              + 'and safety supervisor a show uses'}
+        >{live.armed ? 'live' : 'go live'}</button>
+        {live.armed && (
+          <span
+            className={'chip' + (live.state.real === 0 ? ' warn' : '')}
+            title={live.state.real === 0
+              ? 'Every instrument in this rig is virtual, so nothing physical '
+                + 'will move. The conductor is logging what it would have sent.'
+              : live.state.cues + ' cues and ' + live.state.curves
+                + ' curve updates sent, ' + Math.round(live.state.precision * 1000)
+                + 'ms precision'}
+          >
+            {live.state.real === 0
+              ? 'all virtual'
+              : live.state.real + ' live'}
+          </span>
+        )}
+        {live.state.problem && !live.armed && (
+          <span className="chip warn" title={live.state.problem}>live refused</span>
+        )}
+        <button
           className={'toggle' + (overlays.calm ? ' on' : '')}
           onClick={() => setOverlays((o) => ({ ...o, calm: !o.calm }))}
           title={score?.calm?.length
@@ -698,9 +738,9 @@ export function App({ active = true }: { active?: boolean } = {}) {
             }}
             onSeeked={(e) => follow(e.currentTarget.currentTime)}
             onLoadedMetadata={(e) => follow(e.currentTarget.currentTime)}
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            onEnded={() => setPlaying(false)}
+            onPlay={() => { setPlaying(true); live.follow(time, true); }}
+            onPause={() => { setPlaying(false); live.follow(video.current?.currentTime ?? time, false); }}
+            onEnded={() => { setPlaying(false); live.follow(video.current?.currentTime ?? time, false); }}
           />
         ) : (
           <p className="dim small hint">

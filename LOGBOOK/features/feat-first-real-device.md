@@ -127,6 +127,43 @@ device list had been showing a dash for every address it had. The test did not
 catch it because the test mocked a response shape the server does not produce.
 A fixture is only worth its accuracy, and that one was invented.
 
+## The studio drives the room
+
+Until now the studio was an editor and a simulator: it read the rig to draw a
+preview and never opened a socket to anything. The thing that drove hardware
+was `componium play`, following mpv rather than the timeline you are editing.
+Right for a show, useless for the half hour where the question is whether a cue
+lands on the frame you put it on.
+
+**Almost none of it was new work, and that is the finding.** `show.Run` already
+turns any `source.TimeSource` into a disciplined clock with latency
+compensation, a curve driver and a safety supervisor. `source.Studio` is a
+forty line TimeSource fed by the page over HTTP. The studio needed an adapter
+and a switch, not a second timing stack. Every timing property a show has, live
+output has, because it *is* a show with a different clock on the front.
+
+Two properties of the source carry the weight:
+
+- **It interpolates.** The page reports at the film's rate, around 24 a second;
+  the show loop asks 200 times a second. A position that only moved on a report
+  would quantise every cue to a frame boundary in the wrong direction. A real
+  player's position advances between polls and so does this.
+- **It goes quiet.** A tab can be closed, slept, or driven into a tunnel, and
+  none of those look different from the server. After a second with no word it
+  stops claiming to know where playback is, which stops dispatch; after five it
+  takes the whole rig safe and disarms.
+
+Measured end to end against a real studio: sweeping the playhead from 8s to
+12.5s over a demo score dispatched the gust at 10s (1.2s early, from the
+instrument's declared latency), sent 203 curve updates, and held 5ms precision.
+The silence timer then demonstrated itself twice by accident, disarming while a
+shell was being started.
+
+**Worth knowing before arming on the deployed stack:** the `conductor` container
+is already driving the same rig from mpv. Arm the studio as well and one node
+has two sources telling it what to do. Not dangerous, since the node's own
+watchdog is unchanged, but confusing. For bench work, stop the conductor first.
+
 ## Decisions
 
 - **2026-09-01 · The image is a directory on disk, not something in the
@@ -146,6 +183,18 @@ A fixture is only worth its accuracy, and that one was invented.
   would mean a provisioned board out of range does nothing at all, including
   nothing safe. It comes up, the watchdog runs, and it answers the moment an
   address arrives.
+- **2026-09-02 · Off by default, and it puts itself away.** A rig left armed by
+  somebody who wandered off is a fan running all night, which is the hazard the
+  node's own watchdog exists for, one level up. So arming is explicit, the page
+  reports while paused as well as while playing so that silence can only mean
+  gone, and closing the tab disarms on `pagehide` rather than waiting out the
+  timer. The timer is the guarantee; the beacon is the courtesy.
+- **2026-09-02 · The switch is on the toolbar, not in the admin.** Everything
+  else about devices lives in the admin, and this does not, because armed is a
+  state you must be able to see while working. It is red on purpose.
+- **2026-09-02 · An all virtual rig says so.** An armed rig that moves nothing
+  looks identical to a broken one from across a room, and that room is where
+  somebody is about to conclude the hardware is dead.
 - **2026-09-01 · The admin is a section, not more buttons on the toolbar.** The
   studio's bar is a working surface used with a film open and a hand on the
   playhead. This is where you go when something is not set up yet, which is a

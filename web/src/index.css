@@ -628,6 +628,15 @@ button:hover { border-color: #3a4553; }
 .adm-set p { margin: 6px 0 8px; line-height: 1.5; }
 .adm-reset { font-size: 11px; padding: 2px 8px; }
 
+/* Armed is a state worth seeing from across a room, because the hazard is
+   somebody wandering off with it on. */
+.toggle.live.on {
+  background: var(--warn, #c1121f);
+  color: #fff;
+  font-weight: 600;
+}
+.chip.warn { color: var(--warn, #c1121f); }
+
 .room-host { position: relative; }
 .room-host canvas { display: block; width: 100%; height: 100%; }
 
