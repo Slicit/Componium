@@ -165,6 +165,11 @@ class TestExtractUsesFilmTime(unittest.TestCase):
             return self.decode_start + t
 
     def setUp(self):
+        # Standing in for the decoder means standing in for the decision to
+        # call it too: without ffmpeg on the machine, extract returns before
+        # any of this is reached and every assertion below measures nothing.
+        self.had_ffmpeg = vision.ffmpeg
+        vision.ffmpeg = lambda: "ffmpeg"
         self.seeked = []
         self.original = vision.keyframe
 
@@ -177,6 +182,7 @@ class TestExtractUsesFilmTime(unittest.TestCase):
 
     def tearDown(self):
         vision.keyframe = self.original
+        vision.ffmpeg = self.had_ffmpeg
 
     def test_a_seeked_frame_is_asked_for_in_film_time(self):
         # Two moments now: the frame, and the one a second before it that says
@@ -247,6 +253,13 @@ class TestExtractUsesFilmTime(unittest.TestCase):
 
 
 class TestObserveInParallel(unittest.TestCase):
+    def setUp(self):
+        self.had_ffmpeg = vision.ffmpeg
+        vision.ffmpeg = lambda: "ffmpeg"
+
+    def tearDown(self):
+        vision.ffmpeg = self.had_ffmpeg
+
     def test_every_frame_is_answered_for(self):
         # The pool must not lose or reorder frames.
         original = vision.keyframe
@@ -281,6 +294,24 @@ class TestObserveInParallel(unittest.TestCase):
         finally:
             vision.keyframe = original
         self.assertEqual(got, [])
+
+
+class TestNoFFmpeg(unittest.TestCase):
+    """With no decoder there is nothing to extract, and it says so quietly.
+
+    Deliberate, and worth a test of its own: it is the behaviour that made
+    nine other tests pass on a machine with ffmpeg and fail on one without,
+    including one that asserted an empty list and was handed one for free.
+    """
+
+    def test_nothing_comes_back(self):
+        had = vision.ffmpeg
+        vision.ffmpeg = lambda: None
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                self.assertEqual(vision.extract("film.mkv", [1.0, 2.0], tmp), [])
+        finally:
+            vision.ffmpeg = had
 
 
 class TestPairs(unittest.TestCase):
@@ -331,6 +362,8 @@ class TestPairsCostOneDecode(unittest.TestCase):
     """
 
     def setUp(self):
+        self.had_ffmpeg = vision.ffmpeg
+        vision.ffmpeg = lambda: "ffmpeg"
         self.calls = []
         self.original = vision.subprocess.run
 
@@ -342,6 +375,7 @@ class TestPairsCostOneDecode(unittest.TestCase):
 
     def tearDown(self):
         vision.subprocess.run = self.original
+        vision.ffmpeg = self.had_ffmpeg
 
     def passes(self):
         return [c for c in self.calls if any("fps=" in str(a) for a in c)]

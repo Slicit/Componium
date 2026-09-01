@@ -77,7 +77,12 @@ func TestARestartLeavesNoChunkClaimingToBeRunning(t *testing.T) {
 
 func TestResetThenQueueStartsFromNothing(t *testing.T) {
 	dir := t.TempDir()
-	j := &Jobs{scores: dir, jobs: map[string]*Job{}}
+	// running, so queueing does not start a worker. This is about what
+	// queueing decides, not about running anything, and the goroutine that
+	// pump starts outlives the test: it writes the job file into the temp
+	// directory after cleanup has begun, which passes on a fast machine and
+	// fails on a slow one.
+	j := &Jobs{scores: dir, jobs: map[string]*Job{}, running: true}
 	const film = "feature.mkv"
 	j.jobs[jobKey(JobAnalyse, film)] = &Job{
 		Kind: JobAnalyse, Film: film, State: JobFailed,

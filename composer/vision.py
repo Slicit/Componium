@@ -222,9 +222,21 @@ def candidates(envelope, rate: float, cuts=None, limit: int = 0,
 KEYFRAME_WIDTH = 512
 
 
+def ffmpeg():
+    """Where ffmpeg is, or None.
+
+    One seam rather than two lookups, because a test that stands in for the
+    decoder has to stand in for the decision to call it as well. Without that,
+    a machine with no ffmpeg makes every extraction test assert against an
+    empty list it was handed before any stub was reached — which is green
+    where ffmpeg is installed and red where it is not.
+    """
+    return shutil.which("ffmpeg")
+
+
 def keyframe(path: str, at: float, out_path: str) -> bool:
     """Extract one frame as a JPEG. Returns False if ffmpeg could not."""
-    exe = shutil.which("ffmpeg")
+    exe = ffmpeg()
     if not exe:
         return False
     result = subprocess.run(
@@ -342,7 +354,7 @@ def extract(path: str, times, into: str, span=None,
     chooses which to keep — so pairing costs a few more JPEGs and not a second
     decode. Everything off the grid is seeked to individually.
     """
-    exe = shutil.which("ffmpeg")
+    exe = ffmpeg()
     if not exe:
         return []
     start = span.decode_start if span is not None else 0.0
