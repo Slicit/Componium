@@ -58,6 +58,55 @@ page detects it and gives the one line that fixes it:
 `localhost` counts as a secure context, so the tunnel is enough and no
 certificate is involved.
 
+## The bug that could not be read from its symptom
+
+Flashed fine, and the Wi-Fi step never appeared.
+
+Every Improv RPC command number in the firmware was a slot out. They had been
+written from memory: 0x02 was implemented as "identify" when 0x02 is *request
+current state*, so the flasher asked what state the board was in, got silence,
+waited ten seconds and reported no Improv support. Nothing else was wrong.
+Nothing in a log, nothing on the board, nothing to see but a step in a dialog
+that did not happen.
+
+The correct numbers, read off `improv-wifi-serial-sdk` rather than recalled:
+
+| command | value |
+|---|---|
+| send wifi settings | 1 |
+| request current state | 2 |
+| request info | 3 |
+| request wifi networks | 4 |
+
+The comment above the wrong ones said they came from the spec. That is the
+whole argument for `web/src/core/improv.test.ts`: it reads the numbers out of
+the firmware and out of the SDK the flasher actually uses, and compares them.
+The SDK is a dev dependency for exactly this. Mutation verified against the
+bug that shipped.
+
+Two things came out of the same reading. A provisioned board owes an RPC result
+as well as a state, because the flasher leaves that command pending for one and
+settles it itself for anything else. And the scan command is worth answering:
+an SSID typed from memory with a character wrong and a network out of range are
+the same silence from the board's side, and the board has no screen to tell them
+apart with.
+
+## Two instruments on one board
+
+The strip and the fan share an ESP32 and share nothing else. The fan takes CIP,
+because a fan is a Componium instrument and nothing else speaks to it. The strip
+takes sACN, because lighting already has a protocol and LOGBOOK.md lists
+competing with it as a non-goal in as many words.
+
+The result is that a rig entry for this strip *is* a WLED entry with a different
+address in it. The board is a drop in substitute for a WLED controller, which is
+what makes it useful for testing and what makes a one board installation a real
+option rather than a compromise.
+
+One colour across the whole length, which is what the conductor sends: a
+fixture's three channels, not a pixel array. An ambient wash is a colour, not a
+picture.
+
 ## Decisions
 
 - **2026-09-01 · The image is a directory on disk, not something in the
@@ -82,6 +131,17 @@ certificate is involved.
   playhead. This is where you go when something is not set up yet, which is a
   different activity at a different pace. The studio stays mounted behind it,
   because losing an undo history to look at a port number is absurd.
+- **2026-09-01 · The light's watchdog is not the fan's watchdog.** CIP goes safe
+  after 300ms because a fan running all night is the hazard it exists for. A
+  light is not that hazard, and 300ms of ordinary network hiccup would make it
+  flicker. The danger for a strip is the opposite one, sitting lit for ever
+  after the conductor has gone, so it holds through a stumble and goes dark
+  after five seconds of real silence.
+- **2026-09-01 · The radio starts even with nothing to join.** Scanning needs
+  it running, and the scan is the first thing the flasher asks for on a board
+  that has never been provisioned. Connecting is gated on having a target
+  instead, so an unprovisioned board does not spend its time failing to join
+  the empty string.
 - **2026-09-01 · Devices is read only.** The rig is a file every machine running
   the show reads. A settings page that edited it would be a second source of
   truth for the one thing in the system that must not have two.
@@ -92,10 +152,11 @@ certificate is involved.
 |---|---|
 | firmware compiles | **done.** Clean, no warnings, ESP-IDF v5.4. |
 | entry point, Wi-Fi, NVS | **done.** |
-| Improv provisioning | **written, never spoken to a real flasher.** |
+| Improv provisioning | **fixed.** The first version was never spoken to a real flasher and it showed: every command number was a slot out. Now checked against the SDK by a test. |
+| LED strip over sACN | **written, never seen a pixel.** |
 | web installer page | **done**, served from the studio. |
 | admin shell | **done.** Navbar, side menu, three pages. |
-| flashed to a board | not yet. Needs the hardware in hand. |
+| flashed to a board | **done**, and it taught us the command numbers. |
 | WLED over sACN | **never tested against a fixture.** M4 has said so since M4. |
 | measured fan latency | not yet, and the firmware's 1.2s is a guess. |
 

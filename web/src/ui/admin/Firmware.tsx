@@ -68,9 +68,11 @@ export function Firmware() {
     <div className="adm-page">
       <h2>Node firmware</h2>
       <p className="dim">
-        A Componium instrument node for the ESP32: CIP over UDP, one PWM output,
-        and a watchdog that puts the output back to safe if the conductor stops
-        talking for 300&nbsp;ms.
+        One board, two instruments, two protocols. The fan takes CIP over UDP,
+        with a watchdog that puts the output back to safe if the conductor stops
+        talking for 300&nbsp;ms. The strip takes sACN, exactly as a WLED
+        controller does, so a rig entry for it is a WLED entry with a different
+        address in it.
       </p>
 
       <section className="adm-card">
@@ -123,7 +125,12 @@ componium studio -firmware firmware/web ...`}</pre>
           <>
             <ol className="adm-steps">
               <li>Plug the ESP32 into this machine over USB.</li>
-              <li>Press <em>Install</em> and pick the serial port that appears.</li>
+              <li>
+                Press <em>Install</em> and pick the serial port that appears. A
+                board that already has this firmware does not need installing
+                again: the same dialog offers <em>Connect to Wi-Fi</em> and a
+                console for a board it recognises.
+              </li>
               <li>
                 When it finishes, the same dialog offers <em>Connect to Wi-Fi</em>.
                 Your password goes down the cable into the board’s own storage.
@@ -155,10 +162,21 @@ componium studio -firmware firmware/web ...`}</pre>
 
       <section className="adm-card">
         <h3>Wiring</h3>
-        <p className="dim small">
-          PWM leaves the board on <strong>GPIO&nbsp;18</strong> at 25&nbsp;kHz, which is
-          above hearing and is what a four pin fan expects.
-        </p>
+        <dl className="adm-facts">
+          <dt>LED strip</dt>
+          <dd>
+            Data to <strong>GPIO&nbsp;5</strong>. WS2812 timing, 30 pixels by
+            default. The strip takes its 5&nbsp;V from its own supply, not from
+            the board, and the grounds must be common. It is driven as one
+            colour across the whole length, which is what an ambient wash is:
+            the conductor sends a fixture’s colour, not a pixel array.
+          </dd>
+          <dt>Fan</dt>
+          <dd>
+            PWM on <strong>GPIO&nbsp;18</strong> at 25&nbsp;kHz, above hearing,
+            which is what a four pin fan expects.
+          </dd>
+        </dl>
         <dl className="adm-facts">
           <dt>4&nbsp;pin fan</dt>
           <dd>
@@ -173,6 +191,13 @@ componium studio -firmware firmware/web ...`}</pre>
             fan current through the ESP32.
           </dd>
         </dl>
+        <p className="dim small">
+          The strip listens for E1.31 on universe 1, DMX address 1, three
+          channels. It goes dark after five seconds of silence: a light is not
+          a hazard the way a fan is, so it holds through a network stumble
+          rather than flickering, but it does not sit lit for ever after the
+          conductor has gone.
+        </p>
         <p className="adm-warn small">
           The declared spin up time in the firmware is 1.8&nbsp;s and it is a guess.
           Measure yours and put the real number in, because the conductor fires

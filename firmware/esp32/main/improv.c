@@ -15,6 +15,17 @@
  * with the checksum a plain sum of everything before it. It shares the line
  * with the log, which is why the parser resynchronises on the magic rather
  * than assuming a frame starts where the last one ended.
+ *
+ * THE NUMBERS BELOW ARE NOT NEGOTIABLE AND NOT GUESSABLE
+ *
+ * The first version of this file had the command numbers written from memory
+ * and every one of them was a slot out: 2 was read as "identify" when 2 is
+ * "request current state". The flasher asked what state the board was in, got
+ * silence, waited ten seconds and reported no Improv support. Nothing else was
+ * wrong, and nothing else could have been diagnosed from the symptom.
+ *
+ * They are checked against the flasher's own SDK by a test, rather than
+ * against anybody's recollection. See web/src/core/improv.test.ts.
  */
 
 #include <string.h>
@@ -52,11 +63,11 @@ static const char *TAG = "improv";
 #define ERROR_UNKNOWN_RPC  0x02
 #define ERROR_CANNOT_JOIN  0x03
 
-/* Commands. */
+/* Commands, from the flasher to us. Read off the SDK, not remembered. */
 #define CMD_WIFI_SETTINGS  0x01
-#define CMD_IDENTIFY       0x02
-#define CMD_GET_STATE      0x03
-#define CMD_GET_INFO       0x04
+#define CMD_REQUEST_STATE  0x02
+#define CMD_REQUEST_INFO   0x03
+#define CMD_REQUEST_SCAN   0x04
 
 /* How long to give a network before saying it cannot be joined. Someone is
  * watching a spinner, so this is chosen against their patience rather than
@@ -101,8 +112,11 @@ static void say_error(uint8_t error)
  *
  * The reply carries the command it answers, so the flasher can tell which
  * question it is hearing back. Each string is length prefixed; there is no
- * terminator and no escaping, which is why nothing here can contain a string
- * longer than a byte can count.
+ * terminator and no escaping, which is why nothing here can be longer than a
+ * byte can count.
+ *
+ * A reply with no strings is meaningful: for the commands that stream several
+ * answers, it is how the stream ends.
  */
 static void say_result(uint8_t command, const char *const *strings, int count)
 {
@@ -126,6 +140,21 @@ static void say_result(uint8_t command, const char *const *strings, int count)
 static uint8_t settled(void)
 {
     return wifi_connected() ? STATE_PROVISIONED : STATE_READY;
+}
+
+/**
+ * Where to find this node, as the flasher's "next" link.
+ *
+ * The address is the answer, because it is the line the rig file needs:
+ *     addr = "192.168.1.x:5570"
+ * There is no web server on this device to send anyone to.
+ */
+static void say_where(uint8_t command)
+{
+    char address[16] = { 0 };
+    wifi_address(address, sizeof(address));
+    const char *out[] = { address };
+    say_result(command, out, 1);
 }
 
 static void do_wifi_settings(const uint8_t *data, uint8_t len)
@@ -162,22 +191,62 @@ static void do_wifi_settings(const uint8_t *data, uint8_t len)
         say_state(STATE_READY);
         return;
     }
-
-    char address[16] = { 0 };
-    wifi_address(address, sizeof(address));
-    /* The address is the answer, because it is the line the rig file needs:
-     *     addr = "192.168.1.x:5570"
-     * There is no web server on this device to send anyone to. */
-    const char *out[] = { address };
     say_state(STATE_PROVISIONED);
-    say_result(CMD_WIFI_SETTINGS, out, 1);
+    say_where(CMD_WIFI_SETTINGS);
 }
 
-static void do_get_info(void)
+/**
+ * Report the state, and where we are if we are anywhere.
+ *
+ * A provisioned device owes an RPC result as well as a state: the flasher
+ * leaves the command pending for one and settles it itself for anything else.
+ */
+static void do_request_state(void)
+{
+    uint8_t state = settled();
+    say_state(state);
+    if (state == STATE_PROVISIONED) {
+        say_where(CMD_REQUEST_STATE);
+    }
+}
+
+/* firmware, version, chip, name. In that order: the flasher reads them
+ * positionally and shows the first and the last. */
+static void do_request_info(void)
 {
     const esp_app_desc_t *app = esp_app_get_description();
     const char *out[] = { "Componium node", app->version, "ESP32", NODE_NAME };
-    say_result(CMD_GET_INFO, out, 4);
+    say_result(CMD_REQUEST_INFO, out, 4);
+}
+
+/**
+ * Stream the networks in range, one result each, then an empty one to close.
+ *
+ * Worth having rather than leaving the flasher to offer a text field: an SSID
+ * typed from memory with a character wrong is indistinguishable, from the
+ * board's side, from a network that is out of range, and the board has no
+ * screen with which to say which it was.
+ */
+static void report_network(const char *ssid, int rssi, bool secured, void *ctx)
+{
+    char strength[8];
+    snprintf(strength, sizeof(strength), "%d", rssi);
+    const char *row[] = { ssid, strength, secured ? "YES" : "NO" };
+    say_result(CMD_REQUEST_SCAN, row, 3);
+    if (ctx) {
+        (*(int *)ctx)++;
+    }
+}
+
+static void do_request_scan(void)
+{
+    int found = 0;
+    if (!wifi_scan(report_network, &found)) {
+        ESP_LOGW(TAG, "scan failed");
+    }
+    /* Nothing more coming. Also the honest answer to an empty scan. */
+    say_result(CMD_REQUEST_SCAN, NULL, 0);
+    ESP_LOGI(TAG, "scan reported %d networks", found);
 }
 
 static void dispatch(const uint8_t *body, uint8_t len)
@@ -198,19 +267,19 @@ static void dispatch(const uint8_t *body, uint8_t len)
     case CMD_WIFI_SETTINGS:
         do_wifi_settings(data, data_len);
         break;
-    case CMD_IDENTIFY:
-        /* Nothing to flash and nothing to sound. A node's whole output is a
-         * fan, and spinning one up because a browser asked politely is not a
-         * thing this firmware is going to do. */
-        ESP_LOGI(TAG, "identify");
+    case CMD_REQUEST_STATE:
+        do_request_state();
         break;
-    case CMD_GET_STATE:
-        say_state(settled());
+    case CMD_REQUEST_INFO:
+        do_request_info();
         break;
-    case CMD_GET_INFO:
-        do_get_info();
+    case CMD_REQUEST_SCAN:
+        do_request_scan();
         break;
     default:
+        /* Hostname and device name exist in the protocol and mean nothing to a
+         * node whose name is in its rig file. Saying so is better than silence,
+         * which is what a wrong number looks like from the other end. */
         say_error(ERROR_UNKNOWN_RPC);
         break;
     }
@@ -228,6 +297,9 @@ static void reader(void *arg)
     uint8_t frame[MAGIC_LEN + 3 + MAX_PAYLOAD + 1];
     size_t have = 0;
 
+    /* Announced rather than waited for. The flasher resets the board and then
+     * asks every second until it gives up, so this is not load bearing, but it
+     * shortens the common case by up to a second. */
     say_state(settled());
 
     for (;;) {
@@ -283,7 +355,9 @@ void improv_start(void)
      * gives us reads without taking writes away, which is what lets a frame
      * and a log line share one cable. */
     if (!uart_is_driver_installed(LINE)) {
-        ESP_ERROR_CHECK(uart_driver_install(LINE, 512, 0, 0, NULL, 0));
+        ESP_ERROR_CHECK(uart_driver_install(LINE, 1024, 0, 0, NULL, 0));
     }
-    xTaskCreate(reader, "improv", 4096, NULL, 4, NULL);
+    /* A scan streams a result per network and the join blocks for seconds, so
+     * this wants room. */
+    xTaskCreate(reader, "improv", 6144, NULL, 4, NULL);
 }

@@ -16,10 +16,17 @@ name = "bench"
 
 # --- the light ------------------------------------------------------------
 #
-# A WLED controller, which receives E1.31 (sACN) natively. In WLED: Sync
-# Interfaces, turn on "Receive UDP realtime", E1.31 mode, universe 1, start
-# address 1, DMX mode "Effect" for one colour across the whole strip or
-# "Multi RGB" to address pixels.
+# Either a WLED controller or the same ESP32 that runs the fan, which receives
+# E1.31 as well. They are interchangeable here, which is the point of speaking
+# a protocol lighting already has: only the address changes.
+#
+# On the ESP32, the strip is on GPIO 5 and listens on universe 1, address 1.
+# In WLED: Sync Interfaces, turn on "Receive UDP realtime", E1.31 mode,
+# universe 1, start address 1, DMX mode "Effect".
+#
+# One colour across the whole length either way. An ambient wash is a colour,
+# not a picture, and the conductor sends a fixture's three channels rather than
+# a pixel array.
 #
 # Unicast rather than multicast. Leaving `addr` out sends to the multicast
 # group for the universe, which is correct and which home access points drop

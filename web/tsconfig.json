@@ -18,7 +18,9 @@
     // type-checked.
     "allowJs": true,
     "checkJs": false,
-    "types": ["vitest/globals"]
+    /* node, for the one test that reads the firmware source off disk to
+       check its protocol numbers against the flasher SDK. */
+    "types": ["vitest/globals", "node"]
   },
   "include": ["src"]
 }

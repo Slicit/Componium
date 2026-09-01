@@ -33,3 +33,16 @@ bool wifi_try(const char *ssid, const char *pass, uint32_t timeout_ms);
 
 /** The dotted quad, or an empty string when there is no address. */
 void wifi_address(char *out, size_t n);
+
+/** Told about one network in range. */
+typedef void (*wifi_seen)(const char *ssid, int rssi, bool secured, void *ctx);
+
+/**
+ * Look around, and report what is there. Blocks for a few seconds.
+ *
+ * Worth having so that a person can pick their network from a list rather than
+ * type it from memory: a mistyped SSID and a network out of range are the same
+ * silence from the board's side, and the board has no screen to tell them
+ * apart with.
+ */
+bool wifi_scan(wifi_seen each, void *ctx);

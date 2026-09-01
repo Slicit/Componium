@@ -14,6 +14,7 @@
 
 #include "wifi.h"
 #include "improv.h"
+#include "sacn.h"
 
 static const char *TAG = "componium";
 
@@ -47,6 +48,11 @@ void app_main(void)
     if (!wifi_await(30000)) {
         ESP_LOGW(TAG, "no network yet, starting anyway");
     }
+
+    /* The strip, which is a separate instrument on the same board reached by
+     * a separate protocol. Started before the node because the node never
+     * returns, and after the network because it binds a socket. */
+    sacn_start();
 
     componium_node_start();
 
