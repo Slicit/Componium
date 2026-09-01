@@ -563,6 +563,16 @@ button:hover { border-color: #3a4553; }
 
 .adm-body { flex: 1 1 auto; min-width: 0; }
 .adm-page { max-width: 62ch; padding: 20px 24px 60px; }
+/* The device table needs the width; prose does not. */
+.adm-wide { max-width: none; }
+.adm-edit input[type="text"] { width: 15ch; }
+.adm-edit input[type="number"] { width: 7ch; text-align: right; }
+.adm-edit td { padding: 3px 10px 3px 0; }
+.adm-dmx { display: inline-flex; gap: 4px; align-items: center; }
+.adm-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.adm-row .spacer { flex: 1 1 auto; }
+.adm-remove { font-size: 11px; padding: 2px 8px; }
+.adm-problems { margin: 0; padding-left: 20px; line-height: 1.6; font-size: 13px; color: var(--warn, #c1121f); }
 .adm-page h2 { margin: 0 0 4px; font-size: 19px; }
 .adm-page > p.dim { margin: 0 0 20px; line-height: 1.55; }
 .adm-card {

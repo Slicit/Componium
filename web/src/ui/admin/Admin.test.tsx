@@ -18,19 +18,49 @@ import { Admin, PAGES } from './Admin';
 import { Nav } from '../Nav';
 import { parseRoute } from '../../core/route';
 
+/* The shape the server actually sends, field for field.
+ *
+ * Worth saying because the first version of this file invented one. The page
+ * rendered an address and a universe that `/api/rig` had never carried, the
+ * test passed against the fixture, and every device in the real studio showed
+ * a dash. A mocked response is only worth what its accuracy is worth. */
 const rig = {
   name: 'bench',
+  editable: true,
   instruments: [
-    { id: 'light.ambient', kind: 'light', driver: 'sacn', universe: 1, latency: 0.02 },
-    { id: 'wind.main', kind: 'wind', driver: 'cip', addr: '192.168.1.90:5570', latency: 1.2 },
-    { id: 'fog.left', kind: 'fog', driver: 'virtual' },
+    { id: 'light.ambient', kind: 'light', driver: 'sacn', addr: '192.168.1.90:5568',
+      universe: 1, start: 1, mode: 'rgb', latency: 0.02, position: [0, 1.4, -0.1] },
+    { id: 'wind.main', kind: 'wind', driver: 'cip', addr: '192.168.1.91:5570',
+      latency: 1.2, position: [0, 1.6, 0.6] },
+    { id: 'fog.left', kind: 'fog', driver: 'virtual', latency: 0, position: [-1.6, 0.15, 1] },
   ],
 };
 
+const options = {
+  kinds: [
+    { kind: 'fog', drivers: ['virtual', 'cip'] },
+    { kind: 'light', drivers: ['virtual', 'sacn', 'cip'] },
+    { kind: 'wind', drivers: ['virtual', 'cip'] },
+  ],
+  modes: ['dimmer', 'rgb', 'rgbw'],
+  editable: true,
+};
+
+/** Every rig PUT the page made. */
+const saves: unknown[] = [];
+
 beforeEach(() => {
   localStorage.clear();
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+  saves.length = 0;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith('/api/rig/options')) {
+      return { ok: true, json: async () => options } as Response;
+    }
     if (url.startsWith('/api/rig')) {
+      if (init?.method === 'PUT') {
+        saves.push(JSON.parse(init.body as string));
+        return { ok: true, json: async () => ({ saved: true }) } as Response;
+      }
       return { ok: true, json: async () => rig } as Response;
     }
     if (url.startsWith('/api/firmware')) {
@@ -80,15 +110,124 @@ describe('the side menu', () => {
   });
 });
 
+async function devices() {
+  show('#/admin/devices');
+  await waitFor(() => expect(screen.getByLabelText('Instrument 1 id')).toBeTruthy());
+}
+
+const value = (label: string) =>
+  (screen.getByLabelText(label) as HTMLInputElement | HTMLSelectElement).value;
+
 describe('devices', () => {
   it('shows what the rig says, and which of it is real', async () => {
-    show('#/admin/devices');
-    await waitFor(() => expect(screen.getByText('light.ambient')).toBeTruthy());
-    expect(screen.getByText('192.168.1.90:5570')).toBeTruthy();
-    expect(screen.getByText('universe 1')).toBeTruthy();
-    /* The count is the useful sentence during bring up: two of these will
-     * move something and one will only write a log line. */
+    await devices();
+    expect(value('Instrument 1 id')).toBe('light.ambient');
+    expect(value('Instrument 1 address')).toBe('192.168.1.90:5568');
+    expect(value('Instrument 1 universe')).toBe('1');
+    expect(value('Instrument 2 address')).toBe('192.168.1.91:5570');
+    /* The useful sentence during bring up: two of these will move something
+     * and one will only write a log line. */
     expect(screen.getByText(/2 on real hardware/)).toBeTruthy();
+  });
+
+  it('offers only the drivers that kind can be driven by', async () => {
+    await devices();
+    const forFog = screen.getByLabelText('Instrument 3 driver');
+    expect([...forFog.querySelectorAll('option')].map((o) => o.value))
+      .toEqual(['virtual', 'cip']);
+    /* sACN builds a DMX light and nothing else, so offering it here would be
+     * offering a rig that will not start. */
+    const forLight = screen.getByLabelText('Instrument 1 driver');
+    expect([...forLight.querySelectorAll('option')].map((o) => o.value))
+      .toEqual(['virtual', 'sacn', 'cip']);
+  });
+
+  it('moves a driver its kind cannot use rather than stranding it', async () => {
+    await devices();
+    fireEvent.change(screen.getByLabelText('Instrument 1 kind'), { target: { value: 'fog' } });
+    expect(value('Instrument 1 driver')).toBe('virtual');
+  });
+
+  it('keeps a driver the new kind can still use', async () => {
+    await devices();
+    fireEvent.change(screen.getByLabelText('Instrument 2 kind'), { target: { value: 'fog' } });
+    expect(value('Instrument 2 driver')).toBe('cip');
+  });
+
+  it('asks for an address only where there is something to reach', async () => {
+    await devices();
+    expect(screen.queryByLabelText('Instrument 3 address')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Instrument 3 driver'), { target: { value: 'cip' } });
+    expect(screen.getByLabelText('Instrument 3 address')).toBeTruthy();
+  });
+
+  it('adds and removes', async () => {
+    await devices();
+    fireEvent.click(screen.getByRole('button', { name: 'Add a device' }));
+    expect(screen.getByLabelText('Instrument 4 id')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove fog.left' }));
+    expect(screen.queryByLabelText('Instrument 4 id')).toBeNull();
+  });
+
+  it('will not save until something changed', async () => {
+    await devices();
+    expect((screen.getByRole('button', { name: 'Save the rig' }) as HTMLButtonElement).disabled)
+      .toBe(true);
+  });
+
+  it('sends the whole rig, including what it cannot edit', async () => {
+    await devices();
+    fireEvent.change(screen.getByLabelText('Instrument 2 address'),
+                     { target: { value: '192.168.1.99:5570' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save the rig' }));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    const sent = saves[0] as typeof rig;
+    expect(sent.instruments).toHaveLength(3);
+    expect(sent.instruments[1].addr).toBe('192.168.1.99:5570');
+    /* Position is not editable here and must still make the round trip, or
+     * saving would move every device to the middle of the room. */
+    expect(sent.instruments[0].position).toEqual([0, 1.4, -0.1]);
+  });
+
+  it('says what was wrong rather than pretending it saved', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/rig/options')) {
+        return { ok: true, json: async () => options } as Response;
+      }
+      if (init?.method === 'PUT') {
+        return {
+          ok: false,
+          json: async () => ({ problems: ['wind.main: needs an address, host:port'] }),
+        } as Response;
+      }
+      return { ok: true, json: async () => rig } as Response;
+    }));
+    await devices();
+    fireEvent.change(screen.getByLabelText('Instrument 2 address'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save the rig' }));
+    await waitFor(() =>
+      expect(screen.getByText(/needs an address/)).toBeTruthy());
+    expect(screen.getByText('Not saved')).toBeTruthy();
+  });
+
+  it('is read only when there is no file to write', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/rig/options')) {
+        return { ok: true, json: async () => ({ ...options, editable: false }) } as Response;
+      }
+      return { ok: true, json: async () => ({ ...rig, editable: false }) } as Response;
+    }));
+    show('#/admin/devices');
+    await waitFor(() => expect(screen.getByText(/Read only/)).toBeTruthy());
+    expect((screen.getByLabelText('Instrument 1 id') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Save the rig' })).toBeNull();
+  });
+
+  it('says that a running show will not notice', async () => {
+    /* The conductor reads the rig once, when it starts. A page that let you
+     * change an address and said nothing would be lying by omission. */
+    await devices();
+    expect(screen.getByText(/reads the rig when it starts/)).toBeTruthy();
   });
 });
 

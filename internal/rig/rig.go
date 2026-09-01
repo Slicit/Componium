@@ -35,23 +35,23 @@ type Meta struct {
 type InstConfig struct {
 	ID      string   `toml:"id"`
 	Kind    string   `toml:"kind"`
-	Driver  string   `toml:"driver"`
-	Latency Duration `toml:"latency"`
+	Driver  string   `toml:"driver,omitempty"`
+	Latency Duration `toml:"latency,omitempty"`
 
 	// Addr is where to reach the device, used by the sacn and cip drivers.
-	RemoteTimeout Duration `toml:"remote_timeout"`
+	RemoteTimeout Duration `toml:"remote_timeout,omitempty"`
 	// Secret authenticates CIP traffic. Both ends must agree.
-	Secret string `toml:"secret"`
+	Secret string `toml:"secret,omitempty"`
 
 	// Position places the instrument in the room, for the studio's preview.
 	// Metres, origin at the centre of the screen wall, x right, y up,
 	// z toward the audience. Optional: the studio falls back to a sensible
 	// spot for the kind.
-	Position *Position `toml:"position"`
+	Position *Position `toml:"position,omitempty"`
 
 	// Motion fields, used when Driver is "motion".
-	Format string        `toml:"format"`
-	Travel *MotionTravel `toml:"travel"`
+	Format string        `toml:"format,omitempty"`
+	Travel *MotionTravel `toml:"travel,omitempty"`
 	// Scents is what each reservoir of a scent instrument holds, by number.
 	//
 	//     [instrument.scents]
@@ -61,12 +61,12 @@ type InstConfig struct {
 	// Keyed by string because TOML tables are, and read back through Scent.
 	// Five bottles or fifteen is a longer table and no code: a score names a
 	// smell and this says which one that is here.
-	Scents map[string]string `toml:"scents"`
+	Scents map[string]string `toml:"scents,omitempty"`
 	// sACN fields, used when Driver is "sacn".
-	Universe uint16 `toml:"universe"`
-	Start    int    `toml:"start"`
-	Mode     string `toml:"mode"`
-	Addr     string `toml:"addr"`
+	Universe uint16 `toml:"universe,omitempty"`
+	Start    int    `toml:"start,omitempty"`
+	Mode     string `toml:"mode,omitempty"`
+	Addr     string `toml:"addr,omitempty"`
 }
 
 // Duration is a Go duration string in TOML.
@@ -79,6 +79,16 @@ func (d *Duration) UnmarshalText(b []byte) error {
 	}
 	*d = Duration(v)
 	return nil
+}
+
+// MarshalText writes a duration the way the file has always spelled one.
+//
+// Without it the encoder writes an integer of nanoseconds, which is not what
+// UnmarshalText reads, so a rig saved by the studio would not load again. The
+// asymmetry is only visible once something writes these files, which nothing
+// did until the studio could.
+func (d Duration) MarshalText() ([]byte, error) {
+	return []byte(time.Duration(d).String()), nil
 }
 
 func (d Duration) Duration() time.Duration { return time.Duration(d) }

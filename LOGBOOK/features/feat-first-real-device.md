@@ -107,6 +107,26 @@ One colour across the whole length, which is what the conductor sends: a
 fixture's three channels, not a pixel array. An ambient wash is a colour, not a
 picture.
 
+## Editing the rig, and what nearly got deleted
+
+The page sends the handful of fields it can edit. An instrument also carries
+things it cannot: a scent rack, a platform's declared travel, a CIP secret.
+Rebuilding each one from the wire alone would have deleted all three the first
+time somebody changed an address, and nothing would have announced it. So a
+save merges onto what is already there, keyed by id, and there is a test that
+puts a five bottle scent rack and a shared secret through a save of somebody
+else's address.
+
+The menus come from `rig.DriversFor`, which is the same table the loader
+dispatches on. A driver this page offers is a driver that will start, and a new
+one appears here the day it exists there rather than the day somebody remembers
+this file. The parity rule in LOGBOOK.md, third time.
+
+While wiring it up: `/api/rig` had never sent `addr` or `universe`, so the
+device list had been showing a dash for every address it had. The test did not
+catch it because the test mocked a response shape the server does not produce.
+A fixture is only worth its accuracy, and that one was invented.
+
 ## Decisions
 
 - **2026-09-01 · The image is a directory on disk, not something in the
@@ -145,6 +165,20 @@ picture.
 - **2026-09-01 · Devices is read only.** The rig is a file every machine running
   the show reads. A settings page that edited it would be a second source of
   truth for the one thing in the system that must not have two.
+  **Reversed the same day, and the argument was never against editing.** It was
+  against a *second copy*. The admin now edits the rig file itself: same file,
+  same one source of truth, a second way to reach it. Typing an IP address into
+  a table beats typing it into TOML over SSH, and nothing about that requires a
+  parallel store.
+
+  What it does require is that everything survive a round trip, and two things
+  did not. `omitempty` in BurntSushi's encoder does not treat a numeric zero as
+  empty, so every virtual fogger was given `start = 0`, which is not a DMX
+  address and which the validator then refused: the file could not be written
+  by the code that wrote it. And `Duration` had `UnmarshalText` and no
+  `MarshalText`, so a latency encoded as an integer of nanoseconds would not
+  read back. Neither was visible until something wrote one of these files, and
+  nothing ever had.
 
 ## Where this stands
 

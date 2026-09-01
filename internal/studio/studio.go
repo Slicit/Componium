@@ -70,13 +70,17 @@ type Server struct {
 	// firmware is a directory of images a browser can flash. Empty when the
 	// studio was started without one, which is the ordinary case.
 	firmware string
-	jobs     *Jobs
+	// rigPath is the file the rig was read from, so the admin can write it
+	// back. Empty when no rig was given, and then the rig is not editable
+	// rather than editable into nowhere.
+	rigPath string
+	jobs    *Jobs
 }
 
 // New opens a studio.
 func New(o Options) (*Server, error) {
 	s := &Server{path: o.Score, media: o.Media, scores: o.Scores,
-		firmware: o.Firmware}
+		firmware: o.Firmware, rigPath: o.Rig}
 
 	if o.Score != "" {
 		sc, err := score.Load(o.Score)
@@ -182,6 +186,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/legacy", http.RedirectHandler("/legacy/", http.StatusFound))
 	mux.HandleFunc("/api/score", s.handleScore)
 	mux.HandleFunc("/api/rig", s.handleRig)
+	mux.HandleFunc("/api/rig/options", s.handleRigOptions)
 	mux.HandleFunc("/media", s.handleMedia)
 	mux.HandleFunc("/api/media", s.handleMediaList)
 	mux.HandleFunc("/api/library", s.handleLibrary)
@@ -384,16 +389,27 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 
 // wireInstrument is what the room needs to draw a device.
 type wireInstrument struct {
-	ID       string     `json:"id"`
-	Kind     string     `json:"kind"`
-	Driver   string     `json:"driver"`
-	Latency  float64    `json:"latency"`
+	ID      string  `json:"id"`
+	Kind    string  `json:"kind"`
+	Driver  string  `json:"driver"`
+	Latency float64 `json:"latency"`
+	// Where it is plugged in. These were missing, which meant the admin's
+	// device list showed a dash for every address it had: the page was
+	// rendering fields the server had never sent.
+	Addr     string     `json:"addr,omitempty"`
+	Universe uint16     `json:"universe,omitempty"`
+	Start    int        `json:"start,omitempty"`
+	Mode     string     `json:"mode,omitempty"`
 	Position [3]float64 `json:"position"`
 }
 
 type wireRig struct {
-	Name        string           `json:"name"`
-	HasMedia    bool             `json:"hasMedia"`
+	Name     string `json:"name"`
+	HasMedia bool   `json:"hasMedia"`
+	// Editable is false when the studio was started without a rig file. The
+	// page then shows what it inferred from the score and does not pretend it
+	// can be saved.
+	Editable    bool             `json:"editable"`
 	Instruments []wireInstrument `json:"instruments"`
 }
 
@@ -424,6 +440,11 @@ func defaultPosition(kind string) [3]float64 {
 }
 
 func (s *Server) handleRig(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPut || r.Method == http.MethodPost {
+		s.handleRigSave(w, r)
+		return
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -447,6 +468,7 @@ func (s *Server) handleRig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out.Name = s.rig.Rig.Name
+	out.Editable = s.rigPath != ""
 	for _, in := range s.rig.Instruments {
 		pos := defaultPosition(in.Kind)
 		if in.Position != nil {
@@ -454,7 +476,12 @@ func (s *Server) handleRig(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Instruments = append(out.Instruments, wireInstrument{
 			ID: in.ID, Kind: in.Kind, Driver: in.Driver,
-			Latency: in.Latency.Duration().Seconds(), Position: pos,
+			Latency:  in.Latency.Duration().Seconds(),
+			Addr:     in.Addr,
+			Universe: in.Universe,
+			Start:    in.Start,
+			Mode:     in.Mode,
+			Position: pos,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

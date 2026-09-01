@@ -141,7 +141,11 @@ services:
       COMPONIUM_VLM_API: ${COMPONIUM_VLM_API:-}
     volumes:
       - ${COMPONIUM_MEDIA:-./media}:/media
-      - ./demo-rig.toml:/opt/componium/deploy-rig.toml:ro
+      # Writable, and only here. The admin edits the rig file rather than
+      # keeping a copy of it, which is what stops the studio and the conductor
+      # ending up with different ideas about what is on the end of a wire.
+      # The conductor keeps its read only mount: it reads this, never writes it.
+      - ./demo-rig.toml:/opt/componium/deploy-rig.toml
       - ${COMPONIUM_SCORES:-./scores}:/scores
       - ${COMPONIUM_FIRMWARE:-../firmware/esp32/web}:/firmware:ro
     ports:

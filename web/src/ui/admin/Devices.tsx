@@ -1,108 +1,302 @@
-/* What the rig says is out there.
+/* What is in the room, and where to reach it.
  *
- * Read only, and deliberately: the rig is a file, it lives beside the score,
- * and every machine that runs the show reads the same one. A settings page
- * that edited it here would be a second source of truth for the one thing in
- * the system that must not have two.
+ * This edits the rig *file*, not a copy of it. That distinction is the whole
+ * reason it is safe to have at all: there is still one place that says what is
+ * on the end of every wire, and it is still a file anybody can open in an
+ * editor. A studio keeping its own idea of the hardware would be a studio that
+ * disagrees with the conductor, and the conductor is the one holding the mains.
  *
- * It earns its place during bring up. "Is the studio even loading my rig, and
- * does it think the fan is a real node or a virtual one" is the first question
- * anybody asks when a device does not move, and until now the only way to
- * answer it was to read the TOML over somebody's shoulder.
+ * The menus are built from what the server says a rig may contain, rather than
+ * from a list typed in here. The loader dispatches on that same table, so a
+ * driver this page offers is a driver that will start, and a new one becomes
+ * available here the day it exists there rather than the day somebody
+ * remembers this file.
  */
 
-import { useEffect, useState } from 'react';
-import type { Instrument, Rig } from '../../core/score';
+import { useCallback, useEffect, useState } from 'react';
 
-type Wired = { driver?: string; addr?: string; universe?: number };
-
-function driverOf(inst: Wired): string {
-  return inst.driver || 'virtual';
+interface Device {
+  id: string;
+  kind: string;
+  driver: string;
+  latency: number;
+  addr?: string;
+  universe?: number;
+  start?: number;
+  mode?: string;
+  position: [number, number, number];
 }
 
-/** Real hardware, or a stand in that logs what it would have sent. */
-function isReal(driver: string): boolean {
-  return driver !== 'virtual';
+interface Rig {
+  name: string;
+  editable: boolean;
+  instruments: Device[];
 }
 
-function whereOf(inst: Wired): string {
-  if (inst.addr) return inst.addr;
-  if (inst.universe !== undefined) return 'universe ' + inst.universe;
-  return '—';
+interface Options {
+  kinds: { kind: string; drivers: string[] }[];
+  modes: string[];
+  editable: boolean;
+}
+
+/** A device that is not virtual is a device that will move something. */
+const isReal = (d: Device) => (d.driver || 'virtual') !== 'virtual';
+
+/** What a driver needs to be reachable. */
+const wantsAddress = (driver: string) => driver === 'cip' || driver === 'motion';
+const wantsUniverse = (driver: string) => driver === 'sacn';
+
+function blank(kind: string, drivers: string[]): Device {
+  return {
+    id: kind + '.new', kind, driver: drivers[0] ?? 'virtual',
+    latency: 0, position: [0, 1, 1],
+  };
 }
 
 export function Devices() {
   const [rig, setRig] = useState<Rig | null>(null);
+  const [options, setOptions] = useState<Options | null>(null);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [name, setName] = useState('');
+  const [dirty, setDirty] = useState(false);
+  const [problems, setProblems] = useState<string[]>([]);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    void fetch('/api/rig')
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('none loaded'))))
-      .then((r) => { if (alive) setRig(r); })
-      .catch((e) => { if (alive) setError(String(e.message || e)); });
-    return () => { alive = false; };
+  const load = useCallback(async () => {
+    try {
+      const [r, o] = await Promise.all([
+        fetch('/api/rig').then((x) => (x.ok ? x.json() : Promise.reject(new Error('none loaded')))),
+        fetch('/api/rig/options').then((x) => (x.ok ? x.json() : { kinds: [], modes: [] })),
+      ]);
+      setRig(r);
+      setOptions(o);
+      setDevices(r.instruments ?? []);
+      setName(r.name ?? '');
+      setDirty(false);
+    } catch (e) {
+      setError(String((e as Error).message || e));
+    }
   }, []);
 
-  const instruments = (rig?.instruments ?? []) as (Instrument & Wired)[];
-  const real = instruments.filter((i) => isReal(driverOf(i))).length;
+  useEffect(() => { void load(); }, [load]);
+
+  const change = (i: number, patch: Partial<Device>) => {
+    setDevices((was) => was.map((d, n) => (n === i ? { ...d, ...patch } : d)));
+    setDirty(true);
+    setSaved(false);
+  };
+
+  const driversFor = (kind: string) =>
+    options?.kinds.find((k) => k.kind === kind)?.drivers ?? ['virtual'];
+
+  /* Changing a kind can strand a driver that kind cannot use, so it moves to
+   * one it can rather than leaving a rig that will not start. */
+  const changeKind = (i: number, kind: string) => {
+    const allowed = driversFor(kind);
+    const keep = allowed.includes(devices[i].driver) ? devices[i].driver : allowed[0];
+    change(i, { kind, driver: keep });
+  };
+
+  const save = async () => {
+    setProblems([]);
+    setError(null);
+    const res = await fetch('/api/rig', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, instruments: devices }),
+    });
+    if (res.ok) {
+      setSaved(true);
+      setDirty(false);
+      await load();
+      return;
+    }
+    const body = await res.json().catch(() => null);
+    if (body?.problems) { setProblems(body.problems); return; }
+    setError(await res.text().catch(() => 'the studio refused it'));
+  };
+
+  const editable = rig?.editable ?? false;
+  const real = devices.filter(isReal).length;
 
   return (
-    <div className="adm-page">
+    <div className="adm-page adm-wide">
       <h2>Devices</h2>
       <p className="dim">
-        From the rig file the studio was started with. To change any of it, edit
-        that file: it is the one thing every machine running the show reads, and
-        a second place to set it would be a second thing to be wrong.
+        This is the rig file, not a copy of it. Edit it here or in a text editor;
+        both write the same place, which is what keeps the studio and the
+        conductor agreeing about what is on the end of every wire.
       </p>
 
-      {error && (
+      {error && <p className="adm-warn">{error}</p>}
+
+      {rig && !editable && (
         <p className="adm-warn">
-          No rig: {error}. Start the studio with <code>-rig</code>.
+          Read only: this studio was started without <code>-rig</code>, so what
+          you see below was inferred from the score and there is no file to
+          write it to.
         </p>
       )}
 
       {rig && (
         <>
           <section className="adm-card">
-            <h3>{rig.name || 'unnamed rig'}</h3>
-            <p className="dim small">
-              {instruments.length} instrument{instruments.length === 1 ? '' : 's'},
-              {' '}{real} on real hardware.
-              {real === 0 && ' Everything here is virtual, so nothing physical will move.'}
-            </p>
+            <div className="adm-set-head">
+              <label htmlFor="rig-name">Rig name</label>
+              <span className="dim small">
+                {devices.length} instrument{devices.length === 1 ? '' : 's'},
+                {' '}{real} on real hardware
+              </span>
+            </div>
+            <input
+              id="rig-name" type="text" value={name} disabled={!editable}
+              onChange={(e) => { setName(e.target.value); setDirty(true); setSaved(false); }}
+            />
           </section>
 
           <section className="adm-card">
             <div className="adm-scroll">
-              <table className="adm-table">
+              <table className="adm-table adm-edit">
                 <thead>
                   <tr>
                     <th>Instrument</th><th>Kind</th><th>Driver</th>
-                    <th>Where</th><th className="num">Latency</th>
+                    <th>Where</th><th className="num">Latency</th><th />
                   </tr>
                 </thead>
                 <tbody>
-                  {instruments.map((i) => {
-                    const driver = driverOf(i);
-                    return (
-                      <tr key={i.id}>
-                        <td><code>{i.id}</code></td>
-                        <td>{i.kind}</td>
-                        <td>
-                          <span className={'adm-pill' + (isReal(driver) ? ' is-real' : '')}>
-                            {driver}
+                  {devices.map((d, i) => (
+                    <tr key={i}>
+                      <td>
+                        <input
+                          type="text" value={d.id} disabled={!editable}
+                          aria-label={'Instrument ' + (i + 1) + ' id'}
+                          onChange={(e) => change(i, { id: e.target.value })}
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={d.kind} disabled={!editable}
+                          aria-label={'Instrument ' + (i + 1) + ' kind'}
+                          onChange={(e) => changeKind(i, e.target.value)}
+                        >
+                          {options?.kinds.map((k) => (
+                            <option key={k.kind} value={k.kind}>{k.kind}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={d.driver || 'virtual'} disabled={!editable}
+                          aria-label={'Instrument ' + (i + 1) + ' driver'}
+                          onChange={(e) => change(i, { driver: e.target.value })}
+                        >
+                          {driversFor(d.kind).map((v) => (
+                            <option key={v} value={v}>{v}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        {wantsAddress(d.driver) && (
+                          <input
+                            type="text" value={d.addr ?? ''} disabled={!editable}
+                            placeholder="192.168.1.90:5570"
+                            aria-label={'Instrument ' + (i + 1) + ' address'}
+                            onChange={(e) => change(i, { addr: e.target.value })}
+                          />
+                        )}
+                        {wantsUniverse(d.driver) && (
+                          <span className="adm-dmx">
+                            <input
+                              type="text" value={d.addr ?? ''} disabled={!editable}
+                              placeholder="192.168.1.90:5568"
+                              aria-label={'Instrument ' + (i + 1) + ' address'}
+                              onChange={(e) => change(i, { addr: e.target.value })}
+                            />
+                            <input
+                              type="number" min={1} max={63999} value={d.universe ?? 1}
+                              disabled={!editable}
+                              aria-label={'Instrument ' + (i + 1) + ' universe'}
+                              onChange={(e) => change(i, { universe: Number(e.target.value) })}
+                            />
+                            <input
+                              type="number" min={1} max={512} value={d.start ?? 1}
+                              disabled={!editable}
+                              aria-label={'Instrument ' + (i + 1) + ' DMX address'}
+                              onChange={(e) => change(i, { start: Number(e.target.value) })}
+                            />
+                            <select
+                              value={d.mode || 'rgb'} disabled={!editable}
+                              aria-label={'Instrument ' + (i + 1) + ' mode'}
+                              onChange={(e) => change(i, { mode: e.target.value })}
+                            >
+                              {(options?.modes ?? []).map((m) => (
+                                <option key={m} value={m}>{m}</option>
+                              ))}
+                            </select>
                           </span>
-                        </td>
-                        <td className="dim">{whereOf(i)}</td>
-                        <td className="num">{i.latency ? i.latency + ' s' : '—'}</td>
-                      </tr>
-                    );
-                  })}
+                        )}
+                        {!wantsAddress(d.driver) && !wantsUniverse(d.driver) && (
+                          <span className="dim small">nothing to reach</span>
+                        )}
+                      </td>
+                      <td className="num">
+                        <input
+                          type="number" min={0} max={10} step={0.01}
+                          value={d.latency ?? 0} disabled={!editable}
+                          aria-label={'Instrument ' + (i + 1) + ' latency'}
+                          onChange={(e) => change(i, { latency: Number(e.target.value) })}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          className="adm-remove" disabled={!editable}
+                          title={'Remove ' + d.id}
+                          aria-label={'Remove ' + d.id}
+                          onClick={() => {
+                            setDevices((was) => was.filter((_, n) => n !== i));
+                            setDirty(true); setSaved(false);
+                          }}
+                        >remove</button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
+
+            {editable && (
+              <div className="adm-row">
+                <button
+                  onClick={() => {
+                    const kind = options?.kinds[0]?.kind ?? 'light';
+                    setDevices((was) => [...was, blank(kind, driversFor(kind))]);
+                    setDirty(true); setSaved(false);
+                  }}
+                >Add a device</button>
+                <span className="spacer" />
+                {problems.length === 0 && saved && <span className="dim small">saved</span>}
+                {dirty && <span className="dim small">unsaved</span>}
+                <button className="adm-go" disabled={!dirty} onClick={() => void save()}>
+                  Save the rig
+                </button>
+              </div>
+            )}
           </section>
+
+          {problems.length > 0 && (
+            <section className="adm-card">
+              <h3>Not saved</h3>
+              <ul className="adm-problems">
+                {problems.map((p) => <li key={p}>{p}</li>)}
+              </ul>
+            </section>
+          )}
+
+          <p className="dim small">
+            The conductor reads the rig when it starts. Saving here changes what
+            the next show does, not what a running one is doing.
+          </p>
         </>
       )}
     </div>
