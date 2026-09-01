@@ -1,0 +1,105 @@
+# The first rig with real hardware in it: one WLED strip and one fan.
+#
+# Two devices, two entirely different paths to them, which is the point of
+# starting here. The light speaks a lighting protocol the conductor already
+# knows and needs no Componium code on the device at all. The fan speaks CIP to
+# firmware we wrote, over UDP, with a watchdog. Between them they exercise
+# everything: a standard protocol to a third party device, and our own protocol
+# to our own node.
+#
+# Copy this and fill in the two addresses. Nothing here is dangerous: light and
+# wind are the two instrument kinds that cannot hurt anyone, which is exactly
+# why docs/hardware.md says to buy them first.
+
+[rig]
+name = "bench"
+
+# --- the light ------------------------------------------------------------
+#
+# A WLED controller, which receives E1.31 (sACN) natively. In WLED: Sync
+# Interfaces, turn on "Receive UDP realtime", E1.31 mode, universe 1, start
+# address 1, DMX mode "Effect" for one colour across the whole strip or
+# "Multi RGB" to address pixels.
+#
+# Unicast rather than multicast. Leaving `addr` out sends to the multicast
+# group for the universe, which is correct and which home access points drop
+# with dispiriting regularity: IGMP snooping on consumer wifi is a coin toss.
+# Naming the controller's own address makes it an ordinary datagram.
+#
+# 20ms is the honest number for a strip on wifi: the LEDs themselves are
+# instant, and the wifi hop is not.
+[[instrument]]
+id = "light.ambient"
+kind = "light"
+driver = "sacn"
+addr = "192.168.1.xxx:5568"   # <- the WLED controller
+universe = 1
+start = 1
+mode = "rgb"
+latency = "20ms"
+[instrument.position]
+x = 0.0
+y = 1.4
+z = -0.1
+
+# --- the fan --------------------------------------------------------------
+#
+# An ESP32 running firmware/esp32, flashed from the studio's admin page. It
+# reports its address when it joins the network; put that here.
+#
+# The three numbers below are the ones that matter and the ones most likely to
+# be wrong. They are what the conductor uses to fire a cue early enough that
+# the air arrives on the frame, and the firmware ships with guesses:
+#
+#   latency    dead time before anything at all happens
+#   ramp up    nothing to full
+#   ramp down  full to nothing
+#
+# Measure them. Point a phone at the fan, film it, drive the slider from the
+# studio's force panel and count frames. A fan is the first instrument in this
+# project with large, honest latency, and every later instrument is easier
+# because this one taught you to measure rather than guess.
+[[instrument]]
+id = "wind.main"
+kind = "wind"
+driver = "cip"
+addr = "192.168.1.xxx:5570"   # <- the ESP32, from the flasher
+latency = "1.2s"
+[instrument.position]
+x = 0.0
+y = 1.7
+z = 0.7
+
+# Everything else stays virtual, so the room preview still has a full rig to
+# draw and the conductor logs what it would have sent. Add hardware one line at
+# a time; a rig that half exists is a normal state and not a broken one.
+
+[[instrument]]
+id = "light.event"
+kind = "light"
+driver = "virtual"
+latency = "20ms"
+[instrument.position]
+x = 0.0
+y = 2.5
+z = 1.2
+
+[[instrument]]
+id = "shake.seat"
+kind = "shake"
+driver = "virtual"
+latency = "5ms"
+[instrument.position]
+x = 0.0
+y = 0.35
+z = 3.0
+
+[[instrument]]
+id = "motion.platform"
+kind = "motion"
+driver = "virtual"
+latency = "60ms"
+[instrument.position]
+x = 0.0
+y = 0.5
+z = 3.0

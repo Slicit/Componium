@@ -504,6 +504,120 @@ button:hover { border-color: #3a4553; }
   overflow: hidden;
   background: var(--ground);
 }
+/* --- the shell and the admin ------------------------------------------- */
+
+/* The studio flows exactly as it did: normal document flow, the page scrolls,
+   nothing is trapped in a box of a fixed height. The shell adds a bar above it
+   and nothing else. Only the admin, which is two columns side by side, asks
+   for a viewport height of its own. */
+.shell { min-height: 100vh; }
+.shell-body { min-height: 0; }
+/* Hidden rather than unmounted: the studio keeps its score, its undo history
+   and its WebGL context while somebody is in the admin. display:none also
+   stops the room being asked for frames nobody is looking at. */
+.shell-away { display: none; }
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 12px;
+  height: 34px;
+  border-bottom: 1px solid var(--line);
+  background: var(--ground);
+}
+.nav-mark { font-weight: 600; letter-spacing: 0.02em; }
+.nav ul { display: flex; gap: 4px; list-style: none; margin: 0; padding: 0; }
+.nav a {
+  display: block;
+  padding: 3px 10px;
+  border-radius: 3px;
+  color: var(--dim);
+  text-decoration: none;
+  font-size: 13px;
+}
+.nav a:hover { color: var(--ink); background: var(--raise); }
+.nav a.is-current { color: var(--ink); background: var(--raise); }
+
+.adm { display: flex; min-height: calc(100vh - 34px); }
+.adm-menu {
+  flex: 0 0 200px;
+  border-right: 1px solid var(--line);
+  padding: 12px 8px;
+  align-self: stretch;
+}
+.adm-menu ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.adm-menu a {
+  display: block;
+  padding: 6px 10px;
+  border-radius: 3px;
+  color: var(--dim);
+  text-decoration: none;
+  font-size: 13px;
+}
+.adm-menu a:hover { color: var(--ink); background: var(--raise); }
+.adm-menu a.is-current { color: var(--ink); background: var(--raise); font-weight: 500; }
+
+.adm-body { flex: 1 1 auto; min-width: 0; }
+.adm-page { max-width: 62ch; padding: 20px 24px 60px; }
+.adm-page h2 { margin: 0 0 4px; font-size: 19px; }
+.adm-page > p.dim { margin: 0 0 20px; line-height: 1.55; }
+.adm-card {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.adm-card h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.adm-card > p:last-child { margin-bottom: 0; }
+
+.adm-warn { color: var(--warn, #c1121f); line-height: 1.5; }
+.adm-code {
+  background: var(--raise);
+  border-radius: 3px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+.adm-steps { margin: 0 0 14px; padding-left: 20px; line-height: 1.6; font-size: 13px; }
+.adm-steps li { margin-bottom: 4px; }
+.adm-go { padding: 6px 18px; font-weight: 600; }
+
+.adm-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
+.adm-facts dt { color: var(--dim); }
+.adm-facts dd { margin: 0; line-height: 1.5; }
+
+.adm-scroll { overflow-x: auto; }
+.adm-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.adm-table th, .adm-table td { padding: 5px 10px 5px 0; text-align: left; white-space: nowrap; }
+.adm-table th { color: var(--dim); font-weight: 500; border-bottom: 1px solid var(--line); }
+.adm-table td { border-bottom: 1px solid var(--line); }
+.adm-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.adm-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: 11px;
+  background: var(--raise);
+  color: var(--dim);
+}
+.adm-pill.is-real { color: var(--ink); font-weight: 600; }
+
+.adm-set { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.adm-set:last-child { border-bottom: 0; padding-bottom: 0; }
+.adm-set:first-child { padding-top: 0; }
+.adm-set-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.adm-set-head label { font-size: 13px; font-weight: 500; }
+.adm-set-value { font-variant-numeric: tabular-nums; color: var(--dim); font-size: 13px; }
+.adm-set input[type="range"] { width: 100%; }
+.adm-set p { margin: 6px 0 8px; line-height: 1.5; }
+.adm-reset { font-size: 11px; padding: 2px 8px; }
+
 .room-host { position: relative; }
 .room-host canvas { display: block; width: 100%; height: 100%; }
 

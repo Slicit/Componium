@@ -40,3 +40,12 @@ deploy/.env
 # Python bytecode, which the composer regenerates on every run.
 __pycache__/
 *.pyc
+
+# ESP-IDF build output and the packaged web installer: artifacts of a
+# different toolchain, on a different release schedule.
+firmware/esp32/build/
+firmware/esp32/web/
+firmware/esp32/sdkconfig
+firmware/esp32/sdkconfig.old
+firmware/esp32/dependencies.lock
+firmware/esp32/managed_components/

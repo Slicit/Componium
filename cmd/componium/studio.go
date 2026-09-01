@@ -17,6 +17,7 @@ func studioCmd(args []string) error {
 	mediaPath := fs.String("media", "", "a film, or a directory of them")
 	scoresPath := fs.String("scores", "", "where generated scores live (default: beside the films)")
 	composer := fs.String("composer", "", "path to compose.py, so the library can analyse films")
+	firmware := fs.String("firmware", "", "directory of node firmware images the admin page can flash")
 	addr := fs.String("addr", "127.0.0.1:8722", "address to serve on")
 	fs.Parse(args)
 
@@ -43,7 +44,7 @@ func studioCmd(args []string) error {
 
 	s, err := studio.New(studio.Options{
 		Score: *scorePath, Rig: *rigPath, Media: *mediaPath,
-		Scores: *scoresPath, Composer: comp,
+		Scores: *scoresPath, Composer: comp, Firmware: *firmware,
 	})
 	if err != nil {
 		return err

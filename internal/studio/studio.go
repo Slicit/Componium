@@ -52,6 +52,11 @@ type Options struct {
 	// Composer is the path to compose.py. Without it, analysis cannot run and
 	// the library says so rather than offering a button that does nothing.
 	Composer string
+	// Firmware is a directory of node images the admin page can flash to a
+	// board over USB. Empty is the ordinary case: the image belongs to a
+	// different toolchain on a different release schedule, so it is a
+	// directory on disk rather than something built into this binary.
+	Firmware string
 }
 
 // Server edits scores and previews them against a rig and a film.
@@ -62,12 +67,16 @@ type Server struct {
 	rig    *rig.Config
 	media  string
 	scores string
-	jobs   *Jobs
+	// firmware is a directory of images a browser can flash. Empty when the
+	// studio was started without one, which is the ordinary case.
+	firmware string
+	jobs     *Jobs
 }
 
 // New opens a studio.
 func New(o Options) (*Server, error) {
-	s := &Server{path: o.Score, media: o.Media, scores: o.Scores}
+	s := &Server{path: o.Score, media: o.Media, scores: o.Scores,
+		firmware: o.Firmware}
 
 	if o.Score != "" {
 		sc, err := score.Load(o.Score)
@@ -182,6 +191,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/versions", s.handleVersions)
 	mux.HandleFunc("/api/seen", s.handleSeen)
 	mux.HandleFunc("/api/context", s.handleContext)
+	mux.HandleFunc("/api/firmware", s.handleFirmwareInfo)
+	mux.HandleFunc("/firmware/", s.handleFirmwareFile)
 	// The rebuilt studio, alongside the original rather than instead of it.
 	mux.Handle("/v2/", s.handleWeb())
 	mux.Handle("/v2", http.RedirectHandler("/v2/", http.StatusFound))

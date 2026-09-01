@@ -124,6 +124,10 @@ services:
       - -rig=/opt/componium/deploy-rig.toml
       - -media=/media
       - -scores=/scores
+      # Images the admin page can flash to a board over USB. A build artifact
+      # of a different toolchain, so it is mounted rather than baked in;
+      # absent is fine and the page says so.
+      - -firmware=/firmware
       - -addr=0.0.0.0:8722
     # The vision seam, off unless a command is named. Analysis works without
     # it; naming one turns keyframe labelling on for every film analysed here.
@@ -139,6 +143,7 @@ services:
       - ${COMPONIUM_MEDIA:-./media}:/media
       - ./demo-rig.toml:/opt/componium/deploy-rig.toml:ro
       - ${COMPONIUM_SCORES:-./scores}:/scores
+      - ${COMPONIUM_FIRMWARE:-../firmware/esp32/web}:/firmware:ro
     ports:
       - "8722:8722"
     depends_on:
