@@ -167,6 +167,9 @@ func (s *Server) armLive(cfg *rig.Config, sc *score.Score, name string) error {
 	// the show loop it could never notice the show loop stopping, which is the
 	// one failure it exists to catch.
 	go safety.Watch(ctx, l.sup, 0)
+	// See play: a cue driven light needs its universe retransmitted or it goes
+	// dark on the receiver's timer rather than on the score's.
+	go built.Keepalive(ctx)
 	go l.run(ctx, stop, frame)
 
 	s.liveMu.Lock()

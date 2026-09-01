@@ -139,6 +139,12 @@ func playCmd(args []string) error {
 	// which is the one failure it exists to catch.
 	go safety.Watch(ctx, sup, 0)
 
+	// And every sACN universe keeps being transmitted. Receivers drop back to
+	// idle after about two and a half seconds of silence, so a light driven by
+	// cues rather than by a curve goes dark on the receiver's timer instead of
+	// on the score's.
+	go built.Keepalive(ctx)
+
 	var lastPrint time.Time
 	err = show.Run(ctx, show.Config{
 		Source: src, Clock: clk, Conductor: cond, PollInterval: *poll,

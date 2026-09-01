@@ -7,9 +7,11 @@
 package rig
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -151,6 +153,11 @@ type Built struct {
 	Instruments map[string]instrument.Instrument
 	closers     []io.Closer
 	remotes     []*cip.Client
+	// universes are shared by the fixtures in them. A DMX universe carries
+	// several fixtures at different start addresses, and E1.31 sends all 512
+	// channels in every packet, so a fixture that owned one would blank every
+	// other fixture on it with each frame it sent.
+	universes []*sacn.Universe
 }
 
 // Close releases every instrument that holds a resource.
@@ -171,6 +178,8 @@ func (b *Built) Close() error {
 // to start.
 func (c *Config) Build() (*Built, error) {
 	out := &Built{Instruments: map[string]instrument.Instrument{}}
+	// Fixtures asking for the same universe get the same one.
+	universes := map[string]*sacn.Universe{}
 	for _, in := range c.Instruments {
 		switch in.Driver {
 		case "", "virtual":
@@ -182,7 +191,20 @@ func (c *Config) Build() (*Built, error) {
 			if in.Mode == "" {
 				mode = sacn.ModeRGB
 			}
-			l, err := sacn.New(sacn.Config{
+			key := sacn.Key(in.Universe, in.Addr)
+			u, ok := universes[key]
+			if !ok {
+				var err error
+				u, err = sacn.Dial(in.Universe, in.Addr, "")
+				if err != nil {
+					out.Close()
+					return nil, err
+				}
+				universes[key] = u
+				out.universes = append(out.universes, u)
+				out.closers = append(out.closers, u)
+			}
+			l, err := sacn.On(u, sacn.Config{
 				ID: in.ID, Universe: in.Universe, Addr: in.Addr,
 				Start: in.Start, Mode: mode, Latency: in.Latency.Duration(),
 			})
@@ -191,7 +213,6 @@ func (c *Config) Build() (*Built, error) {
 				return nil, err
 			}
 			out.Instruments[in.ID] = l
-			out.closers = append(out.closers, l)
 		case "cip":
 			// The manifest comes from the node rather than from this file.
 			// The device is the only thing that actually knows its own
@@ -244,6 +265,29 @@ func (b *Built) Heartbeat() {
 	for _, c := range b.remotes {
 		_ = c.Heartbeat()
 	}
+}
+
+// Keepalive keeps every sACN universe being transmitted until ctx is done.
+//
+// Not optional, and for a long time not called by anything, which is a bug that
+// only shows on a fixture driven by cues rather than by a curve. E1.31
+// receivers drop back to idle after about two and a half seconds of silence, so
+// a curve track at 50Hz keeps its own fixture alive by accident and an event
+// light flashes once and then goes dark on the receiver's timer rather than on
+// the score's.
+//
+// Nothing in Componium starts a goroutine the caller did not ask for, so this
+// is the caller's to run: `go built.Keepalive(ctx)`.
+func (b *Built) Keepalive(ctx context.Context) {
+	var wg sync.WaitGroup
+	for _, u := range b.universes {
+		wg.Add(1)
+		go func(u *sacn.Universe) {
+			defer wg.Done()
+			_ = u.Keepalive(ctx, time.Second)
+		}(u)
+	}
+	wg.Wait()
 }
 
 // Safe orders every remote node to its safe state immediately.

@@ -2,10 +2,7 @@ package sacn
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
-	"net"
-	"sync"
 	"time"
 
 	"github.com/Slicit/componium/internal/instrument"
@@ -56,17 +53,21 @@ type Config struct {
 
 // Light is a DMX fixture addressed over sACN.
 //
-// It owns its own socket and its own sequence numbering, because that is
-// device I/O rather than show timing. It does not own a ticker: keepalive is
+// A view onto a few channels of a universe, not an owner of one. A universe is
+// 512 channels and is meant to carry several fixtures; a fixture that owned its
+// own buffer and socket would transmit all 512 slots with every other
+// fixture's channels at zero, and two of them on one universe would erase each
+// other. See universe.go, which is where that bug is written up.
+//
+// It does not own a ticker either: keepalive belongs to the universe and is
 // started explicitly by the caller.
 type Light struct {
-	cfg  Config
-	conn net.Conn
-
-	mu   sync.Mutex
-	seq  uint8
-	data [Slots]byte
-	cid  [16]byte
+	cfg Config
+	u   *Universe
+	// mine is the universe this light dialled for itself, and is what Close
+	// closes. Nil when the universe was handed in, because a fixture does not
+	// get to close a universe other fixtures are using.
+	mine *Universe
 }
 
 // New dials the destination and prepares the fixture.
@@ -77,26 +78,43 @@ func New(cfg Config) (*Light, error) {
 	if cfg.Start < 1 || cfg.Start+cfg.Mode.width()-1 > Slots {
 		return nil, fmt.Errorf("sacn: start address %d does not fit a %s fixture in 512 channels", cfg.Start, cfg.Mode)
 	}
-	addr := cfg.Addr
-	if addr == "" {
-		addr = MulticastAddr(cfg.Universe)
-	}
-	conn, err := net.Dial("udp", addr)
+	u, err := Dial(cfg.Universe, cfg.Addr, cfg.SourceName)
 	if err != nil {
-		return nil, fmt.Errorf("sacn: dial %s: %w", addr, err)
+		return nil, err
+	}
+	l, err := On(u, cfg)
+	if err != nil {
+		u.Close()
+		return nil, err
+	}
+	l.mine = u
+	return l, nil
+}
+
+// On puts a fixture into a universe somebody else is holding.
+//
+// This is how a rig with three lights on one universe is built: one universe,
+// three views. They share the buffer, so setting one does not blank the others.
+func On(u *Universe, cfg Config) (*Light, error) {
+	if cfg.ID == "" {
+		return nil, fmt.Errorf("sacn: ID is required")
+	}
+	if cfg.Start < 1 || cfg.Start+cfg.Mode.width()-1 > Slots {
+		return nil, fmt.Errorf("sacn: start address %d does not fit a %s fixture in 512 channels", cfg.Start, cfg.Mode)
 	}
 	if cfg.Latency == 0 {
 		cfg.Latency = DefaultLatency
 	}
-	if cfg.SourceName == "" {
-		cfg.SourceName = "componium"
-	}
-	l := &Light{cfg: cfg, conn: conn}
-	rand.Read(l.cid[:])
-	return l, nil
+	return &Light{cfg: cfg, u: u}, nil
 }
 
-func (l *Light) Close() error { return l.conn.Close() }
+// Close releases the universe, if this fixture is the one that opened it.
+func (l *Light) Close() error {
+	if l.mine == nil {
+		return nil
+	}
+	return l.mine.Close()
+}
 
 func (l *Light) Manifest() instrument.Manifest {
 	return instrument.Manifest{
@@ -112,70 +130,40 @@ func (l *Light) Manifest() instrument.Manifest {
 // them onto DMX channels is this instrument's problem, which is exactly the
 // division ADR 0001 sets out.
 func (l *Light) Dispatch(d instrument.Dispatch) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	base := l.cfg.Start - 1
+	values := make([]byte, l.cfg.Mode.width())
 	switch l.cfg.Mode {
 	case ModeRGB, ModeRGBW:
-		l.data[base+0] = level(d.Cue.Params["r"])
-		l.data[base+1] = level(d.Cue.Params["g"])
-		l.data[base+2] = level(d.Cue.Params["b"])
+		values[0] = level(d.Cue.Params["r"])
+		values[1] = level(d.Cue.Params["g"])
+		values[2] = level(d.Cue.Params["b"])
 		if l.cfg.Mode == ModeRGBW {
-			l.data[base+3] = level(d.Cue.Params["w"])
+			values[3] = level(d.Cue.Params["w"])
 		}
 	default:
-		l.data[base] = level(d.Cue.Params["intensity"])
+		values[0] = level(d.Cue.Params["intensity"])
 	}
 	if d.Cue.Action == "off" {
-		for i := 0; i < l.cfg.Mode.width(); i++ {
-			l.data[base+i] = 0
+		for i := range values {
+			values[i] = 0
 		}
 	}
-	return l.send()
+	// Only this fixture's channels. Everything else in the universe belongs to
+	// somebody else and is none of this fixture's business.
+	return l.u.Set(l.cfg.Start-1, values)
 }
 
-// send transmits the current universe. The caller must hold the lock.
-func (l *Light) send() error {
-	p := &Packet{
-		CID:        l.cid,
-		SourceName: l.cfg.SourceName,
-		Universe:   l.cfg.Universe,
-		Priority:   100,
-		Sequence:   l.seq,
-		Data:       l.data,
-	}
-	l.seq++
-	_, err := l.conn.Write(p.Marshal())
-	return err
-}
+// Universe is the universe this fixture is in, for a caller that needs to keep
+// it alive or close it.
+func (l *Light) Sender() *Universe { return l.u }
 
-// Keepalive retransmits the current state until ctx is done.
+// Keepalive keeps this fixture's universe being transmitted.
 //
-// E1.31 receivers commonly drop back to their idle state after about 2.5
-// seconds without traffic, so a fixture set once and left alone will go dark
-// on its own. Componium cues are sparse by nature, so something has to keep
-// talking. It is the caller's goroutine, deliberately: nothing in Componium
-// starts a goroutine the caller did not ask for.
+// Kept here because a caller holding one fixture should not have to know about
+// universes to stop it going dark. Two fixtures on one universe running this
+// is two tickers on one socket, which is wasteful and harmless; a rig builds
+// one per universe instead.
 func (l *Light) Keepalive(ctx context.Context, interval time.Duration) error {
-	if interval <= 0 {
-		interval = time.Second
-	}
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-t.C:
-			l.mu.Lock()
-			err := l.send()
-			l.mu.Unlock()
-			if err != nil {
-				return err
-			}
-		}
-	}
+	return l.u.Keepalive(ctx, interval)
 }
 
 // level converts a 0 to 1 domain value into a DMX level, clamping rather than
