@@ -22,6 +22,7 @@ import * as THREE from 'three';
 import { containScale, aspectOf, SCREEN_ASPECT } from '../../core/picture';
 import { repeatForAspect } from '../../core/tiling';
 import { Activity } from './activity';
+import { Meter } from './meter';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
@@ -1265,6 +1266,17 @@ export class Room3D {
   /* Draw one moment. Renders immediately rather than waiting for the animation
    * loop, so scrubbing the timeline updates the room even when the page is not
    * being given frames. */
+  /**
+   * Report how fast the room is drawing, roughly twice a second.
+   *
+   * Told rather than polled, so a React overlay re-renders when the number
+   * moves and not on every frame of a sixty hertz loop, which would be a
+   * larger cost than the one it is reporting.
+   */
+  onMeter(fn) {
+    this.meterListener = fn;
+  }
+
   update(state) {
     this.state = state || {};
     this.activity.changed();
@@ -1381,8 +1393,23 @@ export class Room3D {
      * or the damping never settles. */
     if (this.controls && this.controls.update()) this.activity.moved();
 
-    if (!this.activity.take()) return;
+    if (!this.meter) this.meter = new Meter(now);
+    if (!this.activity.take()) {
+      if (this.meter.skipped(now) && this.meterListener) {
+        this.meterListener({ rate: this.meter.rate, cost: this.meter.cost });
+      }
+      return;
+    }
     this.renderer.render(this.scene, this.camera);
+    /* Measured after the render call rather than around it. WebGL is
+     * asynchronous, so this is the time spent building and submitting the
+     * frame, not the time the GPU spent on it. That is still the number worth
+     * having here: it is the part that runs on the same thread as everything
+     * else in the studio. */
+    const after = (globalThis.performance && globalThis.performance.now()) || now;
+    if (this.meter.drew(after - now, after) && this.meterListener) {
+      this.meterListener({ rate: this.meter.rate, cost: this.meter.cost });
+    }
   }
 
   /* Sized from the host on every frame rather than from a resize event.

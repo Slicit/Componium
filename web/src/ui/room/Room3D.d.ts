@@ -16,6 +16,7 @@ export declare class Room3D {
   setBrightness(v: number): void;
   setWash(v: number): void;
   update(state: unknown): void;
+  onMeter(fn: (reading: { rate: number; cost: number }) => void): void;
   onView(fn: (view: CameraView) => void): void;
   getView(): CameraView;
   setView(view: CameraView | null): void;

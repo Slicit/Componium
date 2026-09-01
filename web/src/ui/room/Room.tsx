@@ -25,6 +25,7 @@ interface RoomHandle {
   setBrightness(v: number): void;
   setWash(v: number): void;
   update(state: unknown): void;
+  onMeter(fn: (reading: { rate: number; cost: number }) => void): void;
   onView(fn: (view: CameraView) => void): void;
   getView(): CameraView;
   setView(view: CameraView | null): void;
@@ -144,6 +145,13 @@ export function Room(props: {
    * video — which happens after this component exists, once a film is picked.
    * Reaching into a ref from an effect keyed on anything else is how the
    * playhead once stopped following the picture. */
+  /* What the renderer is managing, for the corner of the room. Held as one
+   * object so a reading is one re-render rather than two. */
+  const [meter, setMeter] = useState<{ rate: number; cost: number } | null>(null);
+  useEffect(() => {
+    room.current?.onMeter((reading) => setMeter(reading));
+  }, [status]);
+
   useEffect(() => { room.current?.setPicture(picture ?? null); }, [picture, status]);
 
   useEffect(() => {
@@ -163,7 +171,18 @@ export function Room(props: {
 
   return (
     <div className="room">
-      <div className="room-host" ref={host} />
+      <div className="room-host" ref={host}>
+        {meter && status === 'ready' && (
+          <p className="room-meter"
+             title={'Frames drawn per second, and what one costs to build. The '
+                    + 'room draws only when something changed, so a low rate '
+                    + 'beside a small cost means it is being asked for frames '
+                    + 'slowly, not that it cannot keep up.'}>
+            <span>{Math.round(meter.rate)} fps</span>
+            <span className="room-meter-cost">{meter.cost.toFixed(1)} ms</span>
+          </p>
+        )}
+      </div>
       {status === 'loading' && <p className="dim small room-note">building the room…</p>}
       {status === 'unavailable' && (
         <p className="dim small room-note">

@@ -36,6 +36,7 @@ vi.mock('./Room3D.js', () => {
     getView() { return { pos: [0, 0, 0], target: [0, 0, 0] }; }
     setView() {}
     update() {}
+    onMeter() {}
     dispose() {}
   }
   return {

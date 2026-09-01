@@ -34,6 +34,7 @@ vi.mock('./Room3D.js', () => {
     getView() { return { pos: [0, 0, 0], target: [0, 0, 0] }; }
     setView() {}
     update(state: unknown) { updates.push(state); }
+    onMeter() {}
     dispose() {}
   }
   return { Room3D: FakeRoom, webglAvailable: () => true, HOME_VIEW: { pos: [0, 0, 0], target: [0, 0, 0] } };
