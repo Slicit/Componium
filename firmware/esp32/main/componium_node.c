@@ -52,13 +52,21 @@
  * or declare a latency of zero and corrupt the timing of every cue after it in a
  * way that reads as the score being wrong rather than as an attack.
  *
- * Written over USB with the wifi credentials, by whoever is holding the board.
- * There is no recovery path over the network, deliberately: losing it means
- * reconnecting USB and reflashing, because a remote way back in is a way in.
+ * Built in, alongside the wifi credentials written over USB, by whoever is
+ * holding the board. There is no recovery path over the network, deliberately:
+ * losing it means reconnecting USB and reflashing, because a remote way back in
+ * is a way in.
  *
- * Empty here means the board refuses everything, which is the state it should
+ * Set from the environment at build time and never written down here, because a
+ * secret in the source is a secret in the history and this history is public:
+ *
+ *   COMPONIUM_CIP_SECRET='...' idf.py build
+ *
+ * Empty means the board refuses all configuration, which is the state it should
  * be in until somebody has given it one. */
+#ifndef CIP_SECRET
 #define CIP_SECRET        ""
+#endif
 
 /* What this board calls itself. The devices on it, and everything about them,
  * come from its configuration; see config.c and ADR 0007. */

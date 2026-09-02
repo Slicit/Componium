@@ -68,11 +68,19 @@ export function Firmware() {
     <div className="adm-page">
       <h2>Node firmware</h2>
       <p className="dim">
-        One board, two instruments, two protocols. The fan takes CIP over UDP,
-        with a watchdog that puts the output back to safe if the conductor stops
-        talking for 300&nbsp;ms. The strip takes sACN, exactly as a WLED
-        controller does, so a rig entry for it is a WLED entry with a different
-        address in it.
+        One board carries whatever its configuration says it carries: several
+        devices on one socket, addressed by the index the board announces. What
+        is wired to a particular board is set on the Boards page and kept in the
+        board's own flash, so it survives a reboot and is pushed back through
+        the handshake when it comes up.
+      </p>
+      <p className="dim">
+        Everything on it takes CIP over UDP, with a watchdog that puts every
+        output back to safe if the conductor stops talking for 300&nbsp;ms. A
+        strip can also be driven over sACN instead, exactly as a WLED controller
+        is, in which case its rig entry is a WLED entry with a different address
+        in it. One or the other, never both: two things writing one strip is two
+        things fighting over it.
       </p>
 
       <section className="adm-card">
@@ -84,10 +92,24 @@ export function Firmware() {
             <p className="dim small">Build it on a machine with ESP-IDF, then point the studio at it:</p>
             <pre className="adm-code">{`cd firmware/esp32
 idf.py set-target esp32
-idf.py build
+COMPONIUM_CIP_SECRET='...' idf.py build
 ./make-web-install.sh          # writes firmware/web/
 
 componium studio -firmware firmware/web ...`}</pre>
+            <p className="dim small">
+              The secret is built in and comes from the environment, never from
+              a file in the tree, because a secret in the source is a secret in
+              the history. A board built without one still runs and still
+              announces itself, but it refuses every configuration, so it can
+              never be told what is wired to it.
+            </p>
+            <p className="dim small">
+              There is no way to change it over the network, deliberately: a
+              remote way back in is a way in. Losing it means USB and another
+              flash. The rig needs the same string, as{' '}
+              <code>secret</code> on the instrument, or the conductor cannot
+              talk to the board either.
+            </p>
           </>
         )}
         {build?.available && (
