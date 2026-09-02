@@ -133,6 +133,12 @@ services:
       POSTGRES_PASSWORD: ${COMPONIUM_DB_PASSWORD:-componium}
     volumes:
       - db:/var/lib/postgresql/data
+    ports:
+      # Bound to the loopback deliberately. Nothing outside the compose network
+      # needs this, and the containers reach it by service name; the mapping is
+      # here so that psql and one shot commands like import-vision work from
+      # the machine running the stack, without putting a database on the LAN.
+      - "127.0.0.1:5432:5432"
     healthcheck:
       # So that whatever depends on this waits for a database that answers,
       # not for a container that has started.
@@ -166,6 +172,9 @@ services:
       COMPONIUM_VLM_HOST: ${COMPONIUM_VLM_HOST:-}
       COMPONIUM_VLM_MODEL: ${COMPONIUM_VLM_MODEL:-}
       COMPONIUM_VLM_API: ${COMPONIUM_VLM_API:-}
+      # Derived data. Without it the studio still opens, edits and saves a
+      # score, because those are files; observations just stay beside them.
+      COMPONIUM_DB: postgres://componium:${COMPONIUM_DB_PASSWORD:-componium}@db:5432/componium
     volumes:
       - ${COMPONIUM_MEDIA:-./media}:/media
       # Writable, and only here. The admin edits the rig files rather than
@@ -182,6 +191,11 @@ services:
     ports:
       - "8722:8722"
     depends_on:
+      db:
+        # Healthy rather than started: the studio opens the database when it
+        # boots and treats a refusal as fatal, so a container that exists but
+        # is not yet listening would be a studio that will not start.
+        condition: service_healthy
       clips:
         condition: service_completed_successfully
       scores:

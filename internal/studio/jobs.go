@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Slicit/componium/internal/store"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -104,6 +105,12 @@ type Jobs struct {
 	// the composer then falls back to its own defaults.
 	devices []string
 
+	// store is where observations go when there is a database. Nil without
+	// one, and then they stay files, which is the whole degradation story:
+	// a studio with no database analyses films and shows what was seen, it
+	// just keeps it somewhere less queryable.
+	store store.Store
+
 	mu      sync.Mutex
 	jobs    map[string]*Job
 	queue   []string
@@ -126,6 +133,9 @@ func (j *Jobs) WithDevices(args []string) *Jobs {
 	j.devices = append([]string(nil), args...)
 	return j
 }
+
+// SetStore points observations at a database. Nil is the ordinary case.
+func (j *Jobs) SetStore(s store.Store) { j.store = s }
 
 func NewJobs(composer, scores, mediaDir string) *Jobs {
 	if composer != "" {

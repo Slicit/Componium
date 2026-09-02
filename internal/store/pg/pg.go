@@ -181,6 +181,13 @@ func (s *Store) Observations(ctx context.Context, film string) ([]store.Observat
 	return out, rows.Err()
 }
 
+func (s *Store) HasObservations(ctx context.Context, film string) (bool, error) {
+	var any bool
+	err := s.pool.QueryRow(ctx,
+		`select exists (select 1 from observation where film = $1)`, film).Scan(&any)
+	return any, err
+}
+
 func (s *Store) ForgetObservations(ctx context.Context, film string) error {
 	_, err := s.pool.Exec(ctx, `delete from observation where film = $1`, film)
 	return err

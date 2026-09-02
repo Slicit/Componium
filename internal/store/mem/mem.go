@@ -61,6 +61,12 @@ func (s *Store) Observations(_ context.Context, film string) ([]store.Observatio
 	return out, nil
 }
 
+func (s *Store) HasObservations(_ context.Context, film string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.obs[film]) > 0, nil
+}
+
 func (s *Store) ForgetObservations(_ context.Context, film string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

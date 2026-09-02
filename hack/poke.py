@@ -16,6 +16,7 @@ having it.
 import json
 import socket
 import struct
+import subprocess
 import sys
 import time
 
@@ -86,17 +87,49 @@ def ask(sock, host, message, wait=2.0):
         return None
 
 
+def reachable(host, timeout=2):
+    """Whether the host answers at all, as distinct from answering CIP.
+
+    The distinction this whole file exists to draw. A board that is off, asleep,
+    or on the wrong network looks exactly like a board with broken firmware if
+    nobody asks the cheaper question first.
+    """
+    try:
+        socket.gethostbyname(host)
+    except socket.gaierror:
+        return None          # not even a name we can resolve
+    try:
+        done = subprocess.run(
+            ["ping", "-c", "1", "-W", str(timeout), host],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout + 2)
+        return done.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return None          # no ping to run, so we genuinely do not know
+
+
 def hello(host):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     reply = ask(sock, host, {"v": CIP_VERSION, "t": "hello"})
     sock.close()
-    if reply is None:
-        print("  no answer on udp/%d" % CIP_PORT)
-        print("  the board is reachable but nothing is listening for CIP, so")
-        print("  either it is not running this firmware or it never got an address")
-        return False
-    print(json.dumps(reply, indent=2))
-    return True
+    if reply is not None:
+        print(json.dumps(reply, indent=2))
+        return True
+
+    print("  no answer on udp/%d" % CIP_PORT)
+    # Asked now, not assumed. Silence on a port and silence from a host are
+    # different faults with different fixes, and guessing between them costs
+    # somebody an hour with a serial monitor.
+    up = reachable(host)
+    if up is None:
+        print("  and no way to tell whether %s is up from here" % host)
+    elif up:
+        print("  but %s answers ping, so the board is on the network and" % host)
+        print("  nothing is listening for CIP: check it is running this")
+        print("  firmware and got past its wifi")
+    else:
+        print("  and %s does not answer ping either, so the board is off," % host)
+        print("  asleep, or on a different network. Nothing to do with CIP")
+    return False
 
 
 def fan(host, seconds=2.0):

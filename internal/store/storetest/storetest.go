@@ -117,6 +117,26 @@ func Run(t *testing.T, fresh func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("knowing whether a film has any, without reading them", func(t *testing.T) {
+		s := fresh(t)
+		ctx := context.Background()
+		has, err := s.HasObservations(ctx, "sintel")
+		if err != nil || has {
+			t.Fatalf("%v, %v", has, err)
+		}
+		if err := s.SaveObservations(ctx, []store.Observation{
+			{Film: "sintel", At: 1, Seen: "a"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if has, err := s.HasObservations(ctx, "sintel"); err != nil || !has {
+			t.Errorf("%v, %v", has, err)
+		}
+		if has, _ := s.HasObservations(ctx, "wanted"); has {
+			t.Error("found observations for a film that has none")
+		}
+	})
+
 	t.Run("forgetting one film leaves the others", func(t *testing.T) {
 		s := fresh(t)
 		ctx := context.Background()

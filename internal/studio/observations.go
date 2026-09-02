@@ -1,11 +1,14 @@
 package studio
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/Slicit/componium/internal/store"
 )
 
 // What the model saw, kept beside the score.
@@ -23,6 +26,18 @@ import (
 
 // seenSuffix is what the composer appends to the score path it was given.
 const seenSuffix = ".seen.jsonl"
+
+// FilmKey is how a film is named in the database.
+//
+// The base name, without the container extension, which is what the score path
+// has always used: `sintel.mkv` and `sintel.mp4` share a score and now share
+// their observations. That collision is old and deliberate, and the important
+// thing is that both sides collide the same way. An import reading
+// `sintel.componium.seen.jsonl` has no way to know which container it came
+// from, so keying on anything else would file it under a name nobody asks for.
+func FilmKey(film string) string {
+	return strings.TrimSuffix(filepath.Base(film), filepath.Ext(film))
+}
 
 // SeenPath is where a film's observations live once the chunks are joined.
 func (j *Jobs) SeenPath(film string) string {
@@ -71,11 +86,50 @@ func (j *Jobs) mergeSeen(film, out string) (int, error) {
 		return 0, nil
 	}
 
+	if j.store != nil {
+		obs, err := parseSeen(strings.Join(all, "\n"), FilmKey(film))
+		if err != nil {
+			return 0, err
+		}
+		if err := j.store.SaveObservations(context.Background(), obs); err != nil {
+			return 0, err
+		}
+		// And not the file as well. One or the other, or the studio grows a
+		// second opinion about what a model said and no way to tell which is
+		// older.
+		return len(obs), nil
+	}
+
 	target := out + seenSuffix
 	if err := os.WriteFile(target, []byte(strings.Join(all, "\n")+"\n"), 0o644); err != nil {
 		return 0, err
 	}
 	return len(all), nil
+}
+
+// parseSeen turns the joined JSONL into rows for a film.
+//
+// A line that will not parse is skipped rather than fatal, for the same reason
+// the reader skips one: the file is written a line at a time by something that
+// can be interrupted, and a half written line is not a reason to lose the
+// several thousand above it.
+func parseSeen(body, film string) ([]store.Observation, error) {
+	var out []store.Observation
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var o Observation
+		if err := json.Unmarshal([]byte(line), &o); err != nil {
+			continue
+		}
+		out = append(out, store.Observation{
+			Film: film, At: o.T, Place: o.Place, Doing: o.Doing,
+			Seen: o.Seen, Labels: o.Labels,
+		})
+	}
+	return out, nil
 }
 
 // Observation is one moment the model was shown, and what it said about it.
@@ -89,6 +143,11 @@ type Observation struct {
 	T      float64  `json:"t"`
 	Labels []string `json:"labels,omitempty"`
 	Seen   string   `json:"seen,omitempty"`
+	// Where the film is and what is happening in it, as the scene pass reads
+	// them. Carried since the schema has somewhere to put them; the composer
+	// used to drop them at this boundary for no reason anybody could name.
+	Place string `json:"place,omitempty"`
+	Doing string `json:"doing,omitempty"`
 }
 
 // HasSeen reports whether a description is kept for this film.
@@ -96,6 +155,10 @@ type Observation struct {
 // A stat rather than a read. The library asks this for every film every time it
 // polls, and a feature analysed every two seconds has thousands of lines.
 func (j *Jobs) HasSeen(film string) bool {
+	if j.store != nil {
+		has, err := j.store.HasObservations(context.Background(), FilmKey(film))
+		return err == nil && has
+	}
 	info, err := os.Stat(j.SeenPath(film))
 	return err == nil && !info.IsDir() && info.Size() > 0
 }
@@ -107,6 +170,21 @@ func (j *Jobs) HasSeen(film string) bool {
 // line is an ordinary way for this to end and is not a reason to refuse the
 // several thousand lines above it.
 func (j *Jobs) ReadSeen(film string) ([]Observation, error) {
+	if j.store != nil {
+		rows, err := j.store.Observations(context.Background(), FilmKey(film))
+		if err != nil {
+			return nil, err
+		}
+		out := make([]Observation, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, Observation{
+				T: r.At, Labels: r.Labels, Seen: r.Seen,
+				Place: r.Place, Doing: r.Doing,
+			})
+		}
+		return out, nil
+	}
+
 	body, err := os.ReadFile(j.SeenPath(film))
 	if err != nil {
 		return nil, err

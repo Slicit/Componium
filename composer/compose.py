@@ -400,6 +400,14 @@ def write_observations(args, observations, span) -> str:
                 "labels": o.get("labels") or [],
                 "seen": o.get("seen") or "",
             }
+            # Where the film is and what is happening in it, when the scene
+            # pass had an opinion. Dropped here until now for no reason anybody
+            # could name: the scent pass reads them in this process and then
+            # they went no further, so nothing downstream could see what the
+            # model actually said about a place.
+            for extra in ("place", "doing"):
+                if o.get(extra):
+                    row[extra] = o[extra]
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     return os.path.basename(path)
 

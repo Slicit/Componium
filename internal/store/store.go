@@ -66,6 +66,14 @@ type Store interface {
 	// Observations returns everything known about a film, in time order.
 	Observations(ctx context.Context, film string) ([]Observation, error)
 
+	// HasObservations answers whether a film has any, without reading them.
+	//
+	// Its own method rather than len(Observations()) because the library asks
+	// this for every film every time it polls, and a feature described every
+	// two seconds has several thousand of them. It replaces a stat, and it is
+	// here for the same reason the stat was.
+	HasObservations(ctx context.Context, film string) (bool, error)
+
 	// ForgetObservations drops a film's observations, for a rebuild that is
 	// meant to start from nothing.
 	ForgetObservations(ctx context.Context, film string) error

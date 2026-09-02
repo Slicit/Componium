@@ -29,8 +29,11 @@ import (
 	"sync"
 	"time"
 
+	"context"
 	"github.com/Slicit/componium/internal/rig"
 	"github.com/Slicit/componium/internal/score"
+	"github.com/Slicit/componium/internal/store"
+	"github.com/Slicit/componium/internal/store/pg"
 )
 
 //go:embed assets
@@ -57,6 +60,10 @@ type Options struct {
 	// different toolchain on a different release schedule, so it is a
 	// directory on disk rather than something built into this binary.
 	Firmware string
+	// DB is where derived data lives, as a Postgres URL. Empty keeps
+	// observations in files beside the scores, which is a studio that works
+	// and is harder to ask questions of. See docs/adr/0006.
+	DB string
 }
 
 // Server edits scores and previews them against a rig and a film.
@@ -70,6 +77,10 @@ type Server struct {
 	// firmware is a directory of images a browser can flash. Empty when the
 	// studio was started without one, which is the ordinary case.
 	firmware string
+	// store holds derived data, or is nil when no database was given. Nil is
+	// a supported way to run: a score is a file, so it opens, edits and saves
+	// either way, and only what is derived goes somewhere less queryable.
+	store store.Store
 	// rigPath is the file the rig was read from, so the admin can write it
 	// back. Empty when no rig was given, and then the rig is not editable
 	// rather than editable into nowhere.
@@ -131,7 +142,20 @@ func New(o Options) (*Server, error) {
 		}
 	}
 	s.scores = scores
+	if o.DB != "" {
+		st, err := pg.Open(context.Background(), o.DB)
+		if err != nil {
+			// Fatal on purpose. Being asked for a database and quietly
+			// carrying on with files is how somebody analyses a feature and
+			// then cannot find it: the two states look identical from the
+			// studio, and only one of them is what was asked for.
+			return nil, err
+		}
+		s.store = st
+	}
+
 	s.jobs = NewJobs(o.Composer, scores, o.Media)
+	s.jobs.SetStore(s.store)
 	s.jobs.WithDevices(append(deviceArgs(s.rig), lightArgs(s.rig)...))
 	// Keep whatever scores already exist, so there is a baseline to compare
 	// against on the very first run after history was switched on. Those are
