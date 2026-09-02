@@ -259,6 +259,40 @@ type Device struct {
 	Safe       float64 `json:"safe,omitempty"`
 }
 
+// toManifest is what a configured device announces itself as.
+//
+// The physical facts travel from the configuration into the manifest unchanged,
+// which is the whole point of ADR 0007: latency stops being a number compiled
+// into firmware and becomes one that whoever measured their fan can set.
+func (d Device) toManifest() Manifest {
+	m := Manifest{
+		ID:         d.ID,
+		Kind:       d.Kind,
+		LatencyMS:  Millis(d.LatencyMS),
+		RampUpMS:   Millis(d.RampUpMS),
+		RampDownMS: Millis(d.RampDownMS),
+	}
+	// Channels follow from the type, because they are what the hardware can be
+	// told rather than something a person should have to write out.
+	switch d.Type {
+	case DeviceWS28xx:
+		m.Channels = []Channel{
+			{Name: "r", Unit: "normalised", Range: [2]float64{0, 1}},
+			{Name: "g", Unit: "normalised", Range: [2]float64{0, 1}},
+			{Name: "b", Unit: "normalised", Range: [2]float64{0, 1}},
+		}
+		m.SafeState = map[string]float64{"r": 0, "g": 0, "b": 0}
+	default:
+		// pwm and relay are both one number, and a relay is a pwm that has
+		// made up its mind.
+		m.Channels = []Channel{
+			{Name: "intensity", Unit: "normalised", Range: [2]float64{0, 1}},
+		}
+		m.SafeState = map[string]float64{"intensity": d.Safe}
+	}
+	return m
+}
+
 // Device types a build may contain. Three, which is what an ESP32 usefully
 // drives; see ADR 0007 for why there is no builder to select between them yet.
 const (

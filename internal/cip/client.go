@@ -125,15 +125,21 @@ func (m *Manifest) toInstrument() instrument.Manifest {
 func (c *Client) adopt(m *Message) bool {
 	c.node = m.Node
 	c.devices = nil
-	switch {
-	case m.Instruments != nil:
+	switch m.Version {
+	case Version:
+		// The list is the truth, including when it is empty: a board with
+		// nothing attached announces nothing, and has to remain reachable or
+		// it can never be told what it has.
 		for _, in := range m.Instruments {
 			c.devices = append(c.devices, &Remote{
 				client: c, index: in.Index, manifest: in.toInstrument(),
 			})
 		}
 		return true
-	case m.Manifest != nil:
+	case Version02:
+		if m.Manifest == nil {
+			return false
+		}
 		c.devices = []*Remote{{
 			client: c, index: 0, manifest: m.Manifest.toInstrument(),
 		}}
