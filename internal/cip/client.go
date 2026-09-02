@@ -36,7 +36,11 @@ type Client struct {
 	mu      sync.Mutex
 	seq     uint32
 	counter uint64
-	acks    map[uint32]chan struct{}
+	// acks carries the node's answer, which is empty for yes and a sentence
+	// for no. It used to be a chan struct{}, which was enough for a cue, where
+	// the outcomes are arrived and did not; a configuration can be refused for
+	// a reason, and a refusal nobody can read is the same as no refusal.
+	acks    map[uint32]chan string
 	retries int
 	timeout time.Duration
 	auth    *Auth
@@ -61,7 +65,7 @@ func Dial(addr string, wait time.Duration, secret string) (*Client, error) {
 		return nil, fmt.Errorf("cip: dial %s: %w", addr, err)
 	}
 	c := &Client{
-		conn: conn, acks: map[uint32]chan struct{}{},
+		conn: conn, acks: map[uint32]chan string{},
 		retries: DefaultRetries, timeout: DefaultAckTimeout,
 		auth: NewAuth(secret),
 	}
@@ -122,6 +126,7 @@ func (m *Manifest) toInstrument() instrument.Manifest {
 // A node with nothing configured sends an empty list and that is accepted: it
 // is the state every freshly flashed board is in, and refusing to connect to
 // one would mean it could never be configured.
+// adopt takes the instrument list out of a hello. The caller holds the lock.
 func (c *Client) adopt(m *Message) bool {
 	c.node = m.Node
 	c.devices = nil
@@ -188,11 +193,30 @@ func (c *Client) Close() error { return c.conn.Close() }
 func (c *Client) Authenticated() bool { return c.auth.Enabled() }
 
 // next returns the next replay counter. Only meaningful when authenticated.
+//
+// Seeded from the clock rather than from zero, and that is not cosmetic. A node
+// remembers the highest counter it has seen for as long as it runs, so a client
+// that started at one was refused as a replay the moment it was the second
+// client of that node's life: a conductor restarting, a studio asking a board
+// what it has, a rig reloaded after an edit. Every one of them presented as "no
+// hello", which is also what a wrong secret and an absent board look like.
+//
+// Nanoseconds since the epoch, because two clients can easily start in the same
+// millisecond and the first one will already have counted past it. It is
+// monotonic across successive clients as well as within one, and is the only
+// thing both ends can agree is increasing without having to talk about it. The
+// counter climbs by one per control message, which at ten heartbeats a second
+// is microseconds of drift across a whole show. A conductor whose clock steps
+// backwards would be refused until it catches up, which is the correct
+// behaviour for a counter whose whole job is to be higher than the last one.
 func (c *Client) next() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.auth == nil {
 		return 0
+	}
+	if c.counter == 0 {
+		c.counter = uint64(time.Now().UnixNano())
 	}
 	c.counter++
 	return c.counter
@@ -216,11 +240,25 @@ func (c *Client) readLoop() {
 			continue
 		}
 		m, err := Decode(body)
-		if err != nil || m.Type != TypeAck {
+		if err != nil {
+			continue
+		}
+		// A node that has just been reconfigured says hello again, because its
+		// instruments and their indices have changed and anything holding the
+		// old ones is now wrong. Adopted here rather than only at Dial: that is
+		// the whole reason an index is good for one session.
+		if m.Type == TypeHello {
+			c.mu.Lock()
+			c.adopt(m)
+			c.mu.Unlock()
+			continue
+		}
+		if m.Type != TypeAck {
 			continue
 		}
 		c.mu.Lock()
 		if ch, ok := c.acks[m.Seq]; ok {
+			ch <- m.Error
 			close(ch)
 			delete(c.acks, m.Seq)
 		}

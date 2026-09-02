@@ -49,7 +49,7 @@ func (r *Remote) Dispatch(d instrument.Dispatch) error {
 	c.mu.Lock()
 	c.seq++
 	seq := c.seq
-	ch := make(chan struct{})
+	ch := make(chan string, 1)
 	c.acks[seq] = ch
 	c.mu.Unlock()
 
@@ -79,7 +79,13 @@ func (r *Remote) Dispatch(d instrument.Dispatch) error {
 			return err
 		}
 		select {
-		case <-ch:
+		case why := <-ch:
+			if why != "" {
+				// The node refused it, most often enforcing a limit of its own.
+				// Retrying would not change its mind.
+				return fmt.Errorf("cip: %s refused %s: %s",
+					r.manifest.ID, d.Cue.Action, why)
+			}
 			return nil
 		case <-time.After(c.timeout):
 		}

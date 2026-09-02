@@ -329,8 +329,12 @@ func TestReplayedCueIsRejected(t *testing.T) {
 	// Capture a genuine, correctly authenticated cue off the wire by building
 	// one exactly as the client would.
 	a := cip.NewAuth(secret)
+	// Above whatever the real client has already used. Counters are seeded from
+	// the clock so that a node can be dialled more than once in its life, which
+	// means a hand written one has to be plausibly current rather than small.
+	counter := uint64(time.Now().UnixNano()) + uint64(time.Second)
 	body, _ := cip.Encode(&cip.Message{
-		Type: cip.TypeCue, Seq: 900, N: 500,
+		Type: cip.TypeCue, Seq: 900, N: counter,
 		Action: "gust", Params: map[string]float64{"intensity": 1},
 	})
 	replay := a.Wrap(body)
