@@ -178,8 +178,10 @@ func (b *Built) Close() error {
 // to start.
 func (c *Config) Build() (*Built, error) {
 	out := &Built{Instruments: map[string]instrument.Instrument{}}
-	// Fixtures asking for the same universe get the same one.
+	// Fixtures asking for the same universe get the same one, and entries
+	// pointing at the same board get the same client.
 	universes := map[string]*sacn.Universe{}
+	nodes := map[string]*cip.Client{}
 	for _, in := range c.Instruments {
 		switch in.Driver {
 		case "", "virtual":
@@ -214,22 +216,44 @@ func (c *Config) Build() (*Built, error) {
 			}
 			out.Instruments[in.ID] = l
 		case "cip":
-			// The manifest comes from the node rather than from this file.
-			// The device is the only thing that actually knows its own
-			// latency, and a rig file that disagrees with the hardware is
-			// worse than no rig file at all.
+			// The manifests come from the node rather than from this file. The
+			// device is the only thing that actually knows its own latency, and
+			// a rig file that disagrees with the hardware is worse than no rig
+			// file at all.
+			//
+			// One client per board, shared by every entry pointing at it. A
+			// board carries several devices since ADR 0007, and a client per
+			// entry would mean a socket, a heartbeat and a watchdog each, for
+			// one board that only has one of any of them.
 			wait := in.RemoteTimeout.Duration()
 			if wait <= 0 {
 				wait = 2 * time.Second
 			}
-			c, err := cip.Dial(in.Addr, wait, in.Secret)
-			if err != nil {
-				out.Close()
-				return nil, err
+			c, ok := nodes[in.Addr]
+			if !ok {
+				var err error
+				c, err = cip.Dial(in.Addr, wait, in.Secret)
+				if err != nil {
+					out.Close()
+					return nil, err
+				}
+				nodes[in.Addr] = c
+				out.closers = append(out.closers, c)
+				out.remotes = append(out.remotes, c)
 			}
-			out.Instruments[in.ID] = c
-			out.closers = append(out.closers, c)
-			out.remotes = append(out.remotes, c)
+			device, found := c.Device(in.ID)
+			if !found {
+				out.Close()
+				// Naming what is there, because the useful sentence is what
+				// the board actually has rather than what it does not. This
+				// is what the old "one node is one instrument" error became:
+				// two entries at one address are ordinary now, and the fault
+				// is asking for a device that was never configured.
+				return nil, fmt.Errorf(
+					"rig: %s has no instrument %q; it announced %v",
+					in.Addr, in.ID, c.Names())
+			}
+			out.Instruments[in.ID] = device
 		case "motion":
 			cfg := motion.Config{
 				ID: in.ID, Addr: in.Addr,

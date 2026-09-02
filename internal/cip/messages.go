@@ -23,6 +23,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/Slicit/componium/internal/instrument"
 )
 
 // Port is the default UDP port a node listens on.
@@ -76,8 +78,15 @@ type Message struct {
 	// can forge messages outright and a counter buys nothing.
 	N uint64 `json:"n,omitempty"`
 
-	// Hello
-	Manifest *Manifest `json:"manifest,omitempty"`
+	// Hello. Instruments since 0.3; Manifest is what a 0.2 node sends and is
+	// still read, because a firmware upgrade should not be the price of a
+	// conductor upgrade.
+	Instruments []Instrument `json:"instruments,omitempty"`
+	Node        NodeInfo     `json:"node,omitempty"`
+	Manifest    *Manifest    `json:"manifest,omitempty"`
+
+	// Configure
+	Devices []Device `json:"devices,omitempty"`
 
 	// Cue
 	Instrument string             `json:"instrument,omitempty"`
@@ -155,6 +164,42 @@ func Decode(b []byte) (*Message, error) {
 		return nil, fmt.Errorf("cip: message has no type")
 	}
 	return &m, nil
+}
+
+// toInstrument converts a 0.3 instrument entry into the conductor's shape.
+func (i Instrument) toInstrument() instrument.Manifest {
+	return instrument.Manifest{
+		ID:      i.ID,
+		Kind:    i.Kind,
+		Latency: time.Duration(i.LatencyMS) * time.Millisecond,
+		Ramp: instrument.Ramp{
+			Up:   time.Duration(i.RampUpMS) * time.Millisecond,
+			Down: time.Duration(i.RampDownMS) * time.Millisecond,
+		},
+		MaxContinuous: time.Duration(i.MaxContinMS) * time.Millisecond,
+		DutyCycle:     i.DutyCycle,
+		SafeState:     i.SafeState,
+	}
+}
+
+// toAnnouncement is how a node describes one of its devices in a hello.
+//
+// The mirror of toInstrument, and it lives here beside it so that the two
+// cannot drift: a field added to one and forgotten in the other is a field that
+// silently stops crossing the wire.
+func (m Manifest) toAnnouncement(index int) Instrument {
+	return Instrument{
+		Index:       index,
+		ID:          m.ID,
+		Kind:        m.Kind,
+		LatencyMS:   float64(m.LatencyMS),
+		RampUpMS:    float64(m.RampUpMS),
+		RampDownMS:  float64(m.RampDownMS),
+		MaxContinMS: float64(m.MaxContinuous),
+		DutyCycle:   m.DutyCycle,
+		SafeState:   m.SafeState,
+		Channels:    m.Channels,
+	}
 }
 
 // Instrument is one device on a node, as the node describes it.

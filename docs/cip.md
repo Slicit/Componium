@@ -105,13 +105,16 @@ starts.
 ## Cues
 
 ```json
-{ "v": "0.3", "t": "cue", "seq": 17, "i": "wind.main", "action": "gust",
-  "params": { "intensity": 0.8 } }
+{ "v": "0.3", "t": "cue", "seq": 17, "instrument": "wind.main",
+  "action": "gust", "params": { "intensity": 0.8 } }
 ```
 
-`i` names the instrument on the node. A name rather than an index because cues
-are rare, are read by people in logs, and survive a node reconfiguring itself
-between the conductor deciding to send one and the node receiving it.
+`instrument` names the device on the node. A name rather than an index because
+cues are rare, are read by people in logs, and survive a node reconfiguring
+itself between the conductor deciding to send one and the node receiving it.
+
+The field is not new: it has been in the message since 0.2 and was ignored,
+because a node had only one thing to apply a cue to.
 
 The node replies with an `ack` carrying the same `seq`. Unacknowledged cues are
 retried; a cue that cannot be delivered becomes an error the conductor records
@@ -123,8 +126,8 @@ A cue may declare `hold_ms`. A node that receives one **must end the effect
 itself when it expires**, without waiting to be told.
 
 ```json
-{ "v": "0.3", "t": "cue", "seq": 17, "i": "fog.left", "action": "burst",
-  "params": { "output": 0.8 }, "hold_ms": 4000 }
+{ "v": "0.3", "t": "cue", "seq": 17, "instrument": "fog.left",
+  "action": "burst", "params": { "output": 0.8 }, "hold_ms": 4000 }
 ```
 
 The conductor will *also* send a stop when the span ends. Both, deliberately.

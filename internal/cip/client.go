@@ -19,14 +19,19 @@ const DefaultAckTimeout = 40 * time.Millisecond
 // any instrument slow enough to be reached over a network.
 const DefaultRetries = 3
 
-// Client is the conductor's side of a remote instrument.
+// Client is the conductor's side of a node: a board, not an instrument.
 //
-// It satisfies instrument.Instrument, so the conductor cannot tell the
-// difference between a fan on the other side of the room and one in this
-// process. That is the point of the protocol.
+// A board carries several devices, so what satisfies instrument.Instrument is a
+// Remote, one per device, all sharing this connection. One socket, one
+// heartbeat, one watchdog, several instruments the conductor cannot tell from
+// any others. That is the point of the protocol, and before ADR 0007 it was
+// also why two rig entries at one address came back as the same instrument.
 type Client struct {
-	conn     net.Conn
-	manifest instrument.Manifest
+	conn net.Conn
+	node NodeInfo
+	// devices in the order the node announced them, which is the order their
+	// indices refer to.
+	devices []*Remote
 
 	mu      sync.Mutex
 	seq     uint32
@@ -37,15 +42,19 @@ type Client struct {
 	auth    *Auth
 }
 
-// Dial connects to a node and waits for it to introduce itself.
+// Dial connects to a node and waits for it to say what is attached to it.
 //
-// The manifest comes from the node rather than from local configuration,
+// The manifests come from the node rather than from local configuration,
 // because the node is the only thing that actually knows its own latency, and
-// a rig file that disagrees with the hardware is worse than no rig file.
+// a rig file that disagrees with the hardware is worse than no rig file. Since
+// ADR 0007 that list is also what the node was configured with, which is what
+// turns latency from a number compiled into firmware into one a person who has
+// measured their fan can set.
 //
 // secret may be empty, in which case traffic is unauthenticated. A node
 // configured with a secret will ignore an unauthenticated client entirely,
-// which presents as no hello arriving.
+// which presents as no hello arriving. Any node that accepts configuration
+// requires one; see docs/cip.md.
 func Dial(addr string, wait time.Duration, secret string) (*Client, error) {
 	conn, err := net.Dial("udp", addr)
 	if err != nil {
@@ -78,10 +87,12 @@ func Dial(addr string, wait time.Duration, secret string) (*Client, error) {
 			continue
 		}
 		m, err := Decode(body)
-		if err != nil || m.Type != TypeHello || m.Manifest == nil {
+		if err != nil || m.Type != TypeHello {
 			continue
 		}
-		c.manifest = m.Manifest.toInstrument()
+		if !c.adopt(m) {
+			continue
+		}
 		conn.SetReadDeadline(time.Time{})
 		welcome, _ := Encode(&Message{Type: TypeWelcome, N: c.next()})
 		c.send(welcome)
@@ -102,7 +113,68 @@ func (m *Manifest) toInstrument() instrument.Manifest {
 	}
 }
 
-func (c *Client) Manifest() instrument.Manifest { return c.manifest }
+// adopt takes the instrument list out of a hello, in either version.
+//
+// A 0.2 node sends one manifest and no list. It becomes a single device at
+// index 0, which is what it was addressing all along, because a firmware
+// upgrade should not be the price of a conductor upgrade.
+//
+// A node with nothing configured sends an empty list and that is accepted: it
+// is the state every freshly flashed board is in, and refusing to connect to
+// one would mean it could never be configured.
+func (c *Client) adopt(m *Message) bool {
+	c.node = m.Node
+	c.devices = nil
+	switch {
+	case m.Instruments != nil:
+		for _, in := range m.Instruments {
+			c.devices = append(c.devices, &Remote{
+				client: c, index: in.Index, manifest: in.toInstrument(),
+			})
+		}
+		return true
+	case m.Manifest != nil:
+		c.devices = []*Remote{{
+			client: c, index: 0, manifest: m.Manifest.toInstrument(),
+		}}
+		return true
+	}
+	return false
+}
+
+// Info is what the node says about itself.
+func (c *Client) Info() NodeInfo { return c.node }
+
+// Devices are the instruments on this node, in the order it announced them.
+func (c *Client) Devices() []*Remote {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]*Remote(nil), c.devices...)
+}
+
+// Device finds one by id, which is how a rig entry names it.
+func (c *Client) Device(id string) (*Remote, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, d := range c.devices {
+		if d.manifest.ID == id {
+			return d, true
+		}
+	}
+	return nil, false
+}
+
+// Names lists what this node has, for an error that has to say what was
+// available instead of what was asked for.
+func (c *Client) Names() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]string, 0, len(c.devices))
+	for _, d := range c.devices {
+		out = append(out, d.manifest.ID)
+	}
+	return out
+}
 
 func (c *Client) Close() error { return c.conn.Close() }
 
@@ -150,60 +222,18 @@ func (c *Client) readLoop() {
 	}
 }
 
-// Dispatch sends a cue and waits for the node to acknowledge it.
-//
-// Retrying rather than firing and forgetting matters because a lost cue is
-// invisible: the effect simply never happens, and nothing in the room explains
-// why. A cue that genuinely cannot be delivered becomes an error the conductor
-// records as a skip.
-func (c *Client) Dispatch(d instrument.Dispatch) error {
-	c.mu.Lock()
-	c.seq++
-	seq := c.seq
-	ch := make(chan struct{})
-	c.acks[seq] = ch
-	c.mu.Unlock()
-
-	defer func() {
-		c.mu.Lock()
-		delete(c.acks, seq)
-		c.mu.Unlock()
-	}()
-
-	msg := &Message{
-		Type: TypeCue, Seq: seq, N: c.next(),
-		Instrument: d.Cue.Instrument,
-		Action:     d.Cue.Action,
-		HoldMS:     Ms(d.Cue.Hold),
-		Params:     d.Cue.Params,
-	}
-	b, err := Encode(msg)
-	if err != nil {
-		return err
-	}
-
-	for attempt := 0; attempt < c.retries; attempt++ {
-		if err := c.send(b); err != nil {
-			return err
-		}
-		select {
-		case <-ch:
-			return nil
-		case <-time.After(c.timeout):
-		}
-	}
-	return fmt.Errorf("cip: %s did not acknowledge %s after %d attempts",
-		c.manifest.ID, d.Cue.Action, c.retries)
-}
-
-// SendCurve sends one curve frame, unacknowledged.
+// SendBundle sends one curve frame carrying every output due this tick.
 //
 // Curve frames are authenticated but carry no replay counter. A replayed frame
 // is superseded by the next genuine one 20ms later, and giving every frame a
 // counter would mean the node dropping frames whenever one arrived out of
 // order, which UDP does routinely.
-func (c *Client) SendCurve(values []float32) error {
-	return c.send(MarshalCurve(values))
+func (c *Client) SendBundle(outs []Outputs) error {
+	b, err := MarshalBundle(outs)
+	if err != nil {
+		return err
+	}
+	return c.send(b)
 }
 
 // Heartbeat tells the node the conductor is alive. A node that stops hearing

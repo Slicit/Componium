@@ -7,19 +7,15 @@ import (
 
 // Two rig entries that turn out to be one device.
 //
-// A CIP node reports its own manifest, because the device is the only thing
-// that actually knows its own latency and a rig file that disagrees with the
-// hardware is worse than no rig file at all. The consequence is easy to reach
-// and hard to read: point two entries at the same node and both come back
-// calling themselves whatever that node calls itself. The conductor then
-// refuses the second one with "instrument already registered", naming an id
-// that appears exactly once in the rig file.
+// This used to be the ordinary consequence of pointing two entries at one CIP
+// node: the node reported one manifest, both entries adopted it, and the
+// conductor refused the second by an id that appeared once in the file.
 //
-// Reached by pointing a light and a fan at one board while testing, which is
-// not a silly thing to do. It is the obvious first move when you have one board
-// and two effects, and the rig is right to refuse it: one CIP node is one
-// instrument. What was wrong was that it refused in a way that sent you looking
-// for a duplicate id that was not there.
+// Since ADR 0007 a board carries several devices and two entries at one address
+// are an ordinary thing to write. What is left is the case this can still
+// catch: two entries that resolve to the same instrument anyway, which now
+// means two rig ids naming one device rather than one device wearing two ids.
+// Rare, and still worth refusing, because the second one silently does nothing.
 
 // Collisions reports rig entries that resolved to the same instrument.
 func (b *Built) Collisions() error {
@@ -33,13 +29,12 @@ func (b *Built) Collisions() error {
 			continue
 		}
 		sort.Strings(entries)
-		bad = append(bad, fmt.Sprintf("%v all answer to %q", entries, manifest))
+		bad = append(bad, fmt.Sprintf("%v all resolve to %q", entries, manifest))
 	}
 	if len(bad) == 0 {
 		return nil
 	}
 	sort.Strings(bad)
-	return fmt.Errorf("rig: %v; a CIP node reports its own id, so two entries "+
-		"pointing at one device are one instrument. Give the device a second "+
-		"node, or drive the other effect another way", bad)
+	return fmt.Errorf("rig: %v; each entry has to name a different instrument, "+
+		"and a node announces one manifest per device", bad)
 }

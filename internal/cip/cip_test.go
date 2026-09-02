@@ -10,6 +10,18 @@ import (
 	"github.com/Slicit/componium/internal/instrument"
 )
 
+// only returns the single device on a node, for the many tests written when a
+// client was an instrument. What they assert about the protocol is unchanged;
+// since ADR 0007 the thing that dispatches is the device rather than the board.
+func only(t *testing.T, c *cip.Client) *cip.Remote {
+	t.Helper()
+	devices := c.Devices()
+	if len(devices) != 1 {
+		t.Fatalf("node announced %d devices, wanted one", len(devices))
+	}
+	return devices[0]
+}
+
 func fanManifest() cip.Manifest {
 	return cip.Manifest{
 		ID: "wind.main", Kind: "wind",
@@ -77,7 +89,7 @@ func TestClientLearnsTheManifestFromTheNode(t *testing.T) {
 	}
 	defer c.Close()
 
-	m := c.Manifest()
+	m := only(t, c).Manifest()
 	if m.ID != "wind.main" {
 		t.Errorf("id %q", m.ID)
 	}
@@ -97,7 +109,7 @@ func TestCueIsDeliveredAndAcknowledged(t *testing.T) {
 	}
 	defer c.Close()
 
-	err = c.Dispatch(instrument.Dispatch{Cue: instrument.Cue{
+	err = only(t, c).Dispatch(instrument.Dispatch{Cue: instrument.Cue{
 		Instrument: "wind.main", Action: "gust",
 		Params: map[string]float64{"intensity": 0.8},
 	}})
@@ -124,7 +136,7 @@ func TestUndeliverableCueBecomesAnError(t *testing.T) {
 	defer c.Close()
 	n.Close() // the node goes away
 
-	err = c.Dispatch(instrument.Dispatch{Cue: instrument.Cue{
+	err = only(t, c).Dispatch(instrument.Dispatch{Cue: instrument.Cue{
 		Instrument: "wind.main", Action: "gust",
 		Params: map[string]float64{"intensity": 1},
 	}})
@@ -142,7 +154,7 @@ func TestCurveFramesReachTheNode(t *testing.T) {
 	defer c.Close()
 
 	for i := 0; i < 5; i++ {
-		if err := c.SendCurve([]float32{0.42}); err != nil {
+		if err := only(t, c).SendCurve([]float32{0.42}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -175,7 +187,7 @@ func TestNodeGoesSafeOnItsOwnWhenHeartbeatsStop(t *testing.T) {
 	defer c.Close()
 
 	c.Heartbeat()
-	c.Dispatch(instrument.Dispatch{Cue: instrument.Cue{
+	only(t, c).Dispatch(instrument.Dispatch{Cue: instrument.Cue{
 		Instrument: "wind.main", Action: "gust",
 		Params: map[string]float64{"intensity": 1},
 	}})
@@ -208,7 +220,7 @@ func TestExplicitSafeCommand(t *testing.T) {
 	}
 	defer c.Close()
 
-	c.Dispatch(instrument.Dispatch{Cue: instrument.Cue{
+	only(t, c).Dispatch(instrument.Dispatch{Cue: instrument.Cue{
 		Action: "gust", Params: map[string]float64{"intensity": 1}}})
 	c.Safe()
 
@@ -248,7 +260,7 @@ func TestAuthenticatedTrafficWorksEndToEnd(t *testing.T) {
 		t.Error("client reports it is not authenticating")
 	}
 
-	err = c.Dispatch(instrument.Dispatch{Cue: instrument.Cue{
+	err = only(t, c).Dispatch(instrument.Dispatch{Cue: instrument.Cue{
 		Action: "gust", Params: map[string]float64{"intensity": 0.5}}})
 	if err != nil {
 		t.Fatal(err)
@@ -400,7 +412,7 @@ func TestNodeEndsASpanOnItsOwnWhenTheHoldExpires(t *testing.T) {
 		}
 	}()
 
-	err = c.Dispatch(instrument.Dispatch{Cue: instrument.Cue{
+	err = only(t, c).Dispatch(instrument.Dispatch{Cue: instrument.Cue{
 		Instrument: "wind.main", Action: "gust",
 		Params: map[string]float64{"intensity": 1},
 		Hold:   200 * time.Millisecond,
@@ -433,7 +445,7 @@ func TestNodeWithoutAHoldKeepsRunning(t *testing.T) {
 	defer c.Close()
 
 	c.Heartbeat()
-	c.Dispatch(instrument.Dispatch{Cue: instrument.Cue{
+	only(t, c).Dispatch(instrument.Dispatch{Cue: instrument.Cue{
 		Action: "gust", Params: map[string]float64{"intensity": 1},
 	}})
 	time.Sleep(300 * time.Millisecond)
@@ -453,13 +465,13 @@ func TestExplicitStopActionEndsTheEffect(t *testing.T) {
 	}
 	defer c.Close()
 
-	c.Dispatch(instrument.Dispatch{Cue: instrument.Cue{
+	only(t, c).Dispatch(instrument.Dispatch{Cue: instrument.Cue{
 		Action: "gust", Params: map[string]float64{"intensity": 1}, Hold: time.Hour,
 	}})
 	if got := n.State()["intensity"]; got != 1 {
 		t.Fatalf("cue not accepted, intensity %v", got)
 	}
 
-	c.Dispatch(instrument.Dispatch{Cue: instrument.Cue{Action: instrument.ActionStop}})
+	only(t, c).Dispatch(instrument.Dispatch{Cue: instrument.Cue{Action: instrument.ActionStop}})
 	waitFor(t, func() bool { return n.State()["intensity"] == 0 })
 }

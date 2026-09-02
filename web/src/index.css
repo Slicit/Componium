@@ -585,6 +585,7 @@ button:hover { border-color: #3a4553; }
 .adm-card > p:last-child { margin-bottom: 0; }
 
 .adm-warn { color: var(--warn, #c1121f); line-height: 1.5; }
+.adm-sub { margin: 18px 0 6px; font-size: 13px; font-weight: 600; }
 .adm-code {
   background: var(--raise);
   border-radius: 3px;

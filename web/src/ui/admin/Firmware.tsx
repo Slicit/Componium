@@ -198,6 +198,51 @@ componium studio -firmware firmware/web ...`}</pre>
           rather than flickering, but it does not sit lit for ever after the
           conductor has gone.
         </p>
+        <h3 className="adm-sub">Which pins can do what</h3>
+        <p className="dim small">
+          Most GPIOs will drive any of the three device types. These will not,
+          and the last group is the one to be careful with: a configuration that
+          claims one of those can leave a board that will not boot, and the only
+          way back is USB.
+        </p>
+        <div className="adm-scroll">
+          <table className="adm-table">
+            <thead>
+              <tr><th>Pins</th><th>Why not</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>34&ndash;39</code></td>
+                <td>Input only. No output of any kind, from the chip’s own
+                  <code> SOC_GPIO_VALID_OUTPUT_GPIO_MASK</code>.</td>
+              </tr>
+              <tr>
+                <td><code>6&ndash;11</code></td>
+                <td>The SPI flash. The chip calls them valid; using them stops
+                  the board running.</td>
+              </tr>
+              <tr>
+                <td><code>1</code>, <code>3</code></td>
+                <td>The console UART, where Wi-Fi provisioning lives. Taking
+                  them removes the way back in.</td>
+              </tr>
+              <tr>
+                <td><code>0</code>, <code>2</code>, <code>12</code>, <code>15</code></td>
+                <td>Strapping pins, read at boot. Usable with care;
+                  <code> 12</code> held high at boot can leave a board that will
+                  not start.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="dim small">
+          And there is a limit on how many, not just which. The ESP32 has
+          <strong> 8 RMT channels</strong>, so at most eight addressable strips,
+          and <strong>8 PWM channels across 4 timers</strong>, so at most eight
+          dimmed outputs at no more than four distinct frequencies. Three or
+          four devices on one board is comfortable; ten is not.
+        </p>
+
         <p className="adm-warn small">
           The declared spin up time in the firmware is 1.8&nbsp;s and it is a guess.
           Measure yours and put the real number in, because the conductor fires

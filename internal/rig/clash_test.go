@@ -9,9 +9,13 @@ import (
 )
 
 func TestTwoEntriesOnOneDeviceAreNamed(t *testing.T) {
-	// What a pair of CIP entries pointing at one board comes back as: two rig
-	// ids, one manifest. The conductor used to refuse this with "instrument
-	// wind.main already registered", naming an id that appears once in the file.
+	/* Two rig ids resolving to one instrument.
+	 *
+	 * This used to be what pointing two entries at one CIP board produced,
+	 * because the board reported one manifest and both entries adopted it.
+	 * Since ADR 0007 a board carries several devices and two entries at one
+	 * address are ordinary; what is left is the narrower fault of two ids
+	 * naming one device, where the second silently does nothing. */
 	b := &Built{Instruments: map[string]instrument.Instrument{
 		"wind.main":     virtual.New(instrument.Manifest{ID: "wind.main", Kind: "wind"}),
 		"light.ambient": virtual.New(instrument.Manifest{ID: "wind.main", Kind: "wind"}),
@@ -21,7 +25,7 @@ func TestTwoEntriesOnOneDeviceAreNamed(t *testing.T) {
 		t.Fatal("did not notice")
 	}
 	said := err.Error()
-	for _, want := range []string{"light.ambient", "wind.main", "one device"} {
+	for _, want := range []string{"light.ambient", "wind.main", "name a different instrument"} {
 		if !strings.Contains(said, want) {
 			t.Errorf("did not mention %q: %s", want, said)
 		}

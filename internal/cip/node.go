@@ -143,13 +143,22 @@ func (n *Node) handle(b []byte, from *net.UDPAddr) {
 	}
 	b = body
 	// A curve frame is binary and has no envelope, so it is recognised first.
-	if values, err := UnmarshalCurve(b); err == nil {
+	if outs, err := UnmarshalBundle(b); err == nil {
 		n.mu.Lock()
 		n.curves++
-		n.safe = false
-		for i, ch := range n.cfg.Manifest.Channels {
-			if i < len(values) {
-				n.state[ch.Name] = float64(values[i])
+		for _, o := range outs {
+			// One device, so index 0 and nothing else. An index this node does
+			// not have is skipped and the rest of the frame is applied: a frame
+			// is fifty times a second and superseded 20ms later, so refusing
+			// all of it because one output has gone would be the wrong trade.
+			if o.Index != 0 {
+				continue
+			}
+			n.safe = false
+			for i, ch := range n.cfg.Manifest.Channels {
+				if i < len(o.Values) {
+					n.state[ch.Name] = float64(o.Values[i])
+				}
 			}
 		}
 		n.mu.Unlock()
@@ -172,7 +181,13 @@ func (n *Node) handle(b []byte, from *net.UDPAddr) {
 
 	switch m.Type {
 	case TypeHello:
-		reply := &Message{Type: TypeHello, Manifest: &n.cfg.Manifest}
+		reply := &Message{
+			Type: TypeHello,
+			Node: NodeInfo{Name: n.cfg.Manifest.ID, Firmware: Version, Chip: "software"},
+			Instruments: []Instrument{
+				n.cfg.Manifest.toAnnouncement(0),
+			},
+		}
 		n.send(reply, from)
 	case TypeHeartbeat:
 		n.mu.Lock()
