@@ -205,8 +205,16 @@ static void listener(void *arg)
     }
 }
 
+bool node_has_strip(void);
+
 void sacn_start(void)
 {
+    /* A strip the conductor is driving over CIP is not also a lighting fixture
+     * on a universe. One writer: see the note in componium_node.c. */
+    if (node_has_strip()) {
+        ESP_LOGI(TAG, "a configured device drives the strip, so not listening");
+        return;
+    }
     if (!led_start()) {
         ESP_LOGW(TAG, "no strip, so not listening");
         return;

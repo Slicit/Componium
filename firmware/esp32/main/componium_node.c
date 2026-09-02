@@ -33,99 +33,155 @@
 #include "lwip/sockets.h"
 #include "cJSON.h"
 #include "mbedtls/md.h"
+#include "freertos/semphr.h"
+#include "config.h"
+#include "devices.h"
 
 #define CIP_PORT          5570
-#define CIP_VERSION       "0.2"
+#define CIP_VERSION       "0.3"
 #define CIP_WATCHDOG_MS   300
 #define CIP_MAX_DATAGRAM  1024
 #define CIP_TAG_LEN       16
 
-/* Shared secret. Empty disables authentication, which is only reasonable on a
- * wired network you control. With it set, every datagram carries a 16 byte
- * HMAC-SHA256 prefix and anything that fails verification is dropped in
- * silence: replying would confirm this node exists and is worth attacking. */
+/* Shared secret, and there is no building without one.
+ *
+ * A node that accepts configuration requires it, and this one does. Under 0.2
+ * the worst a stranger on the network could do was start a fogger, which is why
+ * leaving it off was once reasonable. A board that takes configuration is a
+ * different proposition: a stranger can move a relay onto a pin nobody intended,
+ * or declare a latency of zero and corrupt the timing of every cue after it in a
+ * way that reads as the score being wrong rather than as an attack.
+ *
+ * Written over USB with the wifi credentials, by whoever is holding the board.
+ * There is no recovery path over the network, deliberately: losing it means
+ * reconnecting USB and reflashing, because a remote way back in is a way in.
+ *
+ * Empty here means the board refuses everything, which is the state it should
+ * be in until somebody has given it one. */
 #define CIP_SECRET        ""
 
-/* Declared characteristics. These must describe the physical device honestly:
- * the conductor dispatches every cue this far ahead, so a lie here makes the
- * whole rig feel wrong in a way that is hard to diagnose from the room. */
-#define NODE_ID           "wind.main"
-#define NODE_KIND         "wind"
-#define NODE_LATENCY_MS   1200
-#define NODE_RAMP_UP_MS   1800
-#define NODE_RAMP_DOWN_MS 3000
-#define NODE_CHANNEL      "intensity"
-
-/* 25kHz keeps a 4 pin fan quiet. Audible switching noise in a cinema defeats
- * the purpose of the entire project. */
-#define PWM_GPIO          18
-#define PWM_FREQ_HZ       25000
-#define PWM_RESOLUTION    LEDC_TIMER_10_BIT
-#define PWM_MAX_DUTY      1023
+/* What this board calls itself. The devices on it, and everything about them,
+ * come from its configuration; see config.c and ADR 0007. */
+#define NODE_NAME         "componium-node"
 
 static const char *TAG = "componium";
 
-static volatile int64_t s_last_heartbeat_us = 0;
-static volatile float   s_level = 0.0f;
-static volatile bool    s_safe = true;
+static volatile int64_t  s_last_heartbeat_us = 0;
 static volatile uint64_t s_highest_counter = 0;
 
-/* A span ends when its hold expires, whether or not the conductor's stop
- * ever arrives. This is the layer that survives a lost datagram, and it is
- * why a cue carries its own duration rather than relying on being told when
- * to stop. */
-static volatile int64_t s_hold_until_us = 0;
+/* What is attached, from this board's own configuration. Every one of them
+ * carries its own value, its own span and its own safe state: a hold expiring
+ * on the fogger must take the fogger and not the fan halfway through a scene. */
+static device_t s_devices[DEVICE_MAX];
+static int      s_device_count;
+static SemaphoreHandle_t s_lock;
+
+static void lock(void)   { xSemaphoreTake(s_lock, portMAX_DELAY); }
+static void unlock(void) { xSemaphoreGive(s_lock); }
 
 /* ---------------------------------------------------------------- output */
 
-static void output_apply(float level)
+/* Every device to its safe value.
+ *
+ * All of them, not the one most recently addressed. When this runs the
+ * conductor is absent or wrong, and nothing here knows which output is the
+ * dangerous one.
+ */
+static void all_safe(const char *why)
 {
-    if (level < 0.0f) level = 0.0f;
-    if (level > 1.0f) level = 1.0f;   /* clamp, never wrap */
-    uint32_t duty = (uint32_t)(level * PWM_MAX_DUTY + 0.5f);
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-    s_level = level;
-}
-
-static void output_safe(const char *why)
-{
-    if (!s_safe) {
-        ESP_LOGW(TAG, "going safe: %s", why);
+    lock();
+    for (int i = 0; i < s_device_count; i++) {
+        device_safe(&s_devices[i]);
     }
-    s_safe = true;
-    s_hold_until_us = 0;
-    output_apply(0.0f);
+    unlock();
+    ESP_LOGW(TAG, "safe: %s", why);
 }
 
-static void output_init(void)
+/* Whether a configured device is already driving a strip.
+ *
+ * Asked by the sACN receiver, which drives one too. Two writers to one strip is
+ * the fault this project has now fixed twice in two days, and it looks the same
+ * every time: whichever writes more often wins, and the other one appears to be
+ * broken hardware.
+ */
+bool node_has_strip(void)
 {
-    ledc_timer_config_t timer = {
-        .speed_mode      = LEDC_LOW_SPEED_MODE,
-        .duty_resolution = PWM_RESOLUTION,
-        .timer_num       = LEDC_TIMER_0,
-        .freq_hz         = PWM_FREQ_HZ,
-        .clk_cfg         = LEDC_AUTO_CLK,
-    };
-    ledc_timer_config(&timer);
-
-    ledc_channel_config_t channel = {
-        .gpio_num   = PWM_GPIO,
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel    = LEDC_CHANNEL_0,
-        .timer_sel  = LEDC_TIMER_0,
-        .duty       = 0,
-        .hpoint     = 0,
-    };
-    ledc_channel_config(&channel);
-    output_safe("boot");
+    bool found = false;
+    lock();
+    for (int i = 0; i < s_device_count; i++) {
+        if (s_devices[i].type == DEV_WS28XX) {
+            found = true;
+        }
+    }
+    unlock();
+    return found;
 }
 
-/* -------------------------------------------------------------- protocol */
+/* Find a device by the name a cue uses.
+ *
+ * An empty name is the single device, which is what a conductor built before
+ * ADR 0007 sends and what a board with one thing on it should keep accepting.
+ * On a board with several a name is required: guessing which output somebody
+ * meant is the one thing worse than not applying the cue at all.
+ */
+static device_t *by_name(const char *id)
+{
+    if (!id || id[0] == 0) {
+        return s_device_count == 1 ? &s_devices[0] : NULL;
+    }
+    for (int i = 0; i < s_device_count; i++) {
+        if (strcmp(s_devices[i].id, id) == 0) {
+            return &s_devices[i];
+        }
+    }
+    return NULL;
+}
 
-/* Prefix the tag on the way out. A node that verifies inbound traffic but
- * sends its replies unauthenticated would be rejected by its own conductor,
- * which is a confusing way to discover a half finished implementation. */
+/* Bring up whatever the stored configuration says is attached.
+ *
+ * Nothing configured is an ordinary state, and the one every freshly flashed
+ * board is in: it announces no instruments, and can still be reached and told
+ * what it has. A board that had to be configured before it could be talked to
+ * could never be configured at all.
+ */
+static void apply_config(void)
+{
+    static char json[CONFIG_JSON_MAX];
+    char problem[128];
+
+    lock();
+    for (int i = 0; i < s_device_count; i++) {
+        device_stop(&s_devices[i]);
+    }
+    s_device_count = 0;
+    unlock();
+
+    if (config_load(json, sizeof(json)) == 0) {
+        ESP_LOGI(TAG, "no configuration; nothing is attached yet");
+        return;
+    }
+
+    device_t parsed[DEVICE_MAX];
+    int n = config_parse(json, parsed, problem, sizeof(problem));
+    if (n < 0) {
+        /* Stored and unreadable. Left with nothing rather than with some of it,
+         * because a board holding half a configuration looks configured. */
+        ESP_LOGE(TAG, "stored configuration is unusable: %s", problem);
+        return;
+    }
+
+    device_reset_budget();
+    lock();
+    for (int i = 0; i < n; i++) {
+        s_devices[s_device_count] = parsed[i];
+        if (device_start(&s_devices[s_device_count])) {
+            s_device_count++;
+        }
+    }
+    unlock();
+    ESP_LOGI(TAG, "%d device(s) attached", s_device_count);
+}
+
 static void send_raw(int sock, struct sockaddr_in *to, const uint8_t *body, size_t len)
 {
     if (sizeof(CIP_SECRET) <= 1) {
@@ -159,35 +215,74 @@ static void send_json(int sock, struct sockaddr_in *to, cJSON *msg)
 static void send_hello(int sock, struct sockaddr_in *to)
 {
     cJSON *root = cJSON_CreateObject();
-    cJSON *manifest = cJSON_CreateObject();
-    cJSON *safe = cJSON_CreateObject();
-    cJSON *channels = cJSON_CreateArray();
-    cJSON *channel = cJSON_CreateObject();
-    cJSON *range = cJSON_CreateArray();
-
     cJSON_AddStringToObject(root, "v", CIP_VERSION);
     cJSON_AddStringToObject(root, "t", "hello");
 
-    cJSON_AddStringToObject(manifest, "id", NODE_ID);
-    cJSON_AddStringToObject(manifest, "kind", NODE_KIND);
-    cJSON_AddNumberToObject(manifest, "latency_ms", NODE_LATENCY_MS);
-    cJSON_AddNumberToObject(manifest, "ramp_up_ms", NODE_RAMP_UP_MS);
-    cJSON_AddNumberToObject(manifest, "ramp_down_ms", NODE_RAMP_DOWN_MS);
+    cJSON *node = cJSON_CreateObject();
+    cJSON_AddStringToObject(node, "name", NODE_NAME);
+    cJSON_AddStringToObject(node, "firmware", CIP_VERSION);
+    cJSON_AddStringToObject(node, "chip", "ESP32");
+    cJSON_AddItemToObject(root, "node", node);
 
-    cJSON_AddNumberToObject(safe, NODE_CHANNEL, 0);
-    cJSON_AddItemToObject(manifest, "safe_state", safe);
+    /* Always an array, even when it is empty. A board with nothing attached
+     * announces nothing and stays reachable, which is what lets it be told
+     * what it has. */
+    cJSON *list = cJSON_CreateArray();
+    lock();
+    for (int i = 0; i < s_device_count; i++) {
+        const device_t *d = &s_devices[i];
+        cJSON *in = cJSON_CreateObject();
+        cJSON_AddNumberToObject(in, "index", i);
+        cJSON_AddStringToObject(in, "id", d->id);
+        cJSON_AddStringToObject(in, "kind", d->kind);
+        cJSON_AddNumberToObject(in, "latency_ms", d->latency_ms);
+        if (d->ramp_up_ms > 0) {
+            cJSON_AddNumberToObject(in, "ramp_up_ms", d->ramp_up_ms);
+        }
+        if (d->ramp_down_ms > 0) {
+            cJSON_AddNumberToObject(in, "ramp_down_ms", d->ramp_down_ms);
+        }
 
-    cJSON_AddStringToObject(channel, "name", NODE_CHANNEL);
-    cJSON_AddStringToObject(channel, "unit", "normalised");
-    cJSON_AddItemToArray(range, cJSON_CreateNumber(0));
-    cJSON_AddItemToArray(range, cJSON_CreateNumber(1));
-    cJSON_AddItemToObject(channel, "range", range);
-    cJSON_AddItemToArray(channels, channel);
-    cJSON_AddItemToObject(manifest, "channels", channels);
+        cJSON *safe = cJSON_CreateObject();
+        cJSON *channels = cJSON_CreateArray();
+        static const char *rgb[3] = {"r", "g", "b"};
+        for (int c = 0; c < d->channels; c++) {
+            const char *name = (d->channels == 3) ? rgb[c] : "intensity";
+            cJSON_AddNumberToObject(safe, name, (d->channels == 3) ? 0 : d->safe);
+            cJSON *ch = cJSON_CreateObject();
+            cJSON_AddStringToObject(ch, "name", name);
+            cJSON_AddStringToObject(ch, "unit", "normalised");
+            cJSON *range = cJSON_CreateArray();
+            cJSON_AddItemToArray(range, cJSON_CreateNumber(0));
+            cJSON_AddItemToArray(range, cJSON_CreateNumber(1));
+            cJSON_AddItemToObject(ch, "range", range);
+            cJSON_AddItemToArray(channels, ch);
+        }
+        cJSON_AddItemToObject(in, "safe_state", safe);
+        cJSON_AddItemToObject(in, "channels", channels);
+        cJSON_AddItemToArray(list, in);
+    }
+    unlock();
+    cJSON_AddItemToObject(root, "instruments", list);
 
-    cJSON_AddItemToObject(root, "manifest", manifest);
     send_json(sock, to, root);
     cJSON_Delete(root);
+}
+
+/* An acknowledgement carrying why something was refused.
+ *
+ * Refusals travel on the ack rather than in silence: a configuration that was
+ * rejected and said nothing is one somebody will spend an evening on. */
+static void send_refusal(int sock, struct sockaddr_in *to, double seq, const char *why)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "v", CIP_VERSION);
+    cJSON_AddStringToObject(root, "t", "ack");
+    cJSON_AddNumberToObject(root, "seq", seq);
+    cJSON_AddStringToObject(root, "error", why);
+    send_json(sock, to, root);
+    cJSON_Delete(root);
+    ESP_LOGW(TAG, "refused: %s", why);
 }
 
 static void send_ack(int sock, struct sockaddr_in *to, double seq)
@@ -203,21 +298,82 @@ static void send_ack(int sock, struct sockaddr_in *to, double seq)
 /* A curve frame is binary: 'C','F', version, channel count, then that many big
  * endian float32s. Recognised before any JSON parsing is attempted, because at
  * 50Hz the parser is the expensive part. */
+/* A curve frame carrying every output due this tick.
+ *
+ * Bounds checked at every step, because this arrives over UDP from whoever can
+ * reach the port and a length that walks off the end of a datagram is the
+ * cheapest possible attack on a device with no memory protection worth the
+ * name.
+ *
+ * An index this board does not have is skipped and the rest of the frame is
+ * applied. A frame is fifty times a second and superseded 20ms later, so
+ * refusing all of it because one output has gone would stop the outputs that
+ * are still there for no reason.
+ */
 static bool handle_curve(const uint8_t *buf, int len)
 {
     if (len < 4 || buf[0] != 'C' || buf[1] != 'F') {
         return false;
     }
+    int at = 4;
     int count = buf[3];
-    if (len != 4 + 4 * count || count < 1) {
-        return true;   /* malformed, but addressed to us: drop it silently */
+    if (buf[2] == 0) {
+        /* A frame from a conductor built before ADR 0007: one unnamed output,
+         * where the count is channels rather than outputs. It addressed the
+         * only device there was, so that is what it gets. */
+        if (s_device_count < 1 || 4 + 4 * count > len) {
+            return true;
+        }
+        lock();
+        device_t *d = &s_devices[0];
+        for (int c = 0; c < count && c < d->channels; c++) {
+            uint32_t bits = ((uint32_t)buf[4 + 4 * c] << 24) |
+                            ((uint32_t)buf[5 + 4 * c] << 16) |
+                            ((uint32_t)buf[6 + 4 * c] << 8) |
+                            ((uint32_t)buf[7 + 4 * c]);
+            float v;
+            memcpy(&v, &bits, sizeof(v));
+            d->value[c] = v;
+        }
+        d->is_safe = false;
+        device_apply(d);
+        unlock();
+        return true;
     }
-    uint32_t bits = ((uint32_t)buf[4] << 24) | ((uint32_t)buf[5] << 16) |
-                    ((uint32_t)buf[6] << 8)  | (uint32_t)buf[7];
-    float value;
-    memcpy(&value, &bits, sizeof(value));
-    s_safe = false;
-    output_apply(value);
+    if (buf[2] != 1) {
+        /* A version this build does not speak. Refused rather than half
+         * understood, which is the rule the whole protocol is versioned for. */
+        return true;
+    }
+
+    lock();
+    for (int i = 0; i < count; i++) {
+        if (at + 2 > len) {
+            break;
+        }
+        int index = buf[at];
+        int channels = buf[at + 1];
+        at += 2;
+        if (at + 4 * channels > len) {
+            break;
+        }
+        if (index >= 0 && index < s_device_count) {
+            device_t *d = &s_devices[index];
+            for (int c = 0; c < channels && c < d->channels; c++) {
+                uint32_t bits = ((uint32_t)buf[at + 4 * c] << 24) |
+                                ((uint32_t)buf[at + 1 + 4 * c] << 16) |
+                                ((uint32_t)buf[at + 2 + 4 * c] << 8) |
+                                ((uint32_t)buf[at + 3 + 4 * c]);
+                float v;
+                memcpy(&v, &bits, sizeof(v));
+                d->value[c] = v;
+            }
+            d->is_safe = false;
+            device_apply(d);
+        }
+        at += 4 * channels;
+    }
+    unlock();
     return true;
 }
 
@@ -262,27 +418,101 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
     } else if (strcmp(type->valuestring, "heartbeat") == 0) {
         s_last_heartbeat_us = esp_timer_get_time();
     } else if (strcmp(type->valuestring, "safe") == 0) {
-        output_safe("commanded");
+        all_safe("commanded");
     } else if (strcmp(type->valuestring, "cue") == 0) {
         const cJSON *params = cJSON_GetObjectItem(root, "params");
         const cJSON *seq = cJSON_GetObjectItem(root, "seq");
+        const cJSON *named = cJSON_GetObjectItem(root, "instrument");
+
+        lock();
+        device_t *d = by_name(cJSON_IsString(named) ? named->valuestring : NULL);
+        if (!d) {
+            unlock();
+            /* Not acknowledged, deliberately. Acknowledging a cue that was not
+             * applied is a lie, and the conductor's retry and then its recorded
+             * skip is exactly the machinery for a cue that did not land. */
+            cJSON_Delete(root);
+            return;
+        }
+
+        static const char *rgb[3] = {"r", "g", "b"};
         if (cJSON_IsObject(params)) {
-            const cJSON *value = cJSON_GetObjectItem(params, NODE_CHANNEL);
-            if (cJSON_IsNumber(value)) {
-                const cJSON *hold = cJSON_GetObjectItem(root, "hold_ms");
-                if (cJSON_IsNumber(hold) && hold->valuedouble > 0) {
-                    s_hold_until_us = esp_timer_get_time() +
-                                      (int64_t)(hold->valuedouble * 1000);
-                } else {
-                    s_hold_until_us = 0;
+            for (int c = 0; c < d->channels; c++) {
+                const char *name = (d->channels == 3) ? rgb[c] : "intensity";
+                const cJSON *v = cJSON_GetObjectItem(params, name);
+                if (cJSON_IsNumber(v)) {
+                    d->value[c] = (float)v->valuedouble;
                 }
-                s_safe = false;
-                output_apply((float)value->valuedouble);
             }
         }
+        const cJSON *hold = cJSON_GetObjectItem(root, "hold_ms");
+        if (cJSON_IsNumber(hold) && hold->valuedouble > 0) {
+            d->hold_until_us = esp_timer_get_time() +
+                               (int64_t)(hold->valuedouble * 1000);
+        } else {
+            d->hold_until_us = 0;
+        }
+        d->is_safe = false;
+        device_apply(d);
+        unlock();
+
         if (cJSON_IsNumber(seq)) {
             send_ack(sock, from, seq->valuedouble);
         }
+    } else if (strcmp(type->valuestring, "configure") == 0) {
+        const cJSON *seq = cJSON_GetObjectItem(root, "seq");
+        double n = cJSON_IsNumber(seq) ? seq->valuedouble : 0;
+
+        /* Only when authenticated, and that is the rule rather than a caution.
+         * A stranger who can write this can move a relay onto a pin nobody
+         * intended, or declare a latency of zero and corrupt the timing of
+         * every cue after it in a way that reads as the score being wrong. A
+         * board with no secret has already refused this datagram long before
+         * here; the check is what makes that true rather than incidental. */
+        if (sizeof(CIP_SECRET) <= 1) {
+            send_refusal(sock, from, n, "this node takes no configuration without a secret");
+            cJSON_Delete(root);
+            return;
+        }
+
+        const cJSON *devices = cJSON_GetObjectItem(root, "devices");
+        if (!cJSON_IsArray(devices)) {
+            send_refusal(sock, from, n, "no devices array");
+            cJSON_Delete(root);
+            return;
+        }
+
+        char *json = cJSON_PrintUnformatted(devices);
+        if (!json) {
+            send_refusal(sock, from, n, "out of memory");
+            cJSON_Delete(root);
+            return;
+        }
+
+        /* Parsed before it is stored, so a configuration that cannot be used is
+         * refused rather than remembered and discovered at the next boot. */
+        device_t parsed[DEVICE_MAX];
+        char problem[128];
+        int count = config_parse(json, parsed, problem, sizeof(problem));
+        if (count < 0) {
+            send_refusal(sock, from, n, problem);
+            free(json);
+            cJSON_Delete(root);
+            return;
+        }
+        if (!config_save(json)) {
+            send_refusal(sock, from, n, "could not store it");
+            free(json);
+            cJSON_Delete(root);
+            return;
+        }
+        free(json);
+
+        send_ack(sock, from, n);
+        apply_config();
+        /* The instruments and their indices have just changed, so anything
+         * holding the old ones is now wrong and has to be told. */
+        send_hello(sock, from);
     }
     cJSON_Delete(root);
 }
@@ -295,14 +525,34 @@ static void watchdog_task(void *arg)
     (void)arg;
     for (;;) {
         int64_t now_us = esp_timer_get_time();
-        if (s_hold_until_us != 0 && now_us > s_hold_until_us && !s_safe) {
-            s_hold_until_us = 0;
-            output_safe("hold expired");
+
+        /* A span that has run its declared duration ends here, whether or not
+         * the conductor's stop ever arrived. One device, not the board: a four
+         * second fog burst ending must not stop a fan in the middle of a
+         * scene. */
+        lock();
+        for (int i = 0; i < s_device_count; i++) {
+            device_t *d = &s_devices[i];
+            if (d->hold_until_us != 0 && now_us > d->hold_until_us && !d->is_safe) {
+                device_safe(d);
+            }
         }
+        unlock();
+
         if (s_last_heartbeat_us != 0) {
-            int64_t idle_ms = (esp_timer_get_time() - s_last_heartbeat_us) / 1000;
-            if (idle_ms > CIP_WATCHDOG_MS && !s_safe) {
-                output_safe("no heartbeat");
+            int64_t idle_ms = (now_us - s_last_heartbeat_us) / 1000;
+            bool anything_running = false;
+            lock();
+            for (int i = 0; i < s_device_count; i++) {
+                if (!s_devices[i].is_safe) {
+                    anything_running = true;
+                }
+            }
+            unlock();
+            if (idle_ms > CIP_WATCHDOG_MS && anything_running) {
+                /* Every device. The conductor is gone, and nothing here knows
+                 * which output is the dangerous one. */
+                all_safe("no heartbeat");
             }
         }
         vTaskDelay(pdMS_TO_TICKS(CIP_WATCHDOG_MS / 3));
@@ -349,7 +599,8 @@ static int auth_unwrap(uint8_t *buf, int len)
 
 void componium_node_start(void)
 {
-    output_init();
+    s_lock = xSemaphoreCreateMutex();
+    apply_config();
     xTaskCreate(watchdog_task, "cip_watchdog", 2048, NULL, 6, NULL);
 
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
@@ -367,7 +618,7 @@ void componium_node_start(void)
         close(sock);
         return;
     }
-    ESP_LOGI(TAG, "%s listening on udp/%d", NODE_ID, CIP_PORT);
+    ESP_LOGI(TAG, "%s listening on udp/%d with %d device(s)", NODE_NAME, CIP_PORT, s_device_count);
 
     uint8_t buf[CIP_MAX_DATAGRAM];
     for (;;) {
