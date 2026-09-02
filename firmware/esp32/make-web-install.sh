@@ -32,6 +32,34 @@ if ! command -v esptool.py > /dev/null 2>&1; then
     exit 1
 fi
 
+# What the build actually put in the image, rather than what you meant.
+#
+# The secret arrives through a CMake compile definition, and CMake reads the
+# environment when it configures, not when it builds. A build directory that was
+# once configured without COMPONIUM_CIP_SECRET keeps that decision: exporting
+# the variable and building again recompiles nothing and quietly produces an
+# image with an empty secret. Every symptom of that arrives later, on a board
+# that refuses its own configuration and can only be reached with a cable.
+#
+# `idf.py reconfigure` is the fix. Refusing to package is how you find out you
+# needed it.
+if [ -n "${COMPONIUM_CIP_SECRET:-}" ]; then
+    if grep -qaF "$COMPONIUM_CIP_SECRET" "$build/componium_node.bin"; then
+        echo "secret: present in the image"
+    else
+        echo "The built image does not contain COMPONIUM_CIP_SECRET." >&2
+        echo "CMake reads it when it configures, so a build directory" >&2
+        echo "configured without it ignores it. Run:" >&2
+        echo >&2
+        echo "    COMPONIUM_CIP_SECRET='...' idf.py reconfigure && idf.py build" >&2
+        echo >&2
+        echo "Refusing to package a board that would refuse all configuration." >&2
+        exit 1
+    fi
+else
+    echo "secret: none, so this board will accept no configuration" >&2
+fi
+
 version=$(git -C "$here" describe --tags --always --dirty 2>/dev/null || echo unknown)
 
 mkdir -p "$out"
