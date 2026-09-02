@@ -780,8 +780,21 @@ type libraryEntry struct {
 	Prepare *Job `json:"prepare,omitempty"`
 }
 
+// errText is an error as a string, or empty. For a field a page can show.
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 type libraryView struct {
-	Scores string `json:"scores"`
+	// SeenError says why the library could not tell which films have
+	// observations. Empty in the ordinary case. Shown rather than swallowed,
+	// because "no film has been looked at" and "nothing could be asked" look
+	// identical in a list and mean opposite things.
+	SeenError string `json:"seenError,omitempty"`
+	Scores    string `json:"scores"`
 	// Free space where films live, since running out of it is the reason
 	// anybody deletes one.
 	Free      int64 `json:"free"`
@@ -798,12 +811,18 @@ type libraryView struct {
 func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 	jobs := s.jobs.Snapshot()
 
+	// Asked once for the whole library rather than once per film. An error is
+	// reported rather than swallowed: a database that is down would otherwise
+	// make every film look freshly analysed and empty.
+	seen, seenErr := s.jobs.FilmsSeen()
+
 	s.mu.Lock()
 	current := filepath.Base(s.path)
 	s.mu.Unlock()
 
 	out := libraryView{
 		Scores:     s.scores,
+		SeenError:  errText(seenErr),
 		CanBuild:   s.jobs.Available(),
 		Current:    current,
 		Free:       freeBytes(s.mediaDir()),
@@ -822,7 +841,7 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 			entry.Duration = sc.Meta.Media.Duration.Duration().Seconds()
 		}
 		entry.Preview = f.Preview
-		entry.Seen = s.jobs.HasSeen(f.Name)
+		entry.Seen = seen[FilmKey(f.Name)]
 		if job, ok := jobs[jobKey(JobAnalyse, f.Name)]; ok {
 			j := job
 			entry.Job = &j

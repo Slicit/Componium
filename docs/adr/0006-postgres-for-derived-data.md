@@ -1,6 +1,6 @@
 # ADR 0006 — Postgres for derived data, files for authored artefacts
 
-Status: accepted · 2026-09-02
+Status: accepted · 2026-09-02, amended 2026-09-02
 
 ## Context
 
@@ -14,13 +14,15 @@ touch the same data, in two languages: the studio (Go) edits scores and rigs
 and owns the job queue, the composer (Python) writes observations while it
 analyses, and the conductor (Go) reads a score and a rig to run a show.
 
-The strain shows in specific places rather than generally. A vision file is
-rewritten whole to append to it, and a bug that stacked chunks needed a bespoke
-repair script. The job queue is a JSON file with two writers and has already
-produced one cleanup race. Questions anybody would ask of the observations,
-which scenes mention fire, what the coverage of a chunk is, are answered by
-grepping JSONL from scripts in `hack/`. None of that is a size problem: the
-whole library is a few megabytes and 8,746 observations.
+The strain shows in one place rather than generally. A vision file is
+rewritten whole to append to it, a bug that stacked chunks needed a bespoke
+repair script, and questions anybody would ask of the observations, which
+scenes mention fire, what the coverage of a chunk is, are answered by grepping
+JSONL from scripts in `hack/`. None of that is a size problem: the whole
+library is a few megabytes and 8,746 observations.
+
+The first version of this document also said the job queue was a JSON file with
+two writers that had produced a race. That was wrong and is corrected below.
 
 ## Decision
 
@@ -30,14 +32,49 @@ artefacts a person authors.**
 | Stays a file | Moves to Postgres |
 |---|---|
 | Scores (`.componium`) | Vision observations |
-| Rigs (`.toml`) | The analysis queue |
-| Media | Score history and its metadata |
-| Firmware images | Measurements from experiments |
-| | Layouts |
+| Rigs (`.toml`) | |
+| Media | |
+| Firmware images | |
+| The analysis queue | |
+| Score history | |
+
+The right hand column was longer when this was written. See the amendment.
 
 The rule, and the reason it is a clean line: **anything in the database can be
 deleted and regenerated; anything in a file is something a person made.** A
 corrupt database costs a re-analysis. It never costs somebody's work.
+
+## Amendment, the same day: only observations move
+
+Stages 2 and 3 were dropped before being built, because the reasons given for
+them here did not survive being checked. Recorded rather than quietly deleted,
+since the next person to look at a JSON file beside a database will have the
+same idea.
+
+**The queue does not have two writers.** `.jobs.json` is written from three call
+sites, all in the Go studio, all inside one process holding a mutex. The
+composer never touches it. The race cited was in a test, between `t.TempDir()`
+and a pump goroutine, and was fixed by not starting the pump in that test. It
+had nothing to do with the file format.
+
+**Nor is it rewritten often.** `update` takes an explicit `persist` flag and
+progress passes `false`, so the hot path was already avoided by whoever wrote
+it. The file is 21KB and is written a handful of times per analysis.
+
+**The history index is a directory read of about a dozen entries per film**,
+performed when somebody opens the version picker.
+
+**And every table costs a file fallback, permanently.** The studio has to work
+without a database, so anything moved here has to keep working when there is
+none. For observations that was free: the file path already existed and moving
+them deleted no code. For the queue and the history it would be new duplicated
+code, maintained for ever, so that files which are not hurting can also live in
+Postgres. That makes those two stages net negative on complexity today.
+
+**What would change it.** The day analysis runs somewhere other than the studio
+process, a worker on another machine taking jobs off a queue, stage 2 stops
+being tidiness and becomes necessary. That is the trigger to watch for. It is
+not a reason to build it now.
 
 ## Why not SQLite
 
@@ -90,6 +127,12 @@ emailed.
 - **The test suite grows a dependency.** Today the whole Go suite runs with
   nothing installed, which is worth something and is about to cost something.
   See below.
+- **The contract test empties the database it is given**, because every subtest
+  has to start from nothing. `COMPONIUM_TEST_DB` therefore refuses a URL whose
+  name does not contain `test`. This is not hypothetical: it was pointed at the
+  real database an hour after being written, and deleted 8,746 rows that had
+  just been imported. They were rebuildable, which is the property this whole
+  decision leans on, and it should still not be one paste away.
 - **Nothing in the database is precious.** Every table can be rebuilt by
   re-running an analysis, which is what makes backup a nice-to-have rather than
   a prerequisite.

@@ -97,6 +97,33 @@ func Run(t *testing.T, fresh func(t *testing.T) store.Store) {
 		}
 	})
 
+	t.Run("the same moment twice in one call", func(t *testing.T) {
+		/* A single run can describe the same moment twice, and both arrive in
+		 * the same save. The bulk path cannot upsert a row it has already
+		 * inserted in the same statement and would fail rather than choose,
+		 * so it picks the last one, which is the answer a loop would have
+		 * given. */
+		s := fresh(t)
+		ctx := context.Background()
+		err := s.SaveObservations(ctx, []store.Observation{
+			{Film: "sintel", At: 5, Seen: "first"},
+			{Film: "sintel", At: 5, Seen: "second"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := s.Observations(ctx, "sintel")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("%d rows for one moment", len(got))
+		}
+		if got[0].Seen != "second" {
+			t.Errorf("kept %q, want the later one", got[0].Seen)
+		}
+	})
+
 	t.Run("films do not see each other", func(t *testing.T) {
 		s := fresh(t)
 		ctx := context.Background()

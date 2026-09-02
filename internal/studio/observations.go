@@ -163,6 +163,45 @@ func (j *Jobs) HasSeen(film string) bool {
 	return err == nil && !info.IsDir() && info.Size() > 0
 }
 
+// FilmsSeen is the set of films with observations, asked once.
+//
+// HasSeen replaced a stat and should have stayed as cheap as one. Against a
+// database it is a round trip per film, and the library asks for every film
+// every time it polls, so this asks once and answers for all of them.
+//
+// The error is returned rather than folded into a false. A database refusing
+// connections would otherwise make every film look freshly analysed and empty,
+// which is a worse answer than saying so.
+func (j *Jobs) FilmsSeen() (map[string]bool, error) {
+	out := map[string]bool{}
+	if j.store != nil {
+		films, err := j.store.Films(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range films {
+			out[f] = true
+		}
+		return out, nil
+	}
+	entries, err := os.ReadDir(j.scores)
+	if err != nil {
+		// No scores directory is an empty library, not a fault.
+		return out, nil
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, seenSuffix) {
+			continue
+		}
+		if info, err := e.Info(); err != nil || info.Size() == 0 {
+			continue
+		}
+		out[FilmKey(strings.TrimSuffix(name, seenSuffix))] = true
+	}
+	return out, nil
+}
+
 // ReadSeen returns what the model said about a film, in time order.
 //
 // A line that will not parse is skipped rather than fatal. The file is written

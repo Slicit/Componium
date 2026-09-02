@@ -1,5 +1,5 @@
 ---
-status: draft
+status: shipped
 branch: feat-postgres
 ---
 
@@ -68,9 +68,19 @@ through `store`.
 the scent pass read them, and the existing `.seen.jsonl` files are imported by
 a one-shot command that can be run twice safely.
 
-## Stage 2 · the analysis queue
+## Stage 2 · the analysis queue, dropped and not built
 
-The file with two writers and a race we have already met.
+Sold on a fact nobody had checked. `.jobs.json` has one writer, not two: three
+call sites, all in the studio, all under one mutex. The race cited was between
+`t.TempDir()` and a pump goroutine in a test, and was fixed by not starting the
+pump there. `update` already takes a `persist` flag that progress passes as
+false, so the frequent write this was going to save does not happen either.
+
+Kept below as the design it would take, for the day it is needed: analysis
+running somewhere other than the studio process. That day it becomes necessary
+rather than tidy.
+
+The file with one writer and a race that was in a test.
 
 ```sql
 create table job (
@@ -98,7 +108,11 @@ query instead of a walk.
 than through `.jobs.json`, and the resume tests pass against both store
 implementations.
 
-## Stage 3 · history and measurements
+## Stage 3 · history and measurements, dropped and not built
+
+A directory read of about a dozen entries per film, when somebody opens the
+version picker. Kept below for the same reason as stage 2.
+
 
 Kept scores stay files; what moves is the *index* of them, which is what the
 version picker actually reads.
@@ -146,6 +160,18 @@ keeping it that way is the point.
 **A studio with no database still opens, edits and saves a score**, because
 those are files. It refuses to analyse and shows no history, and says which.
 That degradation is deliberate and should be tested, not discovered.
+
+## What was actually built
+
+Stage 0 and stage 1. Observations live in Postgres, the studio reads and writes
+them there, `import-vision` moves what was already on disk, and a studio with no
+database keeps them in files exactly as before.
+
+One departure from the plan, in the right direction: **the composer needs no
+driver and no database.** It already wrote one JSONL per chunk and the studio
+already joined them, so there was a single writer in a single language sitting
+at exactly the point where a run's observations become a film's. That join is
+where they land. Python gained nothing but two fields it had been dropping.
 
 ## What this does not do
 

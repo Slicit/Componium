@@ -150,6 +150,37 @@ func TestReadingBackThroughEitherPath(t *testing.T) {
 	}
 }
 
+func TestTheWholeLibraryInOneQuestion(t *testing.T) {
+	/* HasSeen replaced a stat and should be as cheap as one. Against a
+	 * database it is a round trip per film and the library polls, so this asks
+	 * once. Both paths have to agree on the answer or a studio with a database
+	 * and one without would list different films as analysed. */
+	for _, kept := range []struct {
+		name  string
+		store store.Store
+	}{
+		{"from a database", mem.New()},
+		{"from the files", nil},
+	} {
+		t.Run(kept.name, func(t *testing.T) {
+			j, film := seenJobs(t, kept.store)
+			if _, err := j.mergeSeen(film, j.ScorePath(film)); err != nil {
+				t.Fatal(err)
+			}
+			got, err := j.FilmsSeen()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !got[FilmKey(film)] {
+				t.Errorf("the analysed film is missing: %v", got)
+			}
+			if got["never-analysed"] {
+				t.Error("claimed a film nobody looked at")
+			}
+		})
+	}
+}
+
 func TestAFilmNobodyLookedAt(t *testing.T) {
 	for _, st := range []store.Store{mem.New(), nil} {
 		j, _ := seenJobs(t, st)
