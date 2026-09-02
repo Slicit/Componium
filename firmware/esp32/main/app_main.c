@@ -18,7 +18,8 @@
 
 static const char *TAG = "componium";
 
-void componium_node_start(void);
+void componium_node_init(void);
+void componium_node_serve(void);
 
 /** Wipe and retry once. A store this device cannot read is a store it should
  *  not be carrying: the only thing in it is a network it evidently cannot
@@ -37,6 +38,12 @@ static void storage_start(void)
 void app_main(void)
 {
     storage_start();
+
+    /* The outputs, first, at their safe values. Everything this board can drive
+     * is something that moves or blows or switches mains, and the window
+     * between power and provisioning is exactly when nobody is watching it. */
+    componium_node_init();
+
     ESP_ERROR_CHECK(wifi_start());
     improv_start();
 
@@ -49,14 +56,15 @@ void app_main(void)
         ESP_LOGW(TAG, "no network yet, starting anyway");
     }
 
-    /* The strip, which is a separate instrument on the same board reached by
-     * a separate protocol. Started before the node because the node never
-     * returns, and after the network because it binds a socket. */
+    /* The strip, when nothing configured is already driving it. Started
+     * before the node's loop because that loop never returns, and after the
+     * network because it binds a socket. It asks the node what it has, which
+     * is why the node was brought up above and not here. */
     sacn_start();
 
-    componium_node_start();
+    componium_node_serve();
 
-    /* componium_node_start only returns when its socket could not be made,
+    /* componium_node_serve only returns when its socket could not be made,
      * which is not a thing to carry on from. Everything the watchdog protects
      * is already at its safe value; hold here so the log survives and so the
      * improv task keeps answering the cable. */

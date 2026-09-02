@@ -115,6 +115,12 @@ static void all_safe(const char *why)
 bool node_has_strip(void)
 {
     bool found = false;
+    if (!s_lock) {
+        /* Asked before the node came up. It has no devices yet, so it drives
+         * nothing yet, and saying so is the truthful answer as well as the one
+         * that does not take a NULL semaphore and reboot the board. */
+        return false;
+    }
     lock();
     for (int i = 0; i < s_device_count; i++) {
         if (s_devices[i].type == DEV_WS28XX) {
@@ -605,10 +611,25 @@ static int auth_unwrap(uint8_t *buf, int len)
 
 /* ------------------------------------------------------------------ main */
 
-void componium_node_start(void)
+/* Come up, safely, before anything asks what is attached.
+ *
+ * Separate from serving because two things need the node to exist before there
+ * is any network: the outputs, which must be at their safe values from the
+ * first moment rather than from whenever the wifi settles, and sacn_start(),
+ * which asks whether a configured device already drives the strip and must not
+ * be told "no" merely because the answer had not been loaded yet. */
+void componium_node_init(void)
 {
+    if (s_lock) {
+        return;
+    }
     s_lock = xSemaphoreCreateMutex();
     apply_config();
+}
+
+void componium_node_serve(void)
+{
+    componium_node_init();   /* Ordinarily already done. Cheap to be sure. */
     xTaskCreate(watchdog_task, "cip_watchdog", 2048, NULL, 6, NULL);
 
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
