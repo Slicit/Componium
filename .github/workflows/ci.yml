@@ -9,6 +9,22 @@ on:
 jobs:
   go:
     runs-on: ubuntu-latest
+    # Postgres for the store's contract tests. Everything else in the suite
+    # runs without it, and there is a step below that proves so.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: componium
+          POSTGRES_PASSWORD: componium
+          POSTGRES_DB: componium_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U componium"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -23,7 +39,19 @@ jobs:
             echo "not gofmt clean:"; echo "$unformatted"; exit 1
           fi
       - run: go vet ./...
-      - run: go test ./...
+
+      # With nothing installed, which is how a contributor runs it. The store's
+      # contract tests skip here, and that is the point: this step is what
+      # notices the day something quietly starts needing a service.
+      - name: the suite, with no database
+        run: go test ./...
+
+      # And again with one, which picks up the contract tests the run above
+      # skipped.
+      - name: the store, against Postgres
+        env:
+          COMPONIUM_TEST_DB: postgres://componium:componium@localhost:5432/componium_test
+        run: go test ./internal/store/...
 
   python:
     runs-on: ubuntu-latest

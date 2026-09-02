@@ -118,6 +118,30 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  # Derived data: observations, the analysis queue, kept score metadata. Not
+  # scores and not rigs, which are files, and not anything the conductor reads.
+  # See docs/adr/0006-postgres-for-derived-data.md.
+  #
+  # Idle until stage 1 of feat-postgres points the composer and the studio at
+  # it. It is here now because the deployment shape is easier to get right
+  # before something depends on it than after.
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: componium
+      POSTGRES_USER: componium
+      POSTGRES_PASSWORD: ${COMPONIUM_DB_PASSWORD:-componium}
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      # So that whatever depends on this waits for a database that answers,
+      # not for a container that has started.
+      test: ["CMD-SHELL", "pg_isready -U componium"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   # The timeline editor. This is the part with a URL.
   studio:
     <<: [*image, *asuser]
@@ -165,13 +189,18 @@ services:
     restart: unless-stopped
 
 volumes:
-  # Only one named volume, and it holds nothing anybody would miss.
+  # Two named volumes, and neither holds anything anybody would miss.
   #
   # Films and scores are bind mounts instead, under COMPONIUM_MEDIA and
   # COMPONIUM_SCORES, so they can be dropped in, backed up and deleted from
   # outside a container. A named volume would put the user's own files
-  # somewhere only Docker can reach.
-  #
+  # somewhere only Docker can reach. Rigs are a bind mount for the same reason.
+
+  # The database holds derived data: observations, the queue, kept score
+  # metadata. All of it is rebuildable from the films and the scores, which is
+  # what makes losing this an afternoon of re-analysis rather than a loss.
+  db:
+
   # The mpv IPC socket is different: it is a unix socket that exists only while
   # the stack runs, and putting it on a shared volume is how the conductor
   # reaches the player without either of them needing a network.
