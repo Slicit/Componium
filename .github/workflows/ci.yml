@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
       - name: gofmt
         # Not a style preference: an unformatted diff makes every later review
         # noisier than it needs to be.
@@ -144,7 +144,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.24'
+          go-version: '1.25'
       - run: go build -o componium ./cmd/componium
       - name: validate the example score against the example rig
         run: ./componium validate -score examples/demo.componium -rig examples/demo-rig.toml

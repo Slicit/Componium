@@ -5,7 +5,7 @@
 # It carries mpv, ffmpeg and Python because a demonstration that cannot play a
 # film or generate a score is not demonstrating much.
 
-FROM golang:1.24-trixie AS build
+FROM golang:1.25-trixie AS build
 WORKDIR /src
 
 # Dependencies first, so editing source does not re-download the module cache.
