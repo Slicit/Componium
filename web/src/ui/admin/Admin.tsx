@@ -7,6 +7,7 @@
  */
 
 import { Devices } from './Devices';
+import { Nodes } from './Nodes';
 import { Firmware } from './Firmware';
 import { RoomDefaults } from './RoomDefaults';
 import { isCurrent, routeHash, type Route } from '../../core/route';
@@ -14,6 +15,7 @@ import { isCurrent, routeHash, type Route } from '../../core/route';
 /** The menu, in the order a rig gets built: what it is, then how it looks. */
 export const PAGES = [
   { id: 'devices', label: 'Devices', hint: 'What the loaded rig says is out there' },
+  { id: 'boards', label: 'Boards', hint: 'What is physically wired to an ESP32' },
   { id: 'firmware', label: 'Firmware', hint: 'Put the node firmware on an ESP32' },
   { id: 'room', label: 'Room preview', hint: 'How the 3D preview opens' },
 ] as const;
@@ -47,6 +49,7 @@ export function Admin({ route }: { route: Route }) {
       </nav>
       <div className="adm-body">
         {page === 'devices' && <Devices />}
+        {page === 'boards' && <Nodes />}
         {page === 'firmware' && <Firmware />}
         {page === 'room' && <RoomDefaults />}
       </div>

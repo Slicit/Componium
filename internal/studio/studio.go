@@ -234,6 +234,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/rigs", s.handleRigs)
 	mux.HandleFunc("/api/live", s.handleLive)
 	mux.HandleFunc("/api/live/at", s.handleLiveAt)
+	mux.HandleFunc("/api/node", s.handleNode)
 	mux.HandleFunc("/media", s.handleMedia)
 	mux.HandleFunc("/api/media", s.handleMediaList)
 	mux.HandleFunc("/api/library", s.handleLibrary)

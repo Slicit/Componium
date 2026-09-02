@@ -566,6 +566,9 @@ button:hover { border-color: #3a4553; }
 /* The device table needs the width; prose does not. */
 .adm-wide { max-width: none; }
 .adm-edit input[type="text"] { width: 15ch; }
+.adm-edit label { white-space: nowrap; }
+.adm-edit label input[type="number"] { width: 6ch; }
+.adm-row input[type="text"], .adm-row input[type="password"] { width: 22ch; }
 .adm-edit input[type="number"] { width: 7ch; text-align: right; }
 .adm-edit td { padding: 3px 10px 3px 0; }
 .adm-dmx { display: inline-flex; gap: 4px; align-items: center; }
