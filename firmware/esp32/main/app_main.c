@@ -64,11 +64,10 @@ void app_main(void)
 
     componium_node_serve();
 
-    /* componium_node_serve only returns when its socket could not be made,
-     * which is not a thing to carry on from. Everything the watchdog protects
-     * is already at its safe value; hold here so the log survives and so the
-     * improv task keeps answering the cable. */
-    ESP_LOGE(TAG, "node stopped; output is safe, waiting for a reflash");
+    /* Everything worth doing now has a task of its own: the node's socket loop
+     * and its watchdog, improv on the cable, sacn on the strip. Main holds here
+     * with nothing to do, which is the point. Its stack is the smallest in the
+     * system and the last thing that ran on it did not fit. */
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

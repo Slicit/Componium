@@ -43,6 +43,13 @@
 #define CIP_MAX_DATAGRAM  1024
 #define CIP_TAG_LEN       16
 
+/* Stack for the socket loop.
+ *
+ * Generous because the loop is not: a 1KB receive buffer, a cJSON tree per
+ * reply, and another 1KB buffer to sign it into. It ran on app_main's 3584 byte
+ * stack until the first datagram arrived and overflowed it. */
+#define CIP_TASK_STACK    8192
+
 /* Shared secret, and there is no building without one.
  *
  * A node that accepts configuration requires it, and this one does. Under 0.2
@@ -627,11 +634,9 @@ void componium_node_init(void)
     apply_config();
 }
 
-void componium_node_serve(void)
+/* Receive, authenticate, act, answer. Never returns while it has a socket. */
+static void serve_forever(void)
 {
-    componium_node_init();   /* Ordinarily already done. Cheap to be sure. */
-    xTaskCreate(watchdog_task, "cip_watchdog", 2048, NULL, 6, NULL);
-
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
     if (sock < 0) {
         ESP_LOGE(TAG, "socket: errno %d", errno);
@@ -671,4 +676,27 @@ void componium_node_serve(void)
         buf[len] = 0;
         handle_json(sock, &from, (const char *)buf, len);
     }
+}
+
+static void serve_task(void *arg)
+{
+    (void)arg;
+    serve_forever();
+    /* Only reached when the socket could not be made, which is not a thing to
+     * carry on from. Every output is already at its safe value and the watchdog
+     * is running, so the honest thing is to say so and stop. */
+    ESP_LOGE(TAG, "node stopped; output is safe, waiting for a reflash");
+    vTaskDelete(NULL);
+}
+
+/* Start serving, in a task of the loop's own.
+ *
+ * Not on app_main's task, which is where this used to run and where it could
+ * not fit. A task whose stack is sized for the buffers it declares is not a
+ * detail on a board whose only recovery is a USB cable. */
+void componium_node_serve(void)
+{
+    componium_node_init();   /* Ordinarily already done. Cheap to be sure. */
+    xTaskCreate(watchdog_task, "cip_watchdog", 2048, NULL, 6, NULL);
+    xTaskCreate(serve_task, "cip_node", CIP_TASK_STACK, NULL, 5, NULL);
 }
