@@ -29,7 +29,18 @@ import (
 const Port = 5570
 
 // Version is the protocol revision this build speaks.
-const Version = "0.2"
+//
+// 0.3 is a node carrying several devices rather than being one. See ADR 0007:
+// hello is a list, cues name an instrument, curve frames are bundled and carry
+// an index, and a node can be told what is attached to it.
+const Version = "0.3"
+
+// Version02 is what a node built before ADR 0007 speaks.
+//
+// Accepted on the way in, because a firmware upgrade should not be the price of
+// a conductor upgrade, and because the version field exists precisely so that
+// this can be a decision rather than a break.
+const Version02 = "0.2"
 
 // Type identifies a control message.
 type Type string
@@ -48,6 +59,11 @@ const (
 	TypeSafe Type = "safe"
 	// TypeHeartbeat says the conductor is alive. Unacknowledged by design.
 	TypeHeartbeat Type = "heartbeat"
+	// TypeConfigure tells a node what is attached to which pin. Acknowledged,
+	// and refused outright by a node without authentication: a stranger who
+	// can write this can move a relay onto a pin nobody intended, or declare a
+	// latency of zero and corrupt every cue after it.
+	TypeConfigure Type = "configure"
 )
 
 // Message is one control datagram.
@@ -140,6 +156,71 @@ func Decode(b []byte) (*Message, error) {
 	}
 	return &m, nil
 }
+
+// Instrument is one device on a node, as the node describes it.
+//
+// Index is what curve frames address, and is only meaningful for the session
+// that announced it: configuration is editable, so index 2 can be a different
+// device after a reboot. A node that restarts says hello again and every index
+// is re-read. Anything holding an old one is holding a way to drive the wrong
+// output with nothing in the room to show for it.
+type Instrument struct {
+	Index int    `json:"index"`
+	ID    string `json:"id"`
+	Kind  string `json:"kind"`
+
+	LatencyMS   float64 `json:"latency_ms"`
+	RampUpMS    float64 `json:"ramp_up_ms,omitempty"`
+	RampDownMS  float64 `json:"ramp_down_ms,omitempty"`
+	MaxContinMS float64 `json:"max_continuous_ms,omitempty"`
+	DutyCycle   float64 `json:"duty_cycle,omitempty"`
+
+	SafeState map[string]float64 `json:"safe_state,omitempty"`
+	Channels  []Channel          `json:"channels,omitempty"`
+}
+
+// NodeInfo describes the board itself, for logs and for a person looking at a
+// list of them. Not to be confused with Node, which is a software node: this is
+// what a node says about itself, not the thing saying it.
+type NodeInfo struct {
+	Name     string `json:"name,omitempty"`
+	Firmware string `json:"firmware,omitempty"`
+	Chip     string `json:"chip,omitempty"`
+}
+
+// Device is one entry in a configuration: what is attached, and where.
+//
+// The type is what a firmware build contains; the device is what a
+// configuration says is plugged into it. The physical facts travel with it,
+// which is the point of the whole message: latency_ms stops being a #define
+// and becomes something a person who has measured their fan can set.
+type Device struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	GPIO int    `json:"gpio"`
+	Kind string `json:"kind"`
+
+	// pwm
+	FreqHz int `json:"freq_hz,omitempty"`
+	// ws28xx
+	Pixels int    `json:"pixels,omitempty"`
+	Order  string `json:"order,omitempty"`
+	// relay
+	Active string `json:"active,omitempty"`
+
+	LatencyMS  float64 `json:"latency_ms,omitempty"`
+	RampUpMS   float64 `json:"ramp_up_ms,omitempty"`
+	RampDownMS float64 `json:"ramp_down_ms,omitempty"`
+	Safe       float64 `json:"safe,omitempty"`
+}
+
+// Device types a build may contain. Three, which is what an ESP32 usefully
+// drives; see ADR 0007 for why there is no builder to select between them yet.
+const (
+	DevicePWM    = "pwm"
+	DeviceWS28xx = "ws28xx"
+	DeviceRelay  = "relay"
+)
 
 // CurveFrame is a high rate value update. It is binary rather than JSON
 // because at 50Hz per instrument the parsing cost on a microcontroller starts
