@@ -50,6 +50,16 @@
  * stack until the first datagram arrived and overflowed it. */
 #define CIP_TASK_STACK    8192
 
+/* Stack for the watchdog.
+ *
+ * It looks like a task that only compares timestamps, and it is not. Putting a
+ * strip back to safe walks every pixel and then blocks on an RMT transmit, and
+ * saying why it did costs a formatted log line on top. It ran on 2048 bytes,
+ * which was never shown to be too few and was never shown to be enough either.
+ *
+ * Both numbers are reported once at startup; see the headroom line below. */
+#define CIP_WATCHDOG_STACK 4096
+
 /* Shared secret, and there is no building without one.
  *
  * A node that accepts configuration requires it, and this one does. Under 0.2
@@ -90,6 +100,10 @@ static volatile uint64_t s_highest_counter = 0;
 static device_t s_devices[DEVICE_MAX];
 static int      s_device_count;
 static SemaphoreHandle_t s_lock;
+
+/* Kept so that each can be asked how close it came to its limit. */
+static TaskHandle_t s_serve_task;
+static TaskHandle_t s_watchdog_task;
 
 static void lock(void)   { xSemaphoreTake(s_lock, portMAX_DELAY); }
 static void unlock(void) { xSemaphoreGive(s_lock); }
@@ -544,6 +558,8 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
 static void watchdog_task(void *arg)
 {
     (void)arg;
+    unsigned ticks = 0;
+    bool reported = false;
     for (;;) {
         int64_t now_us = esp_timer_get_time();
 
@@ -576,6 +592,23 @@ static void watchdog_task(void *arg)
                 all_safe("no heartbeat");
             }
         }
+        /* Once, about ten seconds in, when everything that runs at startup
+         * has run: the least stack either long lived task has had spare. The
+         * loop below ticks three times per watchdog period, so a hundred of
+         * them is ten seconds at the current numbers.
+         *
+         * Reported rather than assumed because the last stack on this board to
+         * be sized by eye was too small, and the symptom was a board that
+         * rebooted whenever anybody spoke to it. */
+        if (!reported && ++ticks >= 100) {
+            reported = true;
+            ESP_LOGI(TAG, "stack headroom: node %u bytes, watchdog %u bytes",
+                     s_serve_task
+                         ? (unsigned)uxTaskGetStackHighWaterMark(s_serve_task)
+                         : 0u,
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        }
+
         vTaskDelay(pdMS_TO_TICKS(CIP_WATCHDOG_MS / 3));
     }
 }
@@ -697,6 +730,7 @@ static void serve_task(void *arg)
 void componium_node_serve(void)
 {
     componium_node_init();   /* Ordinarily already done. Cheap to be sure. */
-    xTaskCreate(watchdog_task, "cip_watchdog", 2048, NULL, 6, NULL);
-    xTaskCreate(serve_task, "cip_node", CIP_TASK_STACK, NULL, 5, NULL);
+    xTaskCreate(watchdog_task, "cip_watchdog", CIP_WATCHDOG_STACK, NULL, 6,
+                &s_watchdog_task);
+    xTaskCreate(serve_task, "cip_node", CIP_TASK_STACK, NULL, 5, &s_serve_task);
 }
