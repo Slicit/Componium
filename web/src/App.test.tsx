@@ -280,7 +280,10 @@ describe('driving the room from the studio', () => {
      * chip said out loud: the server's reason was on a title attribute, three
      * seconds of hovering away. A diagnosis that exists and is not where
      * anybody is looking is the same as no diagnosis. */
-    const why = 'wind.main and light.ambient are both CIP at 192.168.1.145:5570';
+    /* A refusal the server can still produce. The one this used to quote was
+     * removed with the rule behind it, and a fixture citing a message nothing
+     * emits any more proves only that the page can render a string. */
+    const why = 'rig: 192.168.1.145:5570 has no instrument "light.ambient"; it announced [wind.main]';
     /* Everything that is not about live still has to work, or the studio
      * cannot even open a film to press the button in. */
     const rest = globalThis.fetch;
@@ -300,7 +303,7 @@ describe('driving the room from the studio', () => {
     }));
     await openFilm();
     fireEvent.click(screen.getByRole('button', { name: /go live/ }));
-    await waitFor(() => expect(screen.getByText(new RegExp('both CIP'))).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(new RegExp('has no instrument'))).toBeTruthy());
     expect(screen.getByRole('alert')).toBeTruthy();
 
     // And it can be put away once it has been read.

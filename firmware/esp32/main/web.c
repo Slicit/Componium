@@ -107,6 +107,21 @@ static esp_err_t ask_for_the_secret(httpd_req_t *req)
 
 /* ------------------------------------------------------------------ page */
 
+/* Literal text, straight out, with no buffer to overflow.
+ *
+ * The page's head and stylesheet are about 1400 characters and used to go
+ * through the formatter below, whose buffer is 512. vsnprintf truncated them
+ * in the middle of the <style> block, so the tag never closed and the browser
+ * read the rest of the document as CSS: a blank page, served perfectly, with
+ * nothing wrong anywhere except a buffer nobody had measured against the thing
+ * being put in it.
+ *
+ * Anything with no format arguments belongs here, which is most of the page. */
+static void put(httpd_req_t *req, const char *text)
+{
+    httpd_resp_send_chunk(req, text, HTTPD_RESP_USE_STRLEN);
+}
+
 static void say(httpd_req_t *req, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
 static void say(httpd_req_t *req, const char *fmt, ...)
@@ -119,9 +134,16 @@ static void say(httpd_req_t *req, const char *fmt, ...)
     va_start(args, fmt);
     int n = vsnprintf(line, sizeof(line), fmt, args);
     va_end(args);
-    if (n > 0) {
-        httpd_resp_send_chunk(req, line, HTTPD_RESP_USE_STRLEN);
+    if (n < 0) {
+        return;
     }
+    if ((size_t)n >= sizeof(line)) {
+        /* Said out loud, because the last time this happened silently it cost
+         * an afternoon: the page was blank and everything else was fine. */
+        ESP_LOGE(TAG, "page fragment truncated at %u of %d bytes; it will be malformed",
+                 (unsigned)sizeof(line) - 1, n);
+    }
+    httpd_resp_send_chunk(req, line, HTTPD_RESP_USE_STRLEN);
 }
 
 static void say_uptime(httpd_req_t *req)
@@ -183,10 +205,10 @@ static esp_err_t page(httpd_req_t *req)
     char ip[16];
     wifi_address(ip, sizeof(ip));
 
-    say(req, "<h1>Componium node</h1>"
+    put(req, "<h1>Componium node</h1>"
              "<p class=\"dim\">Read only. Everything that changes this board changes it over CIP.</p>");
 
-    say(req, "<div class=\"card\"><dl>");
+    put(req, "<div class=\"card\"><dl>");
     say(req, "<dt>firmware</dt><dd>%s</dd>", app ? app->version : "unknown");
     say(req, "<dt>built</dt><dd>%s %s</dd>", app ? app->date : "?", app ? app->time : "");
     say(req, "<dt>address</dt><dd>%s</dd>", ip[0] ? ip : "not on a network");
@@ -208,20 +230,20 @@ static esp_err_t page(httpd_req_t *req)
      * to read: turning traffic away and hearing none look the same otherwise. */
     say(req, "<dt>refused</dt><dd>%u datagrams</dd>", (unsigned)refused);
     if (beat < 0) {
-        say(req, "<dt>heartbeat</dt><dd class=\"dim\">no conductor has spoken yet</dd>");
+        put(req, "<dt>heartbeat</dt><dd class=\"dim\">no conductor has spoken yet</dd>");
     } else {
         say(req, "<dt>heartbeat</dt><dd>%lldms ago</dd>", beat);
     }
-    say(req, "</dl></div>");
+    put(req, "</dl></div>");
 
     status_device_t devices[8];
     int n = node_status_devices(devices, 8);
-    say(req, "<div class=\"card\">");
+    put(req, "<div class=\"card\">");
     if (n == 0) {
         say(req, "<p class=\"dim\">Nothing is attached yet. A freshly flashed board says this; "
                  "the studio's Boards page is where it is told what it has.</p>");
     } else {
-        say(req, "<table><tr><th>#</th><th>id</th><th>kind</th><th>type</th>"
+        put(req, "<table><tr><th>#</th><th>id</th><th>kind</th><th>type</th>"
                  "<th class=\"num\">gpio</th><th>value</th><th class=\"num\">latency</th>"
                  "<th>state</th></tr>");
         for (int i = 0; i < n; i++) {
@@ -239,22 +261,22 @@ static esp_err_t page(httpd_req_t *req)
             }
             say(req, "<td class=\"num\">%.0fms</td>", d->latency_ms);
             if (d->is_safe) {
-                say(req, "<td class=\"safe\">safe</td>");
+                put(req, "<td class=\"safe\">safe</td>");
             } else if (d->hold_ms_left > 0) {
                 say(req, "<td class=\"live\">running, %dms left</td>", d->hold_ms_left);
             } else {
-                say(req, "<td class=\"live\">running</td>");
+                put(req, "<td class=\"live\">running</td>");
             }
-            say(req, "</tr>");
+            put(req, "</tr>");
         }
-        say(req, "</table>");
+        put(req, "</table>");
     }
-    say(req, "</div>");
+    put(req, "</div>");
 
-    say(req, "<p class=\"dim\">Refreshes every three seconds. The secret you typed is the one "
+    put(req, "<p class=\"dim\">Refreshes every three seconds. The secret you typed is the one "
              "that authorises configuration over CIP, and Basic auth sends it in clear text, "
              "so this page belongs on a network you trust.</p>");
-    say(req, "</body></html>");
+    put(req, "</body></html>");
     httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }

@@ -122,24 +122,38 @@ func TestARigThatWouldNotLoadIsNotWritten(t *testing.T) {
 	}
 }
 
-func TestTwoCipEntriesOnOneBoardAreRefusedAtSaveTime(t *testing.T) {
-	/* The obvious first move when you have one board and two effects, and the
-	 * studio used to let it be saved: nothing noticed until arming, because
-	 * the collision only exists once the manifests come back from the device.
-	 * It is visible in the file, though. Two entries, one address. */
-	bad := &Config{Instruments: []InstConfig{
+func TestTwoCipEntriesOnOneBoardAreOrdinary(t *testing.T) {
+	/* This was refused until ADR 0007, when one node was one instrument. It is
+	 * now the ordinary way to use a board: a fan and a strip on the same ESP32,
+	 * two entries, one address, addressed by name.
+	 *
+	 * The refusal outlived the reason for it by two protocol versions, so the
+	 * studio would not save the arrangement the firmware had just been rewritten
+	 * to carry. */
+	ok := &Config{Instruments: []InstConfig{
 		{ID: "wind.main", Kind: "wind", Driver: "cip", Addr: "192.168.1.145:5570"},
 		{ID: "light.ambient", Kind: "light", Driver: "cip", Addr: "192.168.1.145:5570"},
 	}}
-	problems := bad.Validate()
-	if len(problems) != 1 {
-		t.Fatalf("problems: %v", problems)
+	if problems := ok.Validate(); len(problems) != 0 {
+		t.Fatalf("refused two devices on one board: %v", problems)
 	}
-	said := problems[0]
-	for _, want := range []string{"wind.main", "light.ambient", "one node is one", "sACN"} {
-		if !strings.Contains(said, want) {
-			t.Errorf("did not mention %q: %s", want, said)
-		}
+}
+
+func TestTwoEntriesWithOneNameAreStillRefused(t *testing.T) {
+	/* What the address rule was really protecting against, and the part that is
+	 * still true: a board addresses its devices by name, so two entries called
+	 * the same thing are a score addressing one of them with nobody able to say
+	 * which. */
+	bad := &Config{Instruments: []InstConfig{
+		{ID: "wind.main", Kind: "wind", Driver: "cip", Addr: "192.168.1.145:5570"},
+		{ID: "wind.main", Kind: "wind", Driver: "cip", Addr: "192.168.1.145:5570"},
+	}}
+	problems := bad.Validate()
+	if len(problems) == 0 {
+		t.Fatal("accepted two entries with one name")
+	}
+	if !strings.Contains(problems[0], "named twice") {
+		t.Errorf("said %q", problems[0])
 	}
 }
 
