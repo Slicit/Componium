@@ -79,10 +79,79 @@ function blank(kind: string, drivers: string[]): Device {
   }, driver);
 }
 
+/* An address, chosen from the boards this installation has.
+ *
+ * A select rather than a text field because an IP is the one thing about a
+ * board nobody remembers and the one thing that changes underneath them: DHCP
+ * moves it and every rig entry pointing at it is quietly wrong, with no symptom
+ * except a cue that does not arrive.
+ *
+ * Typing one stays possible. The first board is reached before there is a list
+ * to pick from, and somebody debugging wants to point at a thing that is not on
+ * any list. An address that matches no board selects that option on its own, so
+ * a rig written before any of this still shows what it says.
+ */
+export function BoardPicker({ boards, value, disabled, label, onChange }: {
+  boards: { name: string; addr: string }[];
+  value: string;
+  disabled: boolean;
+  label: string;
+  onChange: (addr: string) => void;
+}) {
+  const known = boards.some((b) => b.addr === value);
+  const [typing, setTyping] = useState(!known && value !== '');
+
+  if (boards.length === 0) {
+    return (
+      <input
+        type="text" value={value} disabled={disabled}
+        placeholder="192.168.1.90:5570"
+        aria-label={label + ' address'}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+
+  return (
+    <span className="adm-picker">
+      <select
+        value={typing || (!known && value !== '') ? '' : value}
+        disabled={disabled}
+        aria-label={label + ' board'}
+        onChange={(e) => {
+          if (e.target.value === '') {
+            setTyping(true);
+            return;
+          }
+          setTyping(false);
+          onChange(e.target.value);
+        }}
+      >
+        <option value="">an address not on the list</option>
+        {boards.map((b) => (
+          <option key={b.name} value={b.addr}>{b.name} &middot; {b.addr}</option>
+        ))}
+      </select>
+      {(typing || (!known && value !== '')) && (
+        <input
+          type="text" value={value} disabled={disabled}
+          placeholder="192.168.1.90:5570"
+          aria-label={label + ' address'}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
+    </span>
+  );
+}
+
 export function Devices() {
   const [rig, setRig] = useState<Rig | null>(null);
   const [options, setOptions] = useState<Options | null>(null);
   const [shelf, setShelf] = useState<Shelf | null>(null);
+  /* The boards this installation has, so a CIP instrument can be pointed at one
+   * by name. Empty is normal: an installation with no boards attached yet, and
+   * then the address is typed the way it always was. */
+  const [boards, setBoards] = useState<{ name: string; addr: string }[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [name, setName] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -109,6 +178,17 @@ export function Devices() {
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    let live = true;
+    fetch('/api/boards')
+      .then((r) => (r.ok ? r.json() : { boards: [] }))
+      .then((got: { boards?: { name: string; addr: string }[] }) => {
+        if (live) setBoards(got.boards ?? []);
+      })
+      .catch(() => { /* The page still works; the address stays typed. */ });
+    return () => { live = false; };
+  }, []);
 
   const change = (i: number, patch: Partial<Device>) => {
     setDevices((was) => was.map((d, n) => {
@@ -280,11 +360,12 @@ export function Devices() {
                       </td>
                       <td>
                         {wantsAddress(d.driver) && (
-                          <input
-                            type="text" value={d.addr ?? ''} disabled={!editable}
-                            placeholder="192.168.1.90:5570"
-                            aria-label={'Instrument ' + (i + 1) + ' address'}
-                            onChange={(e) => change(i, { addr: e.target.value })}
+                          <BoardPicker
+                            boards={boards}
+                            value={d.addr ?? ''}
+                            disabled={!editable}
+                            label={'Instrument ' + (i + 1)}
+                            onChange={(addr) => change(i, { addr })}
                           />
                         )}
                         {wantsUniverse(d.driver) && (

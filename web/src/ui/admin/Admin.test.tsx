@@ -46,6 +46,13 @@ const options = {
   editable: true,
 };
 
+/* The boards this installation has, as /api/boards really answers.
+ *
+ * Empty by default, because most of these tests are not about boards and an
+ * installation with none is the ordinary starting state. The picker falls back
+ * to a typed address then, which is what the older tests below assert. */
+let attached: { name: string; addr: string; hasSecret: boolean }[] = [];
+
 /** Every rig PUT the page made. */
 const saves: unknown[] = [];
 
@@ -68,7 +75,11 @@ beforeEach(() => {
   saves.length = 0;
   chosen.length = 0;
   shelf.current = 'bench.toml';
+  attached = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith('/api/boards')) {
+      return { ok: true, json: async () => ({ editable: true, boards: attached }) } as Response;
+    }
     if (url.startsWith('/api/rigs')) {
       if (init?.method === 'POST') {
         const want = JSON.parse(init.body as string).rig;
@@ -191,6 +202,73 @@ describe('devices', () => {
     expect(screen.getByLabelText('Instrument 4 id')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Remove fog.left' }));
     expect(screen.queryByLabelText('Instrument 4 id')).toBeNull();
+  });
+
+  it('offers the boards this installation has, instead of asking for an IP', async () => {
+    /* An address is the one thing about a board nobody remembers and the one
+     * thing that moves on its own: DHCP changes it and every entry pointing at
+     * it is quietly wrong, with no symptom but a cue that never lands. */
+    attached = [
+      { name: 'cinema', addr: '192.168.1.99:5570', hasSecret: true },
+      { name: 'bench', addr: '192.168.1.145:5570', hasSecret: true },
+    ];
+    await devices();
+    await waitFor(() => expect(screen.getByLabelText('Instrument 2 board')).toBeTruthy());
+
+    const picker = screen.getByLabelText('Instrument 2 board');
+    const offered = [...picker.querySelectorAll('option')].map((o) => o.value);
+    expect(offered).toContain('192.168.1.99:5570');
+    expect(offered).toContain('192.168.1.145:5570');
+
+    fireEvent.change(picker, { target: { value: '192.168.1.99:5570' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save the rig' }));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    const sent = saves[0] as { instruments: { id: string; addr?: string }[] };
+    expect(sent.instruments.find((x) => x.id === 'wind.main')?.addr)
+      .toBe('192.168.1.99:5570');
+  });
+
+  it('still lets an address be typed when it is not a board on the list', async () => {
+    /* The first board is reached before there is a list to pick from, and
+     * somebody debugging wants to point at something that is on no list. */
+    attached = [{ name: 'cinema', addr: '192.168.1.99:5570', hasSecret: true }];
+    await devices();
+    await waitFor(() => expect(screen.getByLabelText('Instrument 2 board')).toBeTruthy());
+
+    // The rig's own address is not one of the boards, so the free field shows
+    // it rather than the page silently pointing the entry somewhere else.
+    expect(value('Instrument 2 address')).toBe('192.168.1.91:5570');
+
+    fireEvent.change(screen.getByLabelText('Instrument 2 address'),
+      { target: { value: '10.0.0.5:5570' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save the rig' }));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    const sent = saves[0] as { instruments: { id: string; addr?: string }[] };
+    expect(sent.instruments.find((x) => x.id === 'wind.main')?.addr).toBe('10.0.0.5:5570');
+  });
+
+  it('lets two instruments point at one board', async () => {
+    /* One ESP32 carrying a fan and a strip is what ADR 0007 exists for, and the
+     * page must not be the thing that refuses it: the rule that used to, that
+     * one node was one instrument, outlived its protocol by two versions. */
+    attached = [{ name: 'cinema', addr: '192.168.1.99:5570', hasSecret: true }];
+    await devices();
+    await waitFor(() => expect(screen.getByLabelText('Instrument 2 board')).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText('Instrument 2 board'),
+      { target: { value: '192.168.1.99:5570' } });
+    // The third is virtual to begin with; make it a second CIP entry on the
+    // same board, which is a fan and a strip on one ESP32.
+    fireEvent.change(screen.getByLabelText('Instrument 3 driver'), { target: { value: 'cip' } });
+    await waitFor(() => expect(screen.getByLabelText('Instrument 3 board')).toBeTruthy());
+    fireEvent.change(screen.getByLabelText('Instrument 3 board'),
+      { target: { value: '192.168.1.99:5570' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save the rig' }));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    const sent = saves[0] as { instruments: { id: string; addr?: string; driver: string }[] };
+    const onIt = sent.instruments.filter((x) => x.addr === '192.168.1.99:5570');
+    expect(onIt).toHaveLength(2);
   });
 
   it('will not save until something changed', async () => {

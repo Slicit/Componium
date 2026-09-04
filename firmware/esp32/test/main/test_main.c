@@ -273,6 +273,8 @@ static void device_types_are_the_three_this_build_has(void)
     TEST_ASSERT_EQUAL_INT(DEV_NONE, device_type_of(NULL));
 }
 
+void register_roundtrip_tests(void);
+
 void app_main(void)
 {
     UNITY_BEGIN();
@@ -306,6 +308,9 @@ void app_main(void)
     RUN_TEST(the_pins_that_would_stop_the_board_are_refused);
     RUN_TEST(the_pins_the_bench_actually_uses_are_allowed);
     RUN_TEST(device_types_are_the_three_this_build_has);
+
+    /* What the board is told, stores, and says back. */
+    register_roundtrip_tests();
 
     UNITY_END();
 

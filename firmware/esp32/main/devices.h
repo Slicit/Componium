@@ -72,6 +72,18 @@ typedef struct {
     led_strip_handle_t strip;
 } device_t;
 
+/** The name a configuration uses for a type, and that a node announces. */
+const char *device_type_name(device_type_t t);
+
+/**
+ * One device, as the JSON a node announces for it.
+ *
+ * Everything a configuration can set is in here, which is the property that
+ * matters: a field a board stores and does not announce reads back as empty,
+ * and the next write clears it.
+ */
+struct cJSON *device_announcement(const device_t *d, int index);
+
 /** Why a pin cannot be used, or NULL when it can. */
 const char *device_pin_problem(int gpio);
 

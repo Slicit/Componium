@@ -141,10 +141,6 @@ static SemaphoreHandle_t s_lock;
 static TaskHandle_t s_serve_task;
 static TaskHandle_t s_watchdog_task;
 
-/* Declared here because send_hello needs it and it is defined with the status
- * accessors, which are about the same question: what is attached to this. */
-static const char *type_name(device_type_t t);
-
 static void lock(void)   { xSemaphoreTake(s_lock, portMAX_DELAY); }
 static void unlock(void) { xSemaphoreGive(s_lock); }
 
@@ -305,66 +301,10 @@ static void send_hello(int sock, struct sockaddr_in *to)
     cJSON *list = cJSON_CreateArray();
     lock();
     for (int i = 0; i < s_device_count; i++) {
-        const device_t *d = &s_devices[i];
-        cJSON *in = cJSON_CreateObject();
-        cJSON_AddNumberToObject(in, "index", i);
-        cJSON_AddStringToObject(in, "id", d->id);
-        cJSON_AddStringToObject(in, "kind", d->kind);
-        cJSON_AddNumberToObject(in, "latency_ms", d->latency_ms);
-
-        /* How it is wired. Announced because this board is the only thing that
-         * knows: a studio without these has to invent a pin, and an invented
-         * pin is indistinguishable from a board that lost its configuration.
-         *
-         * The same argument ADR 0002 makes for latency, applied to the rest of
-         * the physical facts. */
-        cJSON_AddStringToObject(in, "type", type_name(d->type));
-        cJSON_AddNumberToObject(in, "gpio", d->gpio);
-        /* The value this output falls back to, as a plain number and not only
-         * inside safe_state. A fogger set to fail closed has to read back as
-         * one, or the next write turns it into a fogger that fails open. */
-        cJSON_AddNumberToObject(in, "safe", d->safe);
-        if (d->order[0]) {
-            cJSON_AddStringToObject(in, "order", d->order);
+        cJSON *in = device_announcement(&s_devices[i], i);
+        if (in) {
+            cJSON_AddItemToArray(list, in);
         }
-        switch (d->type) {
-        case DEV_PWM:
-            cJSON_AddNumberToObject(in, "freq_hz", d->freq_hz);
-            break;
-        case DEV_WS28XX:
-            cJSON_AddNumberToObject(in, "pixels", d->pixels);
-            break;
-        case DEV_RELAY:
-            cJSON_AddStringToObject(in, "active", d->active_high ? "high" : "low");
-            break;
-        default:
-            break;
-        }
-        if (d->ramp_up_ms > 0) {
-            cJSON_AddNumberToObject(in, "ramp_up_ms", d->ramp_up_ms);
-        }
-        if (d->ramp_down_ms > 0) {
-            cJSON_AddNumberToObject(in, "ramp_down_ms", d->ramp_down_ms);
-        }
-
-        cJSON *safe = cJSON_CreateObject();
-        cJSON *channels = cJSON_CreateArray();
-        static const char *rgb[3] = {"r", "g", "b"};
-        for (int c = 0; c < d->channels; c++) {
-            const char *name = (d->channels == 3) ? rgb[c] : "intensity";
-            cJSON_AddNumberToObject(safe, name, (d->channels == 3) ? 0 : d->safe);
-            cJSON *ch = cJSON_CreateObject();
-            cJSON_AddStringToObject(ch, "name", name);
-            cJSON_AddStringToObject(ch, "unit", "normalised");
-            cJSON *range = cJSON_CreateArray();
-            cJSON_AddItemToArray(range, cJSON_CreateNumber(0));
-            cJSON_AddItemToArray(range, cJSON_CreateNumber(1));
-            cJSON_AddItemToObject(ch, "range", range);
-            cJSON_AddItemToArray(channels, ch);
-        }
-        cJSON_AddItemToObject(in, "safe_state", safe);
-        cJSON_AddItemToObject(in, "channels", channels);
-        cJSON_AddItemToArray(list, in);
     }
     unlock();
     cJSON_AddItemToObject(root, "instruments", list);
@@ -741,16 +681,6 @@ static int auth_unwrap(uint8_t *buf, int len)
 
 /* ---------------------------------------------------------------- status */
 
-static const char *type_name(device_type_t t)
-{
-    switch (t) {
-    case DEV_PWM:    return "pwm";
-    case DEV_WS28XX: return "ws28xx";
-    case DEV_RELAY:  return "relay";
-    default:         return "none";
-    }
-}
-
 int node_status_devices(status_device_t *out, int max)
 {
     if (!out || max <= 0 || !s_lock) {
@@ -765,7 +695,7 @@ int node_status_devices(status_device_t *out, int max)
         o->index = i;
         strlcpy(o->id, d->id, sizeof(o->id));
         strlcpy(o->kind, d->kind, sizeof(o->kind));
-        o->type = type_name(d->type);
+        o->type = device_type_name(d->type);
         o->gpio = d->gpio;
         o->channels = d->channels;
         for (int c = 0; c < 3; c++) {

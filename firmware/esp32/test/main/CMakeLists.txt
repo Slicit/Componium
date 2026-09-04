@@ -6,6 +6,7 @@
 # chip would prove things about the stub.
 idf_component_register(
     SRCS "test_main.c"
+         "test_roundtrip.c"
          "../../main/guard.c"
          "../../main/config.c"
          "../../main/devices.c"

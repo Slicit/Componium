@@ -28,8 +28,12 @@ type wireDevice struct {
 	GPIO int    `json:"gpio"`
 	Kind string `json:"kind"`
 
-	FreqHz int    `json:"freqHz,omitempty"`
-	Pixels int    `json:"pixels,omitempty"`
+	FreqHz int `json:"freqHz,omitempty"`
+	Pixels int `json:"pixels,omitempty"`
+	// Colour order for a strip. The board has announced it since this
+	// morning and the form could not set it, so a fetched configuration
+	// could show one and saving the same table would drop it.
+	Order  string `json:"order,omitempty"`
 	Active string `json:"active,omitempty"`
 
 	LatencyMS  float64 `json:"latencyMs,omitempty"`
@@ -41,7 +45,7 @@ type wireDevice struct {
 func (w wireDevice) toCIP() cip.Device {
 	return cip.Device{
 		ID: w.ID, Type: w.Type, GPIO: w.GPIO, Kind: w.Kind,
-		FreqHz: w.FreqHz, Pixels: w.Pixels, Active: w.Active,
+		FreqHz: w.FreqHz, Pixels: w.Pixels, Active: w.Active, Order: w.Order,
 		LatencyMS: w.LatencyMS, RampUpMS: w.RampUpMS,
 		RampDownMS: w.RampDownMS, Safe: w.Safe,
 	}
