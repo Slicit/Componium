@@ -131,3 +131,44 @@ class TestSourceSurvivesRendering(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CueTracksDeclareTheirColourSpace(unittest.TestCase):
+    """Flashes are written in hue, and every light driver reads red.
+
+    The conversion between them is turned on by the track saying which space it
+    is in. Curves said so and cues did not, so every flash reached its fixture
+    carrying three parameters no driver reads and none of the three it does. The
+    light stayed dark and the cue was acknowledged, counted and logged.
+    """
+
+    def test_a_flash_track_says_it_is_hsi(self):
+        track = compose._cue_track("light.event", [
+            {"t": "00:00:47.708", "action": "flash", "duration": "200ms",
+             "params": {"h": 0.2178, "s": 0.3624, "i": 1.0}},
+        ])
+        self.assertEqual("hsi", track.get("space"))
+
+    def test_an_rgb_track_says_so_too(self):
+        track = compose._cue_track("light.ambient", [
+            {"t": "00:00:12.100", "action": "flash",
+             "params": {"r": 1.0, "g": 1.0, "b": 1.0}},
+        ])
+        self.assertEqual("rgb", track.get("space"))
+
+    def test_a_track_that_is_not_a_colour_declares_nothing(self):
+        # A gust is an intensity and a spray is an output. Neither is a colour,
+        # and claiming a space for them would be a lie the reader acts on.
+        track = compose._cue_track("wind.main", [
+            {"t": "00:00:10.000", "action": "gust", "params": {"intensity": 0.8}},
+        ])
+        self.assertIsNone(track.get("space"))
+
+    def test_the_space_survives_being_written_out(self):
+        # The declaration is only worth anything if it reaches the file.
+        track = compose._cue_track("light.event", [
+            {"t": 1.0, "action": "flash", "duration": 0.2,
+             "params": {"h": 0.5, "s": 1.0, "i": 1.0}},
+        ])
+        text = compose.render({"title": "t", "duration": 1.0, "fps": 24.0}, [track])
+        self.assertIn('space = "hsi"', text)

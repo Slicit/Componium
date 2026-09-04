@@ -109,9 +109,24 @@ func lerpHSI(a, b map[string]float64, f float64) map[string]float64 {
 
 // resolve adds the red, green and blue a fixture needs, for a track authored
 // as hue and saturation. An RGB track is returned untouched.
+//
+// A track that says nothing about its space is examined rather than assumed.
+// The composer wrote flash cues in hue, saturation and intensity and declared
+// no space for years, so every flash reached its fixture carrying three
+// parameters no driver reads and none of the three it does: the light stayed
+// dark and everything reported success.
+//
+// Safe because colour.Resolve leaves parameters that are not HSI exactly as
+// they are, so the only tracks this touches are the ones that were already
+// unreadable. A track that declares rgb is still taken at its word: an explicit
+// declaration is a statement about intent, and this repairs its absence rather
+// than overriding it.
 func resolve(t Track, v map[string]float64) map[string]float64 {
-	if t.Space != HSI {
-		return v
+	if t.Space == HSI {
+		return colour.Resolve(v)
 	}
-	return colour.Resolve(v)
+	if t.Space == "" && colour.IsHSI(v) {
+		return colour.Resolve(v)
+	}
+	return v
 }

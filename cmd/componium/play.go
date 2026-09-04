@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"time"
 
+	"github.com/Slicit/componium/internal/boards"
 	"github.com/Slicit/componium/internal/clock"
 	"github.com/Slicit/componium/internal/conductor"
 	"github.com/Slicit/componium/internal/instrument"
@@ -37,6 +38,8 @@ func playCmd(args []string) error {
 	fs := flag.NewFlagSet("play", flag.ExitOnError)
 	scorePath := fs.String("score", "", "score file (required)")
 	rigPath := fs.String("rig", "", "rig file, or a directory of them; a directory plays whichever the studio chose (required)")
+	boardsPath := fs.String("boards", os.Getenv("COMPONIUM_BOARDS"),
+		"file naming the boards and their secrets, for rig entries that carry none")
 	socket := fs.String("socket", "/tmp/mpv.sock", "mpv IPC socket path")
 	poll := fs.Duration("poll", show.DefaultPollInterval, "player polling interval")
 	curveRate := fs.Duration("curve-rate", 20*time.Millisecond, "how often to send curve values")
@@ -50,6 +53,15 @@ func playCmd(args []string) error {
 	rc, err := rig.Load(*rigPath)
 	if err != nil {
 		return err
+	}
+	// Where a secret comes from when the rig entry has none. A rig is a file
+	// you commit, so the secret lives beside the board list instead, and the
+	// conductor needs it as much as the studio does: without it this dials
+	// unauthenticated and a board that has a secret ignores it entirely.
+	if shelf, err := boards.Open(*boardsPath); err == nil {
+		rc.UseSecrets(shelf.SecretFor)
+	} else {
+		fmt.Fprintf(os.Stderr, "boards: %v\n", err)
 	}
 	built, err := rc.Build()
 	if err != nil {

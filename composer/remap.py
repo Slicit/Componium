@@ -228,6 +228,13 @@ def dump(score: dict) -> str:
         lines.append('type = %s' % _quote(kind))
 
         if kind == "cue":
+            # The colour space, for cues as well as curves. A chunked analysis
+            # reads and writes every score it merges, so anything this branch
+            # drops is lost on exactly the films long enough to be chunked, and
+            # a flash track without its space reaches the fixture with no
+            # channel any driver reads.
+            if track.get("space"):
+                lines.append('space = %s' % _quote(track["space"]))
             lines.append("cues = [")
             for cue in track.get("cues") or []:
                 params = ", ".join("%s = %s" % (k, _num(v))

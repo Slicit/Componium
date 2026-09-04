@@ -101,6 +101,7 @@ services:
         exec componium play \
           -score /scores/demo.componium \
           -rig /rigs \
+          -boards /state/boards.toml \
           -socket /run/componium/mpv.sock
     volumes:
       - ipc:/run/componium:ro
@@ -109,6 +110,8 @@ services:
       # whichever rig was picked in the studio without either of them having
       # been told anything.
       - ${COMPONIUM_RIGS:-./rigs}:/rigs:ro
+      # The board list, for the secrets a rig deliberately does not carry.
+      - ${COMPONIUM_STATE:-~/.componium}:/state:ro
     depends_on:
       player:
         condition: service_started

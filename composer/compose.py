@@ -294,7 +294,16 @@ def render(meta, tracks, calm=()) -> str:
     for tr in tracks:
         lines += ["", "[[track]]", f'instrument = "{tr["instrument"]}"']
         if tr.get("type") == "cue":
-            lines += ['type = "cue"', "cues = ["]
+            lines += ['type = "cue"']
+            # Which space the parameters are in. Written for cues as well as
+            # curves: flashes are authored in hue and every light driver reads
+            # red, and the conversion between them is what this turns on. A cue
+            # track that did not say reached its fixture with no channel any
+            # driver reads, and the light stayed dark while the cue was
+            # acknowledged, counted and logged as delivered.
+            if tr.get("space"):
+                lines.append(f'space = "{tr["space"]}"')
+            lines.append("cues = [")
             for cue in tr["cues"]:
                 params = ", ".join(f"{k} = {v:.4f}" for k, v in cue["params"].items())
                 row = f'  {{ t = "{timecode(cue["t"])}", action = "{cue["action"]}"'
@@ -348,7 +357,33 @@ def _calm_sections(calm):
 
 
 def _cue_track(instrument, cues):
-    return {"instrument": instrument, "type": "cue", "cues": cues}
+    track = {"instrument": instrument, "type": "cue", "cues": cues}
+    # Which space the parameters are in, the way a curve track already says.
+    # Flashes are written as hue, saturation and intensity, and a cue track
+    # that did not say so reached its fixture with no channel any driver
+    # reads: the conversion to red, green and blue is what the declaration
+    # turns on, and the light stayed dark while everything reported success.
+    space = _space_of(cues)
+    if space:
+        track["space"] = space
+    return track
+
+
+def _space_of(cues):
+    """The colour space a set of cues is written in, or None.
+
+    Read from the parameters rather than passed in, because the caller that
+    knows how a cue was built is not always the caller that emits the track,
+    and a declaration that has to be remembered separately is one that will be
+    forgotten. It already was.
+    """
+    for cue in cues:
+        params = cue.get("params") or {}
+        if any(k in params for k in ("h", "s", "i")):
+            return "hsi"
+        if any(k in params for k in ("r", "g", "b")):
+            return "rgb"
+    return None
 
 
 def _curve_track(instrument, points, space=None):
