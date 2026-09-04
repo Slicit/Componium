@@ -1,6 +1,6 @@
-idf_component_register(SRCS "componium_node.c" "app_main.c" "wifi.c" "improv.c" "led.c" "sacn.c" "devices.c" "config.c" "guard.c"
+idf_component_register(SRCS "componium_node.c" "app_main.c" "wifi.c" "improv.c" "led.c" "sacn.c" "devices.c" "config.c" "guard.c" "web.c"
                        INCLUDE_DIRS "."
-                       REQUIRES driver esp_timer json lwip mbedtls esp_wifi esp_netif nvs_flash esp_event app_update)
+                       REQUIRES driver esp_timer json lwip mbedtls esp_wifi esp_netif nvs_flash esp_event app_update esp_http_server)
 
 # The shared secret comes from the environment, so that building a real board
 # does not mean editing a tracked file:

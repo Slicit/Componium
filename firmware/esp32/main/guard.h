@@ -53,4 +53,20 @@ float unit_value(double v);
 /* An integer from outside, held between two bounds it must not leave. */
 int bounded_int(double v, int lo, int hi, int fallback);
 
+/*
+ * Whether two strings are the same, in time that does not depend on how much of
+ * them is.
+ *
+ * The ordinary comparison returns at the first byte that differs, so a guess
+ * with the right first character takes measurably longer to refuse than one
+ * without. Over a LAN that is enough to recover a secret one byte at a time,
+ * which turns guessing it from impossible into an afternoon.
+ *
+ * Here rather than beside the secret it compares, so that it can be tested:
+ * what this returns is checkable, and the constant time part is a property of
+ * the code that has to be read. Neither is true of a comparison buried in a
+ * translation unit that needs a radio to link.
+ */
+bool constant_time_equal(const char *a, const char *b);
+
 #endif

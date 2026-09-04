@@ -1,6 +1,7 @@
 #include "guard.h"
 
 #include <math.h>
+#include <string.h>
 
 bool json_shallow_enough(const char *text, int len, int max_depth)
 {
@@ -61,6 +62,25 @@ float unit_value(double v)
         return 1.0f;
     }
     return (float)v;
+}
+
+bool constant_time_equal(const char *a, const char *b)
+{
+    if (!a || !b) {
+        return false;
+    }
+    size_t na = strlen(a);
+    size_t nb = strlen(b);
+    /* The length folded into the difference rather than returned on, so that a
+     * wrong length costs the same as a wrong byte. The loop runs over a either
+     * way, so its duration depends on the secret and not on the guess. */
+    unsigned char diff = (unsigned char)((na ^ nb) != 0);
+    for (size_t i = 0; i < na; i++) {
+        unsigned char x = (unsigned char)a[i];
+        unsigned char y = (i < nb) ? (unsigned char)b[i] : 0;
+        diff |= (unsigned char)(x ^ y);
+    }
+    return diff == 0;
 }
 
 int bounded_int(double v, int lo, int hi, int fallback)

@@ -36,6 +36,7 @@
 #include "freertos/semphr.h"
 #include "config.h"
 #include "guard.h"
+#include "status.h"
 #include "devices.h"
 
 #define CIP_PORT          5570
@@ -94,6 +95,13 @@ static const char *TAG = "componium";
 
 static volatile int64_t  s_last_heartbeat_us = 0;
 static volatile uint64_t s_highest_counter = 0;
+
+/* Since boot. Refused is the one that was missing: without it, a board that is
+ * turning traffic away and a board that is not hearing any look identical from
+ * the outside, and telling them apart took a packet capture. */
+static volatile uint32_t s_cues;
+static volatile uint32_t s_curves;
+static volatile uint32_t s_refused;
 
 /* What is attached, from this board's own configuration. Every one of them
  * carries its own value, its own span and its own safe state: a hold expiring
@@ -375,6 +383,7 @@ static bool handle_curve(const uint8_t *buf, int len)
         }
         d->is_safe = false;
         device_apply(d);
+        s_curves++;
         unlock();
         return true;
     }
@@ -408,6 +417,7 @@ static bool handle_curve(const uint8_t *buf, int len)
             }
             d->is_safe = false;
             device_apply(d);
+            s_curves++;
         }
         at += 4 * channels;
     }
@@ -423,6 +433,7 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
      * overflow once the parser is inside it. */
     if (!json_shallow_enough(text, len, JSON_MAX_DEPTH)) {
         ESP_LOGW(TAG, "refusing a document nested deeper than %d", JSON_MAX_DEPTH);
+        s_refused++;
         return;
     }
     cJSON *root = cJSON_ParseWithLength(text, len);
@@ -445,6 +456,7 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
         if (cJSON_IsNumber(counter)) {
             uint64_t n = (uint64_t)counter->valuedouble;
             if (n != 0 && n <= s_highest_counter) {
+                s_refused++;
                 cJSON_Delete(root);
                 return;
             }
@@ -504,6 +516,7 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
         }
         d->is_safe = false;
         device_apply(d);
+        s_cues++;
         unlock();
 
         if (cJSON_IsNumber(seq)) {
@@ -664,6 +677,91 @@ static int auth_unwrap(uint8_t *buf, int len)
     return len - CIP_TAG_LEN;
 }
 
+/* ---------------------------------------------------------------- status */
+
+static const char *type_name(device_type_t t)
+{
+    switch (t) {
+    case DEV_PWM:    return "pwm";
+    case DEV_WS28XX: return "ws28xx";
+    case DEV_RELAY:  return "relay";
+    default:         return "none";
+    }
+}
+
+int node_status_devices(status_device_t *out, int max)
+{
+    if (!out || max <= 0 || !s_lock) {
+        return 0;
+    }
+    int64_t now = esp_timer_get_time();
+    int n = 0;
+    lock();
+    for (int i = 0; i < s_device_count && n < max; i++) {
+        const device_t *d = &s_devices[i];
+        status_device_t *o = &out[n++];
+        o->index = i;
+        strlcpy(o->id, d->id, sizeof(o->id));
+        strlcpy(o->kind, d->kind, sizeof(o->kind));
+        o->type = type_name(d->type);
+        o->gpio = d->gpio;
+        o->channels = d->channels;
+        for (int c = 0; c < 3; c++) {
+            o->value[c] = (c < d->channels) ? d->value[c] : 0.0f;
+        }
+        o->is_safe = d->is_safe;
+        o->latency_ms = d->latency_ms;
+        o->hold_ms_left = (d->hold_until_us > now)
+                              ? (int)((d->hold_until_us - now) / 1000)
+                              : 0;
+    }
+    unlock();
+    return n;
+}
+
+void node_status_counters(uint32_t *cues, uint32_t *curves, uint32_t *refused,
+                          int64_t *since_heartbeat_ms)
+{
+    if (cues)    *cues = s_cues;
+    if (curves)  *curves = s_curves;
+    if (refused) *refused = s_refused;
+    if (since_heartbeat_ms) {
+        *since_heartbeat_ms = s_last_heartbeat_us
+                                  ? (esp_timer_get_time() - s_last_heartbeat_us) / 1000
+                                  : -1;
+    }
+}
+
+void node_status_stacks(unsigned *serve, unsigned *watchdog)
+{
+    if (serve) {
+        *serve = s_serve_task ? (unsigned)uxTaskGetStackHighWaterMark(s_serve_task) : 0;
+    }
+    if (watchdog) {
+        *watchdog = s_watchdog_task
+                        ? (unsigned)uxTaskGetStackHighWaterMark(s_watchdog_task)
+                        : 0;
+    }
+}
+
+bool node_secret_required(void)
+{
+    return sizeof(CIP_SECRET) > 1;
+}
+
+bool node_secret_matches(const char *candidate)
+{
+    if (sizeof(CIP_SECRET) <= 1) {
+        return false;   /* nothing to match, and nothing to unlock */
+    }
+    if (!candidate) {
+        return false;
+    }
+    /* The comparison lives in guard.c so that it can be tested; the secret
+     * itself never leaves this file. */
+    return constant_time_equal(CIP_SECRET, candidate);
+}
+
 /* ------------------------------------------------------------------ main */
 
 /* Come up, safely, before anything asks what is attached.
@@ -714,6 +812,7 @@ static void serve_forever(void)
         }
         len = auth_unwrap(buf, len);
         if (len < 0) {
+            s_refused++;
             /* Dropped in silence. Logging every rejected datagram would let
              * anyone on the network fill the log by spraying rubbish at us. */
             continue;

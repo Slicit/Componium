@@ -15,6 +15,7 @@
 #include "wifi.h"
 #include "improv.h"
 #include "sacn.h"
+#include "web.h"
 
 static const char *TAG = "componium";
 
@@ -74,6 +75,11 @@ void app_main(void)
      * network because it binds a socket. It asks the node what it has, which
      * is why the node was brought up above and not here. */
     sacn_start();
+
+    /* The board's own page, after the network and only on a board with a secret
+     * to lock it with. Read only: everything that changes this device changes it
+     * over CIP, where a message is signed and counted. */
+    web_start();
 
     componium_node_serve();
 

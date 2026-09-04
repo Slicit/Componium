@@ -107,6 +107,32 @@ static void bounded_int_holds_its_bounds(void)
     TEST_ASSERT_EQUAL_INT(60, bounded_int(60, 1, 300, 30));
 }
 
+/* --------------------------------------------------------- the secret */
+
+static void the_secret_matches_only_itself(void)
+{
+    TEST_ASSERT_TRUE(constant_time_equal("GC1u0SRD", "GC1u0SRD"));
+    TEST_ASSERT_FALSE(constant_time_equal("GC1u0SRD", "GC1u0SRE"));
+    TEST_ASSERT_FALSE(constant_time_equal("GC1u0SRD", ""));
+    TEST_ASSERT_FALSE(constant_time_equal("", "GC1u0SRD"));
+    TEST_ASSERT_TRUE(constant_time_equal("", ""));
+}
+
+static void a_prefix_of_the_secret_is_not_the_secret(void)
+{
+    /* The case a length check placed before the loop would get right and a
+     * comparison that stopped at the first difference would leak. */
+    TEST_ASSERT_FALSE(constant_time_equal("correct horse", "correct"));
+    TEST_ASSERT_FALSE(constant_time_equal("correct", "correct horse"));
+}
+
+static void a_null_is_never_the_secret(void)
+{
+    TEST_ASSERT_FALSE(constant_time_equal("secret", NULL));
+    TEST_ASSERT_FALSE(constant_time_equal(NULL, "secret"));
+    TEST_ASSERT_FALSE(constant_time_equal(NULL, NULL));
+}
+
 /* ------------------------------------------------------- the configuration */
 
 static device_t parsed[DEVICE_MAX];
@@ -260,6 +286,10 @@ void app_main(void)
     RUN_TEST(nan_becomes_dark_and_still);
     RUN_TEST(infinities_and_wild_numbers_are_held_in_range);
     RUN_TEST(bounded_int_holds_its_bounds);
+
+    RUN_TEST(the_secret_matches_only_itself);
+    RUN_TEST(a_prefix_of_the_secret_is_not_the_secret);
+    RUN_TEST(a_null_is_never_the_secret);
 
     RUN_TEST(a_good_configuration_is_taken);
     RUN_TEST(a_pixel_count_no_chip_could_hold_is_brought_back_in_range);
