@@ -95,6 +95,16 @@ func (c *Client) Configure(devices []Device) error {
 }
 
 // matches reports whether the node's devices are the ones just sent.
+//
+// The wiring, not just the names. A reconfiguration usually keeps the names:
+// moving a fan from one pin to another leaves the list reading wind.main,
+// light.ambient, so a comparison of names is satisfied by the announcement that
+// was already in flight before the change. Configure then returned holding the
+// old pins, which reads as a board that ignored what it was told.
+//
+// A node announcing no wiring at all is a node from before ADR 0007, and there
+// is no question about pins to ask it. Names are the whole of what it can
+// answer, so names are what it is held to.
 func (c *Client) matches(devices []Device) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -102,8 +112,31 @@ func (c *Client) matches(devices []Device) bool {
 		return false
 	}
 	for i, d := range devices {
-		if c.devices[i].manifest.ID != d.ID {
+		got := c.devices[i]
+		if got.manifest.ID != d.ID {
 			return false
+		}
+		w := got.announced
+		if w.Type == "" {
+			continue // says nothing about wiring, so nothing to check
+		}
+		if w.Type != d.Type || w.GPIO != d.GPIO {
+			return false
+		}
+		// The one setting per type that changes what the output physically is.
+		switch d.Type {
+		case DeviceWS28xx:
+			if d.Pixels != 0 && w.Pixels != d.Pixels {
+				return false
+			}
+		case DevicePWM:
+			if d.FreqHz != 0 && w.FreqHz != d.FreqHz {
+				return false
+			}
+		case DeviceRelay:
+			if d.Active != "" && w.Active != d.Active {
+				return false
+			}
 		}
 	}
 	return true
