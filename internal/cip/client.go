@@ -201,14 +201,22 @@ func (c *Client) Authenticated() bool { return c.auth.Enabled() }
 // what it has, a rig reloaded after an edit. Every one of them presented as "no
 // hello", which is also what a wrong secret and an absent board look like.
 //
-// Nanoseconds since the epoch, because two clients can easily start in the same
-// millisecond and the first one will already have counted past it. It is
-// monotonic across successive clients as well as within one, and is the only
-// thing both ends can agree is increasing without having to talk about it. The
-// counter climbs by one per control message, which at ten heartbeats a second
-// is microseconds of drift across a whole show. A conductor whose clock steps
-// backwards would be refused until it catches up, which is the correct
-// behaviour for a counter whose whole job is to be higher than the last one.
+// Microseconds since the epoch, and the unit is load bearing in both
+// directions. Milliseconds is too coarse: two clients can start in the same one
+// and the first will already have counted past it. Nanoseconds is too fine to
+// survive the wire: `n` travels as a JSON number, every JSON parser returns a
+// double, and a double holds 53 bits of integer exactly. Nanoseconds since the
+// epoch needs 61, so the low bits are lost and n+1 and n+2 arrive identical.
+// The node takes the first, records it as the highest seen, and refuses the
+// second as a replay, silently, because that is what a replay guard does. The
+// symptom was a hello that worked and a configure that vanished.
+//
+// Microseconds is 1.79e15, inside 2^53 with room until the year 2255, so every
+// increment survives the round trip exactly. It is monotonic across successive
+// clients as well as within one, and is the only thing both ends can agree is
+// increasing without having to talk about it. A conductor whose clock steps
+// backwards is refused until it catches up, which is correct for a counter
+// whose whole job is to be higher than the last one.
 func (c *Client) next() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -216,7 +224,7 @@ func (c *Client) next() uint64 {
 		return 0
 	}
 	if c.counter == 0 {
-		c.counter = uint64(time.Now().UnixNano())
+		c.counter = uint64(time.Now().UnixMicro())
 	}
 	c.counter++
 	return c.counter

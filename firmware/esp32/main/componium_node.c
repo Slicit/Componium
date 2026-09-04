@@ -103,6 +103,33 @@ static volatile uint32_t s_cues;
 static volatile uint32_t s_curves;
 static volatile uint32_t s_refused;
 
+/* Refusing one datagram in silence is correct: a replay guard that narrates
+ * every rejection hands anybody on the network a way to fill the log. Refusing
+ * a hundred in silence is how two separate faults today presented as a board
+ * that simply said nothing, and cost a packet capture each to tell apart from a
+ * board that was not listening.
+ *
+ * So: quiet per datagram, and a line every five seconds while it is happening.
+ * Called only from the socket task, which is why the counters here need no
+ * lock. */
+static void note_refusal(const char *why)
+{
+    static int64_t said_at_us;
+    static uint32_t since;
+
+    s_refused++;
+    since++;
+
+    int64_t now = esp_timer_get_time();
+    if (now - said_at_us < 5000000) {
+        return;
+    }
+    said_at_us = now;
+    ESP_LOGW(TAG, "refused %u datagram(s) in the last few seconds, latest: %s",
+             (unsigned)since, why);
+    since = 0;
+}
+
 /* What is attached, from this board's own configuration. Every one of them
  * carries its own value, its own span and its own safe state: a hold expiring
  * on the fogger must take the fogger and not the fan halfway through a scene. */
@@ -432,8 +459,7 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
      * has to happen before parsing, since there is no recovering from a stack
      * overflow once the parser is inside it. */
     if (!json_shallow_enough(text, len, JSON_MAX_DEPTH)) {
-        ESP_LOGW(TAG, "refusing a document nested deeper than %d", JSON_MAX_DEPTH);
-        s_refused++;
+        note_refusal("nested too deep to parse safely");
         return;
     }
     cJSON *root = cJSON_ParseWithLength(text, len);
@@ -456,7 +482,10 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
         if (cJSON_IsNumber(counter)) {
             uint64_t n = (uint64_t)counter->valuedouble;
             if (n != 0 && n <= s_highest_counter) {
-                s_refused++;
+                /* Either a genuine replay or a client whose counter is not
+                 * increasing on the wire, which is a real thing that has
+                 * happened here and is indistinguishable from here. */
+                note_refusal("counter is not higher than the last one seen");
                 cJSON_Delete(root);
                 return;
             }
@@ -812,7 +841,7 @@ static void serve_forever(void)
         }
         len = auth_unwrap(buf, len);
         if (len < 0) {
-            s_refused++;
+            note_refusal("wrong signature, or no signature");
             /* Dropped in silence. Logging every rejected datagram would let
              * anyone on the network fill the log by spraying rubbish at us. */
             continue;

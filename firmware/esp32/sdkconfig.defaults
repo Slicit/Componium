@@ -1,0 +1,8 @@
+# Settings this firmware needs that are not the ESP-IDF defaults.
+#
+# sdkconfig itself is generated and not tracked, so anything deliberate has to
+# live here or it is lost the first time somebody builds from a clean tree.
+
+# A browser sends more than 512 bytes of request headers before it has said
+# anything interesting, and the server answered 431 to every one of them.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048

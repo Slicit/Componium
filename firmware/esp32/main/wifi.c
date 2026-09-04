@@ -27,6 +27,13 @@ static const char *TAG = "wifi";
 #define CONNECTED_BIT  BIT0
 #define FAILED_BIT     BIT1
 
+/* Reconnection runs in a task of its own so that it can wait.
+ *
+ * It used to happen in the event handler, which cannot: sleeping there stalls
+ * every other wifi and IP event, so the only thing available was to reconnect
+ * immediately, over and over, at whatever rate the driver could refuse. */
+static TaskHandle_t s_keeper;
+
 static EventGroupHandle_t s_state;
 static esp_netif_t       *s_netif;
 static bool               s_have_target;
@@ -70,12 +77,19 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data)
                      || why->reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT
                      ? " (handshake failed; usually the password)"
                      : "");
-        if (s_limit && ++s_tries >= s_limit) {
+        /* Counted even when retrying for ever, because the count is what the
+         * backoff is made of. It used to increment only when there was a limit,
+         * which is exactly the case that did not need it. */
+        s_tries++;
+        if (s_limit && s_tries >= s_limit) {
             ESP_LOGW(TAG, "gave up after %d attempts", s_tries);
             xEventGroupSetBits(s_state, FAILED_BIT);
             return;
         }
-        esp_wifi_connect();
+        /* Handed to the keeper rather than retried here. */
+        if (s_keeper) {
+            xTaskNotifyGive(s_keeper);
+        }
         return;
     }
     if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
@@ -86,6 +100,48 @@ static void on_wifi(void *arg, esp_event_base_t base, int32_t id, void *data)
         xEventGroupClearBits(s_state, FAILED_BIT);
         xEventGroupSetBits(s_state, CONNECTED_BIT);
         return;
+    }
+}
+
+/* How long to wait before trying again.
+ *
+ * Half a second, then doubling to eight, which is long enough that a router
+ * rebooting is waited out rather than fought and short enough that nobody
+ * watching the board notices the difference. While provisioning it stays short:
+ * somebody is watching a browser, the attempt count is capped anyway, and four
+ * tries have to fit inside the fifteen seconds the flasher allows.
+ */
+static uint32_t backoff_ms(void)
+{
+    if (s_limit) {
+        return 250;
+    }
+    uint32_t ms = 500u << (s_tries > 4 ? 4 : (s_tries ? s_tries - 1 : 0));
+    return ms > 8000 ? 8000 : ms;
+}
+
+static void keeper(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (!s_have_target) {
+            continue;
+        }
+        uint32_t wait = backoff_ms();
+        vTaskDelay(pdMS_TO_TICKS(wait));
+        /* Both can have changed while waiting: the radio may have come back on
+         * its own, or somebody may have pointed us at a different network. */
+        if (!s_have_target || wifi_connected()) {
+            continue;
+        }
+        esp_err_t err = esp_wifi_connect();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "reconnect refused: %s", esp_err_to_name(err));
+            /* Ask again rather than stopping, because the reason is usually
+             * that the driver is still tearing down the last attempt. */
+            xTaskNotifyGive(s_keeper);
+        }
     }
 }
 
@@ -163,6 +219,9 @@ static void aim(const char *ssid, const char *pass, int limit)
 esp_err_t wifi_start(void)
 {
     s_state = xEventGroupCreate();
+    /* Before any event handler is registered, since the first disconnect can
+     * arrive as soon as the radio starts. */
+    xTaskCreate(keeper, "wifi_keeper", 3072, NULL, 5, &s_keeper);
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     s_netif = esp_netif_create_default_wifi_sta();
