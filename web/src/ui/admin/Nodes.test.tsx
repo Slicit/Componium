@@ -138,7 +138,7 @@ async function editing() {
   answer = { ok: true, body: configured };
   await reach();
   await waitFor(() => expect(screen.getByText(/wind\.main, light\.strip, fog\.left/)).toBeTruthy());
-  fireEvent.click(screen.getByRole('button', { name: 'start from what it has' }));
+  fireEvent.click(screen.getByRole('button', { name: "Fetch the board's current configuration" }));
   await waitFor(() => expect(screen.getByLabelText('Device 1 name')).toBeTruthy());
 }
 

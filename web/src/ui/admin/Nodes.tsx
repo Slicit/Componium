@@ -249,7 +249,7 @@ export function Nodes() {
               <button
                 className="adm-reset"
                 onClick={() => setDevices(board.instruments.map(fromBoard))}
-              >start from what it has</button>
+              >Fetch the board's current configuration</button>
             )}
           </section>
 
