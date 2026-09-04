@@ -320,6 +320,13 @@ static void send_hello(int sock, struct sockaddr_in *to)
          * the physical facts. */
         cJSON_AddStringToObject(in, "type", type_name(d->type));
         cJSON_AddNumberToObject(in, "gpio", d->gpio);
+        /* The value this output falls back to, as a plain number and not only
+         * inside safe_state. A fogger set to fail closed has to read back as
+         * one, or the next write turns it into a fogger that fails open. */
+        cJSON_AddNumberToObject(in, "safe", d->safe);
+        if (d->order[0]) {
+            cJSON_AddStringToObject(in, "order", d->order);
+        }
         switch (d->type) {
         case DEV_PWM:
             cJSON_AddNumberToObject(in, "freq_hz", d->freq_hz);

@@ -71,6 +71,14 @@ type wireNodeInstrument struct {
 	FreqHz int    `json:"freqHz,omitempty"`
 	Pixels int    `json:"pixels,omitempty"`
 	Active string `json:"active,omitempty"`
+	Order  string `json:"order,omitempty"`
+
+	// The rest of what a configuration can set. Carried because a field that
+	// comes back empty is a field the next write clears: fetching a fan with an
+	// 1800ms ramp and pressing write would otherwise flatten it.
+	RampUpMS   float64 `json:"rampUpMs,omitempty"`
+	RampDownMS float64 `json:"rampDownMs,omitempty"`
+	Safe       float64 `json:"safe,omitempty"`
 }
 
 func describe(c *cip.Client) wireNode {
@@ -84,11 +92,15 @@ func describe(c *cip.Client) wireNode {
 		w := d.Wiring()
 		in := wireNodeInstrument{
 			Index: d.Index(), ID: m.ID, Kind: m.Kind,
-			LatencyMS: float64(m.Latency) / float64(time.Millisecond),
-			Type:      w.Type,
-			FreqHz:    w.FreqHz,
-			Pixels:    w.Pixels,
-			Active:    w.Active,
+			LatencyMS:  float64(m.Latency) / float64(time.Millisecond),
+			Type:       w.Type,
+			FreqHz:     w.FreqHz,
+			Pixels:     w.Pixels,
+			Active:     w.Active,
+			Order:      w.Order,
+			RampUpMS:   w.RampUpMS,
+			RampDownMS: w.RampDownMS,
+			Safe:       w.Safe,
 		}
 		// A pointer, because GPIO 0 is a real pin and "the board did not say"
 		// has to be a different answer from "pin zero". Type is what says

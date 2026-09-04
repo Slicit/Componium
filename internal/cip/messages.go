@@ -131,11 +131,13 @@ type Manifest struct {
 	// Absent on a node that was built before ADR 0007 or configured from a
 	// compiled-in manifest, which is why they are all omitempty: unknown and
 	// zero are different answers, and a GPIO of 0 is a real pin.
-	Type   string `json:"type,omitempty"`
-	GPIO   int    `json:"gpio,omitempty"`
-	FreqHz int    `json:"freq_hz,omitempty"`
-	Pixels int    `json:"pixels,omitempty"`
-	Active string `json:"active,omitempty"`
+	Type   string  `json:"type,omitempty"`
+	GPIO   int     `json:"gpio,omitempty"`
+	FreqHz int     `json:"freq_hz,omitempty"`
+	Pixels int     `json:"pixels,omitempty"`
+	Active string  `json:"active,omitempty"`
+	Order  string  `json:"order,omitempty"`
+	Safe   float64 `json:"safe,omitempty"`
 }
 
 // Channel documents one value a node accepts.
@@ -217,6 +219,8 @@ func (m Manifest) toAnnouncement(index int) Instrument {
 		FreqHz:      m.FreqHz,
 		Pixels:      m.Pixels,
 		Active:      m.Active,
+		Order:       m.Order,
+		Safe:        m.Safe,
 	}
 }
 
@@ -240,11 +244,13 @@ type Instrument struct {
 
 	// How it is wired, from the board's own configuration. Omitted by a node
 	// that has none, so that unknown stays distinguishable from zero.
-	Type   string `json:"type,omitempty"`
-	GPIO   int    `json:"gpio,omitempty"`
-	FreqHz int    `json:"freq_hz,omitempty"`
-	Pixels int    `json:"pixels,omitempty"`
-	Active string `json:"active,omitempty"`
+	Type   string  `json:"type,omitempty"`
+	GPIO   int     `json:"gpio,omitempty"`
+	FreqHz int     `json:"freq_hz,omitempty"`
+	Pixels int     `json:"pixels,omitempty"`
+	Active string  `json:"active,omitempty"`
+	Order  string  `json:"order,omitempty"`
+	Safe   float64 `json:"safe,omitempty"`
 
 	SafeState map[string]float64 `json:"safe_state,omitempty"`
 	Channels  []Channel          `json:"channels,omitempty"`
@@ -302,6 +308,8 @@ func (d Device) toManifest() Manifest {
 		FreqHz:     d.FreqHz,
 		Pixels:     d.Pixels,
 		Active:     d.Active,
+		Order:      d.Order,
+		Safe:       d.Safe,
 	}
 	// Channels follow from the type, because they are what the hardware can be
 	// told rather than something a person should have to write out.

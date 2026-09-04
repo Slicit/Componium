@@ -22,6 +22,7 @@ interface Attached {
   freqHz?: number;
   pixels?: number;
   active?: string;
+  order?: string;
   latencyMs?: number;
   rampUpMs?: number;
   rampDownMs?: number;
@@ -41,6 +42,10 @@ interface Announced {
   freqHz?: number;
   pixels?: number;
   active?: string;
+  order?: string;
+  rampUpMs?: number;
+  rampDownMs?: number;
+  safe?: number;
 }
 
 interface Board {
@@ -98,6 +103,10 @@ function fromBoard(i: Announced): Attached {
     ...(i.freqHz !== undefined ? { freqHz: i.freqHz } : {}),
     ...(i.pixels !== undefined ? { pixels: i.pixels } : {}),
     ...(i.active !== undefined ? { active: i.active } : {}),
+    ...(i.order !== undefined ? { order: i.order } : {}),
+    ...(i.rampUpMs !== undefined ? { rampUpMs: i.rampUpMs } : {}),
+    ...(i.rampDownMs !== undefined ? { rampDownMs: i.rampDownMs } : {}),
+    ...(i.safe !== undefined ? { safe: i.safe } : {}),
   };
 }
 

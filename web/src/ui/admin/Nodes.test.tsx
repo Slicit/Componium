@@ -31,7 +31,7 @@ const configured = {
      * board from one the page made up, and this test exists for exactly that
      * distinction. */
     { index: 0, id: 'wind.main', kind: 'wind', latencyMs: 1200,
-      type: 'pwm', gpio: 19, freqHz: 18000 },
+      type: 'pwm', gpio: 19, freqHz: 18000, rampUpMs: 1800, rampDownMs: 2900, safe: 0.25 },
     { index: 1, id: 'light.strip', kind: 'light', latencyMs: 20,
       type: 'ws28xx', gpio: 27, pixels: 60 },
     { index: 2, id: 'fog.left', kind: 'fog', latencyMs: 2000,
@@ -167,6 +167,22 @@ describe('what is wired to it', () => {
     expect(value('Device 3 type')).toBe('relay');
     expect(value('Device 3 gpio')).toBe('23');
     expect(value('Device 3 active level')).toBe('low');
+  });
+
+  it('fetching and writing back changes nothing', async () => {
+    /* The reason every field has to come back. One that arrives empty is one
+     * the next write sets to empty, so a fan fetched and saved without being
+     * touched would lose its ramps and its safe value. */
+    await editing();
+    fireEvent.click(screen.getByRole('button', { name: 'Write it to the board' }));
+    await waitFor(() => expect(posted).toHaveLength(2));
+    const sent = posted[1] as { devices: Record<string, unknown>[] };
+    const fan = sent.devices.find((d) => d.id === 'wind.main')!;
+    expect(fan.rampUpMs).toBe(1800);
+    expect(fan.rampDownMs).toBe(2900);
+    expect(fan.safe).toBe(0.25);
+    expect(fan.freqHz).toBe(18000);
+    expect(fan.gpio).toBe(19);
   });
 
   it("does not give a strip a fan ramp time", async () => {
