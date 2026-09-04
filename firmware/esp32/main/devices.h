@@ -72,6 +72,19 @@ typedef struct {
     led_strip_handle_t strip;
 } device_t;
 
+/**
+ * Whether an action ends a span rather than starting one.
+ *
+ * The conductor ends every span by sending one of these, and a device that does
+ * not recognise them never stops: the cue carries no values, so reading only
+ * the parameters leaves the output exactly as it was.
+ *
+ * The same set the software node accepts, and the reason this is a function
+ * with a test rather than a comparison written out at the one place it is
+ * needed.
+ */
+bool device_action_stops(const char *action);
+
 /** The name a configuration uses for a type, and that a node announces. */
 const char *device_type_name(device_type_t t);
 

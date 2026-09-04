@@ -174,10 +174,84 @@ static void several_devices_are_configured_together(void)
     TEST_ASSERT_NOT_EQUAL(parsed_devices[0].type, parsed_devices[1].type);
 }
 
+/* ------------------------------------------------------- ending a span */
+
+static void the_actions_that_end_a_span_are_recognised(void)
+{
+    /* A conductor ends every span by sending one of these, and the cue carries
+     * no values: a device that reads only the parameters leaves its output
+     * exactly where it was and the light stays on for ever. That is what
+     * happened, and the symptom was an off that seemed to arrive at random. */
+    TEST_ASSERT_TRUE(device_action_stops("stop"));
+    TEST_ASSERT_TRUE(device_action_stops("off"));
+    TEST_ASSERT_TRUE(device_action_stops("safe"));
+    TEST_ASSERT_TRUE(device_action_stops("neutral"));
+}
+
+static void an_action_that_starts_something_is_not_a_stop(void)
+{
+    TEST_ASSERT_FALSE(device_action_stops("flash"));
+    TEST_ASSERT_FALSE(device_action_stops("gust"));
+    TEST_ASSERT_FALSE(device_action_stops("spray"));
+    TEST_ASSERT_FALSE(device_action_stops(""));
+    TEST_ASSERT_FALSE(device_action_stops(NULL));
+    /* Nearly, which is not the same thing. */
+    TEST_ASSERT_FALSE(device_action_stops("stopping"));
+}
+
+static void a_stopped_strip_is_dark(void)
+{
+    /* What the stop does once it is recognised. A strip has no safe colour
+     * other than off: the configured safe value is for outputs that are one
+     * number, where failing to full can be the safer choice. */
+    device_t d;
+    memset(&d, 0, sizeof(d));
+    d.type = DEV_WS28XX;
+    d.channels = 3;
+    d.safe = 1.0f;          /* deliberately not zero */
+    d.value[0] = 0.9f;
+    d.value[1] = 1.0f;
+    d.value[2] = 0.6f;
+    d.is_safe = false;
+    d.hold_until_us = 1234;
+
+    device_safe(&d);
+
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, d.value[0]);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, d.value[1]);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, d.value[2]);
+    TEST_ASSERT_TRUE(d.is_safe);
+    /* And the span is over, so the watchdog has nothing left to expire. */
+    TEST_ASSERT_EQUAL_INT(0, (int)d.hold_until_us);
+}
+
+static void a_stopped_dimmer_goes_to_its_configured_safe_value(void)
+{
+    /* Not always dark. A house light that fails to full is safer than one that
+     * fails to black, and the configuration is where that is decided. */
+    device_t d;
+    memset(&d, 0, sizeof(d));
+    d.type = DEV_PWM;
+    d.channels = 1;
+    d.safe = 0.25f;
+    d.value[0] = 1.0f;
+    d.is_safe = false;
+
+    device_safe(&d);
+
+    TEST_ASSERT_EQUAL_FLOAT(0.25f, d.value[0]);
+    TEST_ASSERT_TRUE(d.is_safe);
+}
+
 void register_roundtrip_tests(void)
 {
     RUN_TEST(a_configuration_is_stored_field_for_field);
     RUN_TEST(what_was_stored_is_what_is_announced);
     RUN_TEST(an_announcement_can_be_configured_back);
     RUN_TEST(several_devices_are_configured_together);
+
+    RUN_TEST(the_actions_that_end_a_span_are_recognised);
+    RUN_TEST(an_action_that_starts_something_is_not_a_stop);
+    RUN_TEST(a_stopped_strip_is_dark);
+    RUN_TEST(a_stopped_dimmer_goes_to_its_configured_safe_value);
 }

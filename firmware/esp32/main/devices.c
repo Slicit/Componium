@@ -343,3 +343,17 @@ const char *device_type_name(device_type_t t)
     default:         return "none";
     }
 }
+
+bool device_action_stops(const char *action)
+{
+    if (!action) {
+        return false;
+    }
+    /* "stop" is what a conductor sends. The rest are what a person writes in a
+     * score by hand, and understanding all of them costs three comparisons
+     * against an output that would otherwise stay on. */
+    return strcmp(action, "stop") == 0
+        || strcmp(action, "off") == 0
+        || strcmp(action, "safe") == 0
+        || strcmp(action, "neutral") == 0;
+}

@@ -495,6 +495,20 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
             return;
         }
 
+        /* A stop ends the span. Checked before the parameters because a stop
+         * carries none, so reading them first and applying what is found
+         * leaves the output exactly where it was and the light stays on. */
+        const cJSON *action = cJSON_GetObjectItem(root, "action");
+        if (cJSON_IsString(action) && device_action_stops(action->valuestring)) {
+            device_safe(d);
+            unlock();
+            if (cJSON_IsNumber(seq)) {
+                send_ack(sock, from, seq->valuedouble);
+            }
+            cJSON_Delete(root);
+            return;
+        }
+
         static const char *rgb[3] = {"r", "g", "b"};
         if (cJSON_IsObject(params)) {
             for (int c = 0; c < d->channels; c++) {
