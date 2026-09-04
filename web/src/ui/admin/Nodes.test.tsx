@@ -26,9 +26,16 @@ const configured = {
   firmware: '0.3',
   chip: 'software',
   instruments: [
-    { index: 0, id: 'wind.main', kind: 'wind', latencyMs: 1200 },
-    { index: 1, id: 'light.strip', kind: 'light', latencyMs: 20 },
-    { index: 2, id: 'fog.left', kind: 'fog', latencyMs: 2000 },
+    /* Deliberately not the pins blank() defaults to (18, 5 and 21). A fixture
+     * whose values match the fallbacks cannot tell a number that came from the
+     * board from one the page made up, and this test exists for exactly that
+     * distinction. */
+    { index: 0, id: 'wind.main', kind: 'wind', latencyMs: 1200,
+      type: 'pwm', gpio: 19, freqHz: 18000 },
+    { index: 1, id: 'light.strip', kind: 'light', latencyMs: 20,
+      type: 'ws28xx', gpio: 27, pixels: 60 },
+    { index: 2, id: 'fog.left', kind: 'fog', latencyMs: 2000,
+      type: 'relay', gpio: 23, active: 'low' },
   ],
 };
 
@@ -144,6 +151,53 @@ describe('what is wired to it', () => {
     expect(value('Device 3 name')).toBe('fog.left');
   });
 
+  it('shows how the board says it is wired, not what a new row would be', async () => {
+    /* The fault this exists for: a strip configured on gpio 5 read back as a
+     * pwm output on gpio 18, because the page filled in everything the board
+     * did not announce from the defaults for a new row. Nothing was wrong with
+     * the board, and the obvious reading was that it had forgotten. */
+    await editing();
+    expect(value('Device 2 type')).toBe('ws28xx');
+    expect(value('Device 2 gpio')).toBe('27');
+    expect(value('Device 2 pixels')).toBe('60');
+    expect(value('Device 1 frequency')).toBe('18000');
+
+    expect(value('Device 1 type')).toBe('pwm');
+    expect(value('Device 1 gpio')).toBe('19');
+    expect(value('Device 3 type')).toBe('relay');
+    expect(value('Device 3 gpio')).toBe('23');
+    expect(value('Device 3 active level')).toBe('low');
+  });
+
+  it("does not give a strip a fan ramp time", async () => {
+    /* The fields a board does not report still have to come from somewhere, and
+     * the somewhere has to be that device's own type. Falling back to pwm
+     * defaults puts a fan's ramp up and ramp down on a strip, and the next
+     * write puts them on the board. */
+    await editing();
+    fireEvent.click(screen.getByRole('button', { name: 'Write it to the board' }));
+    await waitFor(() => expect(posted).toHaveLength(2));
+    const sent = posted[1] as { devices: Record<string, unknown>[] };
+    const strip = sent.devices.find((d) => d.id === 'light.strip')!;
+    expect(strip.rampUpMs).toBeUndefined();
+    expect(strip.rampDownMs).toBeUndefined();
+    // And the fan keeps its own, which is what makes this about type rather
+    // than about dropping ramps everywhere.
+    const fan = sent.devices.find((d) => d.id === 'wind.main')!;
+    expect(fan.rampUpMs).toBe(1800);
+  });
+
+  it('says so when a board does not report its wiring', async () => {
+    /* Older firmware announces what it carries and not how. The pins shown are
+     * then guesses, and a guess presented as an answer is how somebody writes
+     * gpio 18 onto a board that had a strip on 5. */
+    answer = { ok: true, body: { ...configured, instruments: [
+      { index: 0, id: 'wind.main', kind: 'wind', latencyMs: 1200 },
+    ] } };
+    await reach();
+    await waitFor(() => expect(screen.getByText(/not how it is wired/)).toBeTruthy());
+  });
+
   it('offers the kinds the server has, not a list of its own', async () => {
     /* Hard coding them here was right the day it was written and would be
      * wrong the first time a kind is added. */
@@ -205,7 +259,9 @@ describe('what is wired to it', () => {
     await editing();
     fireEvent.click(screen.getByRole('button', { name: 'Write it to the board' }));
     await waitFor(() => expect(screen.getByText(/the board took it/)).toBeTruthy());
-    fireEvent.change(screen.getByLabelText('Device 1 gpio'), { target: { value: '19' } });
+    // A pin it is not already on, or no change event fires and the test passes
+    // for a reason that has nothing to do with what it is checking.
+    fireEvent.change(screen.getByLabelText('Device 1 gpio'), { target: { value: '26' } });
     expect(screen.queryByText(/the board took it/)).toBeNull();
   });
 

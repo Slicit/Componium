@@ -62,6 +62,15 @@ type wireNodeInstrument struct {
 	ID        string  `json:"id"`
 	Kind      string  `json:"kind"`
 	LatencyMS float64 `json:"latencyMs"`
+
+	// How it is wired, as the board reports it. Omitted when the board says
+	// nothing, so that the page can tell "not told" from "GPIO 0" and show the
+	// difference instead of filling in a default that looks like an answer.
+	Type   string `json:"type,omitempty"`
+	GPIO   *int   `json:"gpio,omitempty"`
+	FreqHz int    `json:"freqHz,omitempty"`
+	Pixels int    `json:"pixels,omitempty"`
+	Active string `json:"active,omitempty"`
 }
 
 func describe(c *cip.Client) wireNode {
@@ -72,10 +81,23 @@ func describe(c *cip.Client) wireNode {
 	}
 	for _, d := range c.Devices() {
 		m := d.Manifest()
-		out.Instruments = append(out.Instruments, wireNodeInstrument{
+		w := d.Wiring()
+		in := wireNodeInstrument{
 			Index: d.Index(), ID: m.ID, Kind: m.Kind,
 			LatencyMS: float64(m.Latency) / float64(time.Millisecond),
-		})
+			Type:      w.Type,
+			FreqHz:    w.FreqHz,
+			Pixels:    w.Pixels,
+			Active:    w.Active,
+		}
+		// A pointer, because GPIO 0 is a real pin and "the board did not say"
+		// has to be a different answer from "pin zero". Type is what says
+		// whether any of this was reported at all.
+		if w.Type != "" {
+			gpio := w.GPIO
+			in.GPIO = &gpio
+		}
+		out.Instruments = append(out.Instruments, in)
 	}
 	return out
 }

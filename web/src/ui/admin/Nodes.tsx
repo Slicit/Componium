@@ -28,11 +28,26 @@ interface Attached {
   safe?: number;
 }
 
+/* What a board says about one device. Everything after latency is how it is
+ * wired, and is absent on a board that does not report it: `type` missing means
+ * "this board did not say", which is not the same as any particular value. */
+interface Announced {
+  index: number;
+  id: string;
+  kind: string;
+  latencyMs: number;
+  type?: Attached['type'];
+  gpio?: number;
+  freqHz?: number;
+  pixels?: number;
+  active?: string;
+}
+
 interface Board {
   name?: string;
   firmware?: string;
   chip?: string;
-  instruments: { index: number; id: string; kind: string; latencyMs: number }[];
+  instruments: Announced[];
 }
 
 /** What a build contains. A device is what a configuration says is plugged in. */
@@ -61,6 +76,34 @@ function blank(type: Attached['type']): Attached {
         latencyMs: 1200, rampUpMs: 1800, rampDownMs: 3000,
       };
   }
+}
+
+/* One announced device, as a row.
+ *
+ * The board's own answer wherever it gave one. Where it gave none the row falls
+ * back to the defaults for its type, and the type falls back to pwm, which is a
+ * guess and is why the page says so: a board that reports nothing about its
+ * wiring cannot be edited without retyping it, and quietly showing GPIO 18
+ * would look like an answer.
+ */
+function fromBoard(i: Announced): Attached {
+  const base = blank(i.type ?? 'pwm');
+  return {
+    ...base,
+    id: i.id,
+    kind: i.kind,
+    latencyMs: i.latencyMs,
+    ...(i.type ? { type: i.type } : {}),
+    ...(i.gpio !== undefined ? { gpio: i.gpio } : {}),
+    ...(i.freqHz !== undefined ? { freqHz: i.freqHz } : {}),
+    ...(i.pixels !== undefined ? { pixels: i.pixels } : {}),
+    ...(i.active !== undefined ? { active: i.active } : {}),
+  };
+}
+
+/** Whether a board told us how anything is wired. */
+function saysHowItIsWired(b: Board): boolean {
+  return b.instruments.length === 0 || b.instruments.every((i) => !!i.type);
 }
 
 export function Nodes() {
@@ -195,17 +238,17 @@ export function Nodes() {
                   : board.instruments.map((i) => i.id).join(', ')}
               </dd>
             </dl>
+            {board.instruments.length > 0 && !saysHowItIsWired(board) && (
+              <p className="dim small">
+                This board reports what it is carrying but not how it is wired,
+                which means firmware older than this page. The pins below are
+                defaults, not what is on the board: check them before writing.
+              </p>
+            )}
             {board.instruments.length > 0 && (
               <button
                 className="adm-reset"
-                onClick={() => {
-                  // Start from what the board says it has, so editing an
-                  // existing board does not mean typing it all again.
-                  setDevices(board.instruments.map((i) => ({
-                    ...blank('pwm'), id: i.id, kind: i.kind,
-                    latencyMs: i.latencyMs,
-                  })));
-                }}
+                onClick={() => setDevices(board.instruments.map(fromBoard))}
               >start from what it has</button>
             )}
           </section>

@@ -123,6 +123,19 @@ type Manifest struct {
 	DutyCycle     float64            `json:"duty_cycle,omitempty"`
 	SafeState     map[string]float64 `json:"safe_state,omitempty"`
 	Channels      []Channel          `json:"channels,omitempty"`
+
+	// How it is wired. Announced because the board is the only thing that
+	// knows: a studio reading a manifest without these has to invent them, and
+	// what it invents looks exactly like a board that forgot its configuration.
+	//
+	// Absent on a node that was built before ADR 0007 or configured from a
+	// compiled-in manifest, which is why they are all omitempty: unknown and
+	// zero are different answers, and a GPIO of 0 is a real pin.
+	Type   string `json:"type,omitempty"`
+	GPIO   int    `json:"gpio,omitempty"`
+	FreqHz int    `json:"freq_hz,omitempty"`
+	Pixels int    `json:"pixels,omitempty"`
+	Active string `json:"active,omitempty"`
 }
 
 // Channel documents one value a node accepts.
@@ -199,6 +212,11 @@ func (m Manifest) toAnnouncement(index int) Instrument {
 		DutyCycle:   m.DutyCycle,
 		SafeState:   m.SafeState,
 		Channels:    m.Channels,
+		Type:        m.Type,
+		GPIO:        m.GPIO,
+		FreqHz:      m.FreqHz,
+		Pixels:      m.Pixels,
+		Active:      m.Active,
 	}
 }
 
@@ -219,6 +237,14 @@ type Instrument struct {
 	RampDownMS  float64 `json:"ramp_down_ms,omitempty"`
 	MaxContinMS float64 `json:"max_continuous_ms,omitempty"`
 	DutyCycle   float64 `json:"duty_cycle,omitempty"`
+
+	// How it is wired, from the board's own configuration. Omitted by a node
+	// that has none, so that unknown stays distinguishable from zero.
+	Type   string `json:"type,omitempty"`
+	GPIO   int    `json:"gpio,omitempty"`
+	FreqHz int    `json:"freq_hz,omitempty"`
+	Pixels int    `json:"pixels,omitempty"`
+	Active string `json:"active,omitempty"`
 
 	SafeState map[string]float64 `json:"safe_state,omitempty"`
 	Channels  []Channel          `json:"channels,omitempty"`
@@ -271,6 +297,11 @@ func (d Device) toManifest() Manifest {
 		LatencyMS:  Millis(d.LatencyMS),
 		RampUpMS:   Millis(d.RampUpMS),
 		RampDownMS: Millis(d.RampDownMS),
+		Type:       d.Type,
+		GPIO:       d.GPIO,
+		FreqHz:     d.FreqHz,
+		Pixels:     d.Pixels,
+		Active:     d.Active,
 	}
 	// Channels follow from the type, because they are what the hardware can be
 	// told rather than something a person should have to write out.

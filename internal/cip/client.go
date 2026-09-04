@@ -138,6 +138,7 @@ func (c *Client) adopt(m *Message) bool {
 		for _, in := range m.Instruments {
 			c.devices = append(c.devices, &Remote{
 				client: c, index: in.Index, manifest: in.toInstrument(),
+				announced: in,
 			})
 		}
 		return true

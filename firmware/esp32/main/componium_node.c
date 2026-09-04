@@ -141,6 +141,10 @@ static SemaphoreHandle_t s_lock;
 static TaskHandle_t s_serve_task;
 static TaskHandle_t s_watchdog_task;
 
+/* Declared here because send_hello needs it and it is defined with the status
+ * accessors, which are about the same question: what is attached to this. */
+static const char *type_name(device_type_t t);
+
 static void lock(void)   { xSemaphoreTake(s_lock, portMAX_DELAY); }
 static void unlock(void) { xSemaphoreGive(s_lock); }
 
@@ -307,6 +311,28 @@ static void send_hello(int sock, struct sockaddr_in *to)
         cJSON_AddStringToObject(in, "id", d->id);
         cJSON_AddStringToObject(in, "kind", d->kind);
         cJSON_AddNumberToObject(in, "latency_ms", d->latency_ms);
+
+        /* How it is wired. Announced because this board is the only thing that
+         * knows: a studio without these has to invent a pin, and an invented
+         * pin is indistinguishable from a board that lost its configuration.
+         *
+         * The same argument ADR 0002 makes for latency, applied to the rest of
+         * the physical facts. */
+        cJSON_AddStringToObject(in, "type", type_name(d->type));
+        cJSON_AddNumberToObject(in, "gpio", d->gpio);
+        switch (d->type) {
+        case DEV_PWM:
+            cJSON_AddNumberToObject(in, "freq_hz", d->freq_hz);
+            break;
+        case DEV_WS28XX:
+            cJSON_AddNumberToObject(in, "pixels", d->pixels);
+            break;
+        case DEV_RELAY:
+            cJSON_AddStringToObject(in, "active", d->active_high ? "high" : "low");
+            break;
+        default:
+            break;
+        }
         if (d->ramp_up_ms > 0) {
             cJSON_AddNumberToObject(in, "ramp_up_ms", d->ramp_up_ms);
         }

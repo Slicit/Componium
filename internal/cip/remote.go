@@ -18,6 +18,14 @@ import (
 // Before ADR 0007 the Client was the instrument, which is why two rig entries
 // at one address came back as the same instrument and the rig refused to start.
 type Remote struct {
+	// announced is what the node said about this device, kept whole.
+	//
+	// The manifest below says how to drive it; this says how it is wired, which
+	// is a different question and one only the board can answer. A studio
+	// without it has to invent a pin, and an invented pin looks exactly like a
+	// board that forgot its configuration.
+	announced Instrument
+
 	client   *Client
 	manifest instrument.Manifest
 	// index is what curve frames address, and is only good for the session
@@ -104,3 +112,10 @@ func (r *Remote) SendCurve(values []float32) error {
 }
 
 var _ instrument.Instrument = (*Remote)(nil)
+
+// Wiring is what the node said about how this device is attached.
+//
+// Zero valued on a node that announced nothing about it, which is every node
+// built before ADR 0007. Type empty is the way to tell that apart from a device
+// genuinely on GPIO 0.
+func (r *Remote) Wiring() Instrument { return r.announced }
