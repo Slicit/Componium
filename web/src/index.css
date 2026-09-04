@@ -1224,3 +1224,38 @@ button:hover { border-color: #3a4553; }
   /* Three columns of twelve characters each is not a table, it is a puzzle. */
   .vis-row { grid-template-columns: 1fr; gap: 2px; }
 }
+
+/* Boards: online, offline, and not asked yet.
+ *
+ * Three states, not two. A board nobody has checked is a different thing from
+ * one that answered no, and a page that draws them the same way is a page that
+ * says a shelf is down when it has only just loaded. */
+.adm-dot {
+  display: inline-block;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--dim, #999);
+}
+.adm-dot.is-on { background: #3d9a50; }
+.adm-dot.is-off { background: #b4532a; }
+.adm-dot.is-unknown {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line, #ccc);
+}
+
+/* A name that is a button, because picking a board is what the row is for. */
+.adm-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.adm-table tr.is-current .adm-link { font-weight: 600; }
+
+/* A card inside a card, for the row being added. */
+.adm-inset { margin: 0.75rem 0 0; }

@@ -96,6 +96,9 @@ func (s *Server) armLive(cfg *rig.Config, sc *score.Score, name string) error {
 	}
 	s.disarmLive() // idempotent, and arming twice would open every socket twice
 
+	// Where the secrets come from. A rig names a board and the boards file
+	// knows how to authenticate to it, so the rig itself stays committable.
+	cfg.UseSecrets(s.boards.SecretFor)
 	built, err := cfg.Build()
 	if err != nil {
 		return err

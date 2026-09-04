@@ -73,8 +73,12 @@ func NormaliseAddr(addr, driver string) string {
 	return a
 }
 
-// addrProblem describes what is wrong with an address, or returns empty.
-func addrProblem(addr, driver string) string {
+// AddrProblem describes what is wrong with an address, or returns empty.
+//
+// Exported because a board is reached the same way an instrument is, and two
+// copies of "is this an address" would agree with each other until one of them
+// was fixed.
+func AddrProblem(addr, driver string) string {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		if want := DefaultPort(driver); want != "" {
@@ -85,9 +89,38 @@ func addrProblem(addr, driver string) string {
 	if host == "" {
 		return "address " + quoted(addr) + " has no host"
 	}
+	// A host that is neither an IP nor something that could be a name. Worth
+	// saying because NormaliseAddr will cheerfully append a port to any text at
+	// all, so "not an address" arrives here as "not an address:5570" and looks
+	// structurally fine.
+	if !hostLooksReal(host) {
+		return "address " + quoted(addr) + " does not name a host"
+	}
 	n, err := strconv.Atoi(port)
 	if err != nil || n < 1 || n > 65535 {
 		return "port " + quoted(port) + " is not a port number"
 	}
 	return ""
+}
+
+// hostLooksReal reports whether a host is an IP or a plausible name.
+//
+// Deliberately loose: this is not a resolver and a name that does not exist yet
+// is a normal thing to type. It only refuses what cannot be a host at all,
+// which in practice means text somebody pasted from somewhere else.
+func hostLooksReal(host string) bool {
+	if net.ParseIP(host) != nil {
+		return true
+	}
+	for _, r := range host {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '.', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return host != ""
 }

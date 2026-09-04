@@ -24,6 +24,11 @@ import (
 
 // Config is a rig file.
 type Config struct {
+	// secrets resolves a board's shared secret by address, for entries
+	// with none of their own. Never read from or written to the file: a
+	// rig is a thing you commit, and a secret is not.
+	secrets func(addr string) string `toml:"-"`
+
 	Rig         Meta         `toml:"rig"`
 	Instruments []InstConfig `toml:"instrument"`
 }
@@ -176,7 +181,25 @@ func (b *Built) Close() error {
 // An unknown driver is an error rather than a silent fallback to virtual: a
 // rig that quietly pretends to drive hardware is worse than one that refuses
 // to start.
+// Secrets resolves a board's shared secret from its address, for entries that
+// do not carry one of their own.
+//
+// A function rather than a lookup table so that the rig package does not have
+// to know where secrets are kept, and so it cannot import the package that
+// keeps them, which imports this one.
+//
+// Set it before Build. Nil means every entry is on its own, which is the right
+// behaviour for a rig used without a studio.
+func (c *Config) UseSecrets(from func(addr string) string) {
+	c.secrets = from
+}
+
 func (c *Config) Build() (*Built, error) {
+	// Captured here because c is shadowed further down by the cip client, and
+	// a resolver that silently became nil would be a board that silently went
+	// unauthenticated.
+	secretFor := c.secrets
+
 	out := &Built{Instruments: map[string]instrument.Instrument{}}
 	// Fixtures asking for the same universe get the same one, and entries
 	// pointing at the same board get the same client.
@@ -232,7 +255,13 @@ func (c *Config) Build() (*Built, error) {
 			c, ok := nodes[in.Addr]
 			if !ok {
 				var err error
-				c, err = cip.Dial(in.Addr, wait, in.Secret)
+				// The entry's own secret first, then the installation's.
+				// An entry that names one is an entry that meant it.
+				secret := in.Secret
+				if secret == "" && secretFor != nil {
+					secret = secretFor(in.Addr)
+				}
+				c, err = cip.Dial(in.Addr, wait, secret)
 				if err != nil {
 					out.Close()
 					return nil, err

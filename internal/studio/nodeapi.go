@@ -97,8 +97,13 @@ func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var want struct {
-		Addr    string       `json:"addr"`
-		Secret  string       `json:"secret"`
+		Addr   string `json:"addr"`
+		Secret string `json:"secret"`
+		// Board names a remembered board instead of giving an address and a
+		// secret. That is what the shelf is for: the secret is typed once,
+		// stored once, and the browser never holds the string that
+		// authorises moving a relay onto a pin.
+		Board   string       `json:"board"`
 		Devices []wireDevice `json:"devices"`
 		// Configure distinguishes looking from changing. Without it this only
 		// reads, so a page that opens a board cannot accidentally empty it.
@@ -107,6 +112,21 @@ func (s *Server) handleNode(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&want); err != nil {
 		http.Error(w, "could not read that: "+err.Error(), http.StatusBadRequest)
 		return
+	}
+	// A remembered board supplies both, which is the ordinary case once one
+	// has been attached. An address and a secret typed directly still work,
+	// because that is how a board is reached the first time, before there is
+	// anything to remember.
+	if want.Board != "" {
+		s.mu.Lock()
+		known, ok := s.boards.Find(want.Board)
+		s.mu.Unlock()
+		if !ok {
+			http.Error(w, "no board called "+want.Board, http.StatusNotFound)
+			return
+		}
+		want.Addr = known.Addr
+		want.Secret = known.Secret
 	}
 	if want.Addr == "" {
 		http.Error(w, "no address", http.StatusBadRequest)

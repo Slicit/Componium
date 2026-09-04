@@ -123,7 +123,7 @@ func (c *Config) Validate() []string {
 		// Asked properly. "Contains a colon" said yes to http://192.168.1.145/,
 		// which was then written to the rig and failed when the show started.
 		if in.Addr != "" {
-			if bad := addrProblem(in.Addr, driver); bad != "" {
+			if bad := AddrProblem(in.Addr, driver); bad != "" {
 				problems = append(problems, where+": "+bad)
 			}
 		}

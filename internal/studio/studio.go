@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"context"
+	"github.com/Slicit/componium/internal/boards"
 	"github.com/Slicit/componium/internal/rig"
 	"github.com/Slicit/componium/internal/score"
 	"github.com/Slicit/componium/internal/store"
@@ -55,6 +56,10 @@ type Options struct {
 	// Composer is the path to compose.py. Without it, analysis cannot run and
 	// the library says so rather than offering a button that does nothing.
 	Composer string
+	// Boards is the file remembering which ESP32s exist, with the secrets
+	// needed to reach them. Empty means they are not remembered, and the admin
+	// page says so rather than losing an edit.
+	Boards string
 	// Firmware is a directory of node images the admin page can flash to a
 	// board over USB. Empty is the ordinary case: the image belongs to a
 	// different toolchain on a different release schedule, so it is a
@@ -88,6 +93,11 @@ type Server struct {
 	// rigDir is the shelf the rig came off, when -rig named a directory of
 	// them. Empty for a single file, and the picker then has nothing to offer.
 	rigDir string
+	// boards is the hardware this installation knows about, which is not the
+	// same question as what the rig currently uses: a board on a shelf exists
+	// whether or not any rig mentions it. Never nil, so a studio started
+	// without a boards file still answers the page rather than panicking.
+	boards *boards.Shelf
 
 	// Live output is separate from the editing lock on purpose: the show loop
 	// reports a reading every five milliseconds and must never wait behind
@@ -102,6 +112,15 @@ type Server struct {
 func New(o Options) (*Server, error) {
 	s := &Server{path: o.Score, media: o.Media, scores: o.Scores,
 		firmware: o.Firmware, rigPath: o.Rig}
+
+	// Always a shelf, even with no file behind it. A studio started without one
+	// still answers the page, saying the list cannot be remembered, rather than
+	// offering an Add button that quietly loses what it is given.
+	shelf, err := boards.Open(o.Boards)
+	if err != nil {
+		return nil, err
+	}
+	s.boards = shelf
 
 	if o.Score != "" {
 		sc, err := score.Load(o.Score)
@@ -235,6 +254,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/live", s.handleLive)
 	mux.HandleFunc("/api/live/at", s.handleLiveAt)
 	mux.HandleFunc("/api/node", s.handleNode)
+	mux.HandleFunc("/api/boards", s.handleBoards)
+	mux.HandleFunc("/api/boards/check", s.handleBoardsCheck)
 	mux.HandleFunc("/media", s.handleMedia)
 	mux.HandleFunc("/api/media", s.handleMediaList)
 	mux.HandleFunc("/api/library", s.handleLibrary)

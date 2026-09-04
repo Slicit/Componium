@@ -12,6 +12,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { Boards } from './Boards';
+
 interface Attached {
   id: string;
   type: 'pwm' | 'ws28xx' | 'relay';
@@ -64,6 +66,12 @@ function blank(type: Attached['type']): Attached {
 export function Nodes() {
   const [addr, setAddr] = useState('');
   const [secret, setSecret] = useState('');
+  /* A remembered board, reached by name. When this is set the studio supplies
+   * both the address and the secret, so neither is in this page at all.
+   *
+   * Named picked rather than board because board already means the description
+   * a node sends back about itself, which is a different thing entirely. */
+  const [picked, setPicked] = useState('');
   const [board, setBoard] = useState<Board | null>(null);
   const [devices, setDevices] = useState<Attached[]>([]);
   const [kinds, setKinds] = useState<string[]>([]);
@@ -82,7 +90,10 @@ export function Nodes() {
     return () => { live = false; };
   }, []);
 
-  const ask = useCallback(async (configure: boolean) => {
+  /* `pick` overrides the board in state, because a click has to ask about the
+   * board that was just clicked and setBoard has not landed by then. */
+  const ask = useCallback(async (configure: boolean, pick?: string) => {
+    const named = pick ?? picked;
     setBusy(true);
     setError(null);
     setSaved(false);
@@ -90,7 +101,9 @@ export function Nodes() {
       const res = await fetch('/api/node', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ addr, secret, configure, devices }),
+        body: named
+          ? JSON.stringify({ board: named, configure, devices })
+          : JSON.stringify({ addr, secret, configure, devices }),
       });
       const said = await res.text();
       if (!res.ok) {
@@ -105,7 +118,7 @@ export function Nodes() {
     } finally {
       setBusy(false);
     }
-  }, [addr, secret, devices]);
+  }, [addr, secret, picked, devices]);
 
   const change = (i: number, patch: Partial<Attached>) => {
     setDevices((was) => was.map((d, n) => {
@@ -129,8 +142,21 @@ export function Nodes() {
         board decides whether that instrument exists.
       </p>
 
+      <Boards
+        picked={picked}
+        onPick={(name) => {
+          /* Clearing the typed pair, so there is never a question about which
+           * of the two the next request will use. */
+          setPicked(name);
+          setAddr('');
+          setSecret('');
+          setDevices([]);
+          void ask(false, name);
+        }}
+      />
+
       <section className="adm-card">
-        <h3>Reach a board</h3>
+        <h3>A board that is not on the list yet</h3>
         <div className="adm-row">
           <input
             type="text" value={addr} placeholder="192.168.1.145"

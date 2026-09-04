@@ -160,6 +160,10 @@ services:
       # Images the admin page can flash to a board over USB. A build artifact
       # of a different toolchain, so it is mounted rather than baked in;
       # absent is fine and the page says so.
+      # Which boards exist, and the secrets to reach them. Outside the repo by
+      # default, because it is credentials: anyone who can read it can move a
+      # relay onto a pin on every board it names.
+      - -boards=/state/boards.toml
       - -firmware=/firmware
       - -addr=0.0.0.0:8722
     # The vision seam, off unless a command is named. Analysis works without
@@ -188,6 +192,10 @@ services:
       - ${COMPONIUM_RIGS:-./rigs}:/rigs
       - ${COMPONIUM_SCORES:-./scores}:/scores
       - ${COMPONIUM_FIRMWARE:-../firmware/esp32/web}:/firmware:ro
+      # A directory, not a file: the studio writes the boards file by renaming a
+      # new one over it, and a single file bind mount has no directory to put
+      # that temporary file in.
+      - ${COMPONIUM_STATE:-~/.componium}:/state
     ports:
       - "8722:8722"
     depends_on:
