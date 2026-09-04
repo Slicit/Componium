@@ -49,3 +49,10 @@ firmware/esp32/sdkconfig
 firmware/esp32/sdkconfig.old
 firmware/esp32/dependencies.lock
 firmware/esp32/managed_components/
+
+# The same, for the firmware tests, which are their own IDF project.
+firmware/esp32/test/build/
+firmware/esp32/test/sdkconfig
+firmware/esp32/test/sdkconfig.old
+firmware/esp32/test/dependencies.lock
+firmware/esp32/test/managed_components/

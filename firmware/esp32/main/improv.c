@@ -355,7 +355,14 @@ void improv_start(void)
      * gives us reads without taking writes away, which is what lets a frame
      * and a log line share one cable. */
     if (!uart_is_driver_installed(LINE)) {
-        ESP_ERROR_CHECK(uart_driver_install(LINE, 1024, 0, 0, NULL, 0));
+        esp_err_t err = uart_driver_install(LINE, 1024, 0, 0, NULL, 0);
+        if (err != ESP_OK) {
+            /* No provisioning over the cable, and everything else still runs.
+             * Aborting here would take out a board that is already on a network
+             * and working, for want of a feature it is not using. */
+            ESP_LOGE(TAG, "no serial provisioning: %s", esp_err_to_name(err));
+            return;
+        }
     }
     /* A scan streams a result per network and the join blocks for seconds, so
      * this wants room. */

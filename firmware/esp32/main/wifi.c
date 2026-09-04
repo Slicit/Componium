@@ -143,8 +143,21 @@ static void aim(const char *ssid, const char *pass, int limit)
     xEventGroupClearBits(s_state, CONNECTED_BIT | FAILED_BIT);
 
     esp_wifi_stop();
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    /* Reported, not asserted. This runs from the improv task while somebody is
+     * watching a browser wait for it, and ESP_ERROR_CHECK here would reboot the
+     * board mid provisioning: the flasher would see the device vanish and say
+     * the network was refused, which is the wrong sentence about the wrong
+     * thing. A radio that will not start is a failure to join, and there is
+     * already a path for that. */
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
+    if (err == ESP_OK) {
+        err = esp_wifi_start();
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "radio would not start: %s", esp_err_to_name(err));
+        s_have_target = false;
+        xEventGroupSetBits(s_state, FAILED_BIT);
+    }
 }
 
 esp_err_t wifi_start(void)

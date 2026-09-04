@@ -11,6 +11,7 @@
  */
 
 #include "config.h"
+#include "guard.h"
 
 #include <string.h>
 
@@ -47,6 +48,12 @@ static void text(const cJSON *o, const char *name, char *out, size_t n)
 int config_parse(const char *json, device_t *out, char *problem, size_t problem_len)
 {
     problem[0] = 0;
+    /* This arrives from the network on one path and from flash on the other,
+     * and flash holds whatever the network last sent, so both are outside. */
+    if (!json_shallow_enough(json, (int)strlen(json), JSON_MAX_DEPTH)) {
+        snprintf(problem, problem_len, "nested deeper than %d", JSON_MAX_DEPTH);
+        return -1;
+    }
     cJSON *root = cJSON_Parse(json);
     if (!root) {
         snprintf(problem, problem_len, "not JSON");
@@ -97,8 +104,12 @@ int config_parse(const char *json, device_t *out, char *problem, size_t problem_
             return -1;
         }
 
-        d->freq_hz = (int)number(item, "freq_hz", 25000);
-        d->pixels = (int)number(item, "pixels", 30);
+        /* Bounded, all of them. Unbounded, pixels asks the strip driver for a
+         * buffer the chip has not got, and a frequency of zero is a timer that
+         * will not configure. The upper bounds are what one board can actually
+         * drive rather than what the field can hold. */
+        d->freq_hz = bounded_int(number(item, "freq_hz", 25000), 100, 40000, 25000);
+        d->pixels = bounded_int(number(item, "pixels", 30), 1, 300, 30);
         char active[8];
         text(item, "active", active, sizeof(active));
         d->active_high = strcmp(active, "low") != 0;
@@ -106,7 +117,9 @@ int config_parse(const char *json, device_t *out, char *problem, size_t problem_
         d->latency_ms = number(item, "latency_ms", 0);
         d->ramp_up_ms = number(item, "ramp_up_ms", 0);
         d->ramp_down_ms = number(item, "ramp_down_ms", 0);
-        d->safe = number(item, "safe", 0);
+        /* The value an output falls back to when the conductor is gone, so
+         * out of range here is a fogger whose failure state is "on". */
+        d->safe = unit_value(number(item, "safe", 0));
 
         /* Two devices on one pin is a configuration nobody meant to write, and
          * the second one would quietly win. */

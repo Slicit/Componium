@@ -35,6 +35,7 @@
 #include "mbedtls/md.h"
 #include "freertos/semphr.h"
 #include "config.h"
+#include "guard.h"
 #include "devices.h"
 
 #define CIP_PORT          5570
@@ -368,7 +369,9 @@ static bool handle_curve(const uint8_t *buf, int len)
                             ((uint32_t)buf[7 + 4 * c]);
             float v;
             memcpy(&v, &bits, sizeof(v));
-            d->value[c] = v;
+            /* Raw bits off the wire, so this is the one place a NaN can be
+             * spelled exactly and on purpose. */
+            d->value[c] = unit_value(v);
         }
         d->is_safe = false;
         device_apply(d);
@@ -401,7 +404,7 @@ static bool handle_curve(const uint8_t *buf, int len)
                                 ((uint32_t)buf[at + 3 + 4 * c]);
                 float v;
                 memcpy(&v, &bits, sizeof(v));
-                d->value[c] = v;
+                d->value[c] = unit_value(v);
             }
             d->is_safe = false;
             device_apply(d);
@@ -414,6 +417,14 @@ static bool handle_curve(const uint8_t *buf, int len)
 
 static void handle_json(int sock, struct sockaddr_in *from, const char *text, int len)
 {
+    /* Depth first, because cJSON's parser is recursive and its own limit is a
+     * thousand levels: far past the eight kilobytes this task has. The check
+     * has to happen before parsing, since there is no recovering from a stack
+     * overflow once the parser is inside it. */
+    if (!json_shallow_enough(text, len, JSON_MAX_DEPTH)) {
+        ESP_LOGW(TAG, "refusing a document nested deeper than %d", JSON_MAX_DEPTH);
+        return;
+    }
     cJSON *root = cJSON_ParseWithLength(text, len);
     if (!root) {
         return;
@@ -476,14 +487,18 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
                 const char *name = (d->channels == 3) ? rgb[c] : "intensity";
                 const cJSON *v = cJSON_GetObjectItem(params, name);
                 if (cJSON_IsNumber(v)) {
-                    d->value[c] = (float)v->valuedouble;
+                    d->value[c] = unit_value(v->valuedouble);
                 }
             }
         }
         const cJSON *hold = cJSON_GetObjectItem(root, "hold_ms");
         if (cJSON_IsNumber(hold) && hold->valuedouble > 0) {
-            d->hold_until_us = esp_timer_get_time() +
-                               (int64_t)(hold->valuedouble * 1000);
+            /* Bounded, because this becomes a deadline. A hold of 1e300 ms
+             * overflows the arithmetic into a time in the past, and an expiry
+             * already behind us is an output that never goes safe on its own.
+             * An hour is longer than any cue and shorter than for ever. */
+            int64_t ms = (int64_t)bounded_int(hold->valuedouble, 1, 3600000, 1);
+            d->hold_until_us = esp_timer_get_time() + ms * 1000;
         } else {
             d->hold_until_us = 0;
         }
@@ -531,17 +546,17 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
         int count = config_parse(json, parsed, problem, sizeof(problem));
         if (count < 0) {
             send_refusal(sock, from, n, problem);
-            free(json);
+            cJSON_free(json);
             cJSON_Delete(root);
             return;
         }
         if (!config_save(json)) {
             send_refusal(sock, from, n, "could not store it");
-            free(json);
+            cJSON_free(json);
             cJSON_Delete(root);
             return;
         }
-        free(json);
+        cJSON_free(json);
 
         send_ack(sock, from, n);
         apply_config();

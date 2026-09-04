@@ -29,10 +29,18 @@ static void storage_start(void)
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_LOGW(TAG, "storage unreadable, clearing it");
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
+        if (nvs_flash_erase() == ESP_OK) {
+            err = nvs_flash_init();
+        }
     }
-    ESP_ERROR_CHECK(err);
+    if (err != ESP_OK) {
+        /* A board with no storage forgets its network and its devices, and is
+         * still a board: it comes up, holds every output safe, and can be
+         * provisioned over the cable. Aborting instead would reboot it for ever
+         * over a flash partition that is not coming back on its own. */
+        ESP_LOGE(TAG, "no storage: %s. Nothing will be remembered.",
+                 esp_err_to_name(err));
+    }
 }
 
 void app_main(void)
@@ -44,7 +52,12 @@ void app_main(void)
      * between power and provisioning is exactly when nobody is watching it. */
     componium_node_init();
 
-    ESP_ERROR_CHECK(wifi_start());
+    if (wifi_start() != ESP_OK) {
+        /* No radio. The outputs are already safe and stay that way, and the
+         * cable still works, so this is worth saying rather than rebooting
+         * about. */
+        ESP_LOGE(TAG, "wifi would not start; this board is offline");
+    }
     improv_start();
 
     /* Not a timeout on the network, a timeout on waiting quietly. If the
