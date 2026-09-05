@@ -1,22 +1,39 @@
 #!/bin/sh
 # Package a built firmware into something a browser can flash.
 #
-# esp-web-tools wants one image and a manifest describing it. The image is the
-# bootloader, the partition table and the application merged into a single blob
-# written at offset 0, which is the arrangement that survives a board in an
-# unknown state: it does not matter what was on it before.
-#
 #   . $IDF_PATH/export.sh
-#   cd firmware/esp32 && idf.py set-target esp32 && idf.py build
+#   cd firmware/esp32 && idf.py set-target esp32
+#   COMPONIUM_CIP_SECRET='...' idf.py build
 #   ./make-web-install.sh
 #
 # Then point the studio at the result:
 #
 #   componium studio -firmware firmware/esp32/web ...
 #
+# Four files rather than one blob, and the difference is the whole point.
+#
+# It used to merge the bootloader, the partition table and the application into
+# a single image written at offset 0. That survives a board in an unknown state,
+# which was the reason for it, and it also covers 0x9000 to 0xf000, which is
+# where nvs lives. So every flash over USB erased the wifi credentials and the
+# device configuration as a side effect of how the image was packaged, and the
+# board had to be provisioned and configured again every single time.
+#
+# Written as separate parts, nothing touches the gap where nvs is, and a board
+# keeps what it knows across an update. That matters more now than it did:
+# updates normally happen over the air, and a cable is what is left when
+# everything else has failed. Somebody reaching for one is already having a bad
+# day and should not also lose the configuration.
+#
+# otadata is written too, deliberately. With two app slots the bootloader reads
+# it to decide which to start, and a board that had been updated over the air
+# would otherwise boot the slot this flash did not write. Seeding it makes a USB
+# flash mean what somebody reaching for a cable expects: run the thing I just
+# installed.
+#
 # The output is a build artifact and is not committed. It is close to a
-# megabyte, it changes on its own schedule, and a studio release has no
-# business being tied to a firmware release.
+# megabyte, it changes on its own schedule, and a studio release has no business
+# being tied to a firmware release.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -25,10 +42,6 @@ out="$here/web"
 
 if [ ! -f "$build/componium_node.bin" ]; then
     echo "no build in $build. Run: idf.py set-target esp32 && idf.py build" >&2
-    exit 1
-fi
-if ! command -v esptool.py > /dev/null 2>&1; then
-    echo "esptool.py is not on PATH. Run: . \$IDF_PATH/export.sh" >&2
     exit 1
 fi
 
@@ -63,24 +76,32 @@ fi
 version=$(git -C "$here" describe --tags --always --dirty 2>/dev/null || echo unknown)
 
 mkdir -p "$out"
-esptool.py --chip esp32 merge_bin \
-    -o "$out/componium-node-esp32.bin" \
-    --flash_mode dio --flash_size 4MB \
-    0x1000 "$build/bootloader/bootloader.bin" \
-    0x8000 "$build/partition_table/partition-table.bin" \
-    0x10000 "$build/componium_node.bin"
+cp "$build/bootloader/bootloader.bin"            "$out/bootloader.bin"
+cp "$build/partition_table/partition-table.bin"  "$out/partition-table.bin"
+cp "$build/ota_data_initial.bin"                 "$out/otadata.bin"
+cp "$build/componium_node.bin"                   "$out/componium-node-esp32.bin"
 
+# Offsets in decimal, because that is what the manifest format takes:
+#   0x1000  = 4096     bootloader
+#   0x8000  = 32768    partition table
+#   0xf000  = 61440    otadata
+#   0x20000 = 131072   the first app slot
+#
+# nvs sits at 0x9000 to 0xf000 and is not in this list, which is the point.
 cat > "$out/manifest.json" <<MANIFEST
 {
   "name": "Componium node",
   "version": "$version",
-  "new_install_prompt_erase": true,
+  "new_install_prompt_erase": false,
   "builds": [
     {
       "chipFamily": "ESP32",
       "improv": true,
       "parts": [
-        { "path": "componium-node-esp32.bin", "offset": 0 }
+        { "path": "bootloader.bin", "offset": 4096 },
+        { "path": "partition-table.bin", "offset": 32768 },
+        { "path": "otadata.bin", "offset": 61440 },
+        { "path": "componium-node-esp32.bin", "offset": 131072 }
       ]
     }
   ]

@@ -62,9 +62,20 @@ func (s *Server) handleFirmwareInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	if b, err := os.ReadFile(path); err == nil && json.Unmarshal(b, &m) == nil {
 		out.Name = m.Name
-		if len(m.Builds) > 0 && len(m.Builds[0].Parts) > 0 {
-			if st, err := os.Stat(filepath.Join(s.firmware, filepath.Base(m.Builds[0].Parts[0].Path))); err == nil {
-				out.Bytes = st.Size()
+		// Every part, not the first one.
+		//
+		// The first part was the whole image while the firmware was
+		// packaged as one blob at offset 0. It is written in pieces now, so
+		// that nothing lands on the gap where the wifi credentials and the
+		// configuration live, and the first piece is a 26KB bootloader.
+		// What somebody wants to know is how much is about to be written.
+		if len(m.Builds) > 0 {
+			for _, part := range m.Builds[0].Parts {
+				st, err := os.Stat(filepath.Join(s.firmware, filepath.Base(part.Path)))
+				if err != nil {
+					continue
+				}
+				out.Bytes += st.Size()
 			}
 		}
 	}

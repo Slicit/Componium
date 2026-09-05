@@ -122,3 +122,87 @@ func TestServingIsOffWhenNoDirectoryWasGiven(t *testing.T) {
 		t.Errorf("answered %d with no directory configured", code)
 	}
 }
+
+func TestTheFlasherIsToldHowMuchIsAboutToBeWritten(t *testing.T) {
+	/* The size used to be the first part's, which was the whole thing while
+	 * the firmware was one blob written at offset 0. It is written in pieces
+	 * now so that nothing lands on the gap where the wifi credentials and the
+	 * device configuration live, and the first piece is a small bootloader.
+	 *
+	 * A page offering to flash 26KB of a 900KB firmware is wrong in the one
+	 * way somebody would notice and not be able to explain. */
+	dir := t.TempDir()
+	write := func(name string, n int) {
+		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, n), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("bootloader.bin", 26112)
+	write("partition-table.bin", 3072)
+	write("otadata.bin", 8192)
+	write("app.bin", 882656)
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"),
+		[]byte(`{"name":"Componium node","builds":[{"chipFamily":"ESP32","parts":[
+		{"path":"bootloader.bin","offset":4096},
+		{"path":"partition-table.bin","offset":32768},
+		{"path":"otadata.bin","offset":61440},
+		{"path":"app.bin","offset":131072}]}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{firmware: dir}
+	var got struct {
+		Available bool  `json:"available"`
+		Bytes     int64 `json:"bytes"`
+	}
+	if err := json.Unmarshal(ask(s, "/api/firmware").Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Available {
+		t.Fatal("a four part build was not reported as available")
+	}
+	if want := int64(26112 + 3072 + 8192 + 882656); got.Bytes != want {
+		t.Errorf("the page is told %d bytes and %d will be written", got.Bytes, want)
+	}
+}
+
+func TestNothingIsWrittenWhereTheSettingsLive(t *testing.T) {
+	/* The reason for packaging in pieces at all. nvs runs from 0x9000 to
+	 * 0xf000 and holds the wifi credentials and the device configuration; a
+	 * single image at offset 0 covers it, so every flash over USB erased both
+	 * as a side effect of how the image was built. */
+	const nvsFrom, nvsTo = 0x9000, 0xf000
+
+	body, err := os.ReadFile(filepath.Join("..", "..", "firmware", "esp32", "web", "manifest.json"))
+	if err != nil {
+		t.Skip("no packaged firmware here")
+	}
+	var m struct {
+		Builds []struct {
+			Parts []struct {
+				Path   string `json:"path"`
+				Offset int64  `json:"offset"`
+			} `json:"parts"`
+		} `json:"builds"`
+	}
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Builds) == 0 || len(m.Builds[0].Parts) == 0 {
+		t.Fatal("the manifest describes nothing to write")
+	}
+
+	dir := filepath.Join("..", "..", "firmware", "esp32", "web")
+	for _, part := range m.Builds[0].Parts {
+		st, err := os.Stat(filepath.Join(dir, filepath.Base(part.Path)))
+		if err != nil {
+			t.Errorf("the manifest names %s and it is not there", part.Path)
+			continue
+		}
+		from, to := part.Offset, part.Offset+st.Size()
+		if from < nvsTo && to > nvsFrom {
+			t.Errorf("%s covers 0x%x to 0x%x and would erase the settings at "+
+				"0x%x to 0x%x", part.Path, from, to, nvsFrom, nvsTo)
+		}
+	}
+}

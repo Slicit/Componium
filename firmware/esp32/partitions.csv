@@ -1,0 +1,29 @@
+# Where everything lives in the board's flash.
+#
+# Written out rather than taken from ESP-IDF's stock two-slot table, for one
+# reason: nvs has to stay exactly where it is. It holds the wifi credentials and
+# the device configuration, at 0x9000 for 0x6000 bytes, and a board that moves
+# it is a board that forgets everything the first time it is updated. The stock
+# table puts nvs at 0x9000 with 0x4000, which is close enough to look fine and
+# far enough to lose the end of a configuration.
+#
+# Two app slots, because that is what an update over the air means: the running
+# firmware writes the one it is not running from, and the bootloader is told to
+# try it next. Nothing is overwritten until the new image is complete and has
+# been checked, so a download that fails halfway leaves a working board.
+#
+# otadata records which slot to boot and whether the last attempt worked. It is
+# what makes rolling back possible, and it is why an image that cannot get
+# itself onto a network does not strand a board in a ceiling.
+#
+# 1.75MB a slot is generous: the firmware is under 900KB with room for the web
+# server and the http client an update needs. The spare 384KB at the end is
+# deliberate, because a partition table is the one thing that cannot be changed
+# without a cable.
+#
+# Name,     Type, SubType, Offset,   Size,     Flags
+nvs,        data, nvs,     0x9000,   0x6000,
+otadata,    data, ota,     0xf000,   0x2000,
+phy_init,   data, phy,     0x11000,  0x1000,
+ota_0,      app,  ota_0,   0x20000,  0x1C0000,
+ota_1,      app,  ota_1,   0x1E0000, 0x1C0000,

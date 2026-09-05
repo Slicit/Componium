@@ -6,3 +6,21 @@
 # A browser sends more than 512 bytes of request headers before it has said
 # anything interesting, and the server answered 431 to every one of them.
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+
+# Four megabytes, which is what a WROOM-32U has, and two app slots in it.
+#
+# An update over the air writes the slot the board is not running from, so the
+# firmware is never half replaced and a download that fails leaves a board that
+# still works. USB stays as the way back when everything else has failed, which
+# is the right place for it: a board in a ceiling should not need a cable to be
+# updated, and should still be recoverable with one.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# A new image has to prove it works before it is kept. It is marked valid only
+# once it has come up and answered, so an image that cannot join a network or
+# cannot serve is rolled back by the bootloader on the next boot rather than
+# leaving somebody with a ladder.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
