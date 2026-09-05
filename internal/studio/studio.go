@@ -56,6 +56,9 @@ type Options struct {
 	// Composer is the path to compose.py. Without it, analysis cannot run and
 	// the library says so rather than offering a button that does nothing.
 	Composer string
+	// Addr is where the studio listens, used to tell a board where to fetch
+	// firmware from.
+	Addr string
 	// Boards is the file remembering which ESP32s exist, with the secrets
 	// needed to reach them. Empty means they are not remembered, and the admin
 	// page says so rather than losing an edit.
@@ -98,6 +101,11 @@ type Server struct {
 	// whether or not any rig mentions it. Never nil, so a studio started
 	// without a boards file still answers the page rather than panicking.
 	boards *boards.Shelf
+	// addr is where this studio listens, so it can tell a board where to
+	// fetch firmware from. The browser cannot answer that: it is often
+	// reaching the studio through a tunnel at localhost, which is not
+	// somewhere a board on a shelf can go.
+	addr string
 
 	// Live output is separate from the editing lock on purpose: the show loop
 	// reports a reading every five milliseconds and must never wait behind
@@ -111,7 +119,7 @@ type Server struct {
 // New opens a studio.
 func New(o Options) (*Server, error) {
 	s := &Server{path: o.Score, media: o.Media, scores: o.Scores,
-		firmware: o.Firmware, rigPath: o.Rig}
+		firmware: o.Firmware, rigPath: o.Rig, addr: o.Addr}
 
 	// Always a shelf, even with no file behind it. A studio started without one
 	// still answers the page, saying the list cannot be remembered, rather than
@@ -256,6 +264,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/node", s.handleNode)
 	mux.HandleFunc("/api/boards", s.handleBoards)
 	mux.HandleFunc("/api/boards/check", s.handleBoardsCheck)
+	mux.HandleFunc("/api/boards/update", s.handleBoardUpdate)
 	mux.HandleFunc("/media", s.handleMedia)
 	mux.HandleFunc("/api/media", s.handleMediaList)
 	mux.HandleFunc("/api/library", s.handleLibrary)

@@ -20,6 +20,15 @@ export interface Board {
   hasSecret: boolean;
 }
 
+/** What the studio has to send, if anything. */
+export interface OnHand {
+  available: boolean;
+  why?: string;
+  name?: string;
+  version?: string;
+  appBytes?: number;
+}
+
 export interface BoardStatus {
   name: string;
   addr: string;
@@ -43,6 +52,9 @@ export function Boards({ onPick, picked }: {
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [onHand, setOnHand] = useState<OnHand | null>(null);
+  const [updating, setUpdating] = useState<string | null>(null);
+  const [sent, setSent] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch('/api/boards');
@@ -70,6 +82,18 @@ export function Boards({ onPick, picked }: {
   }, []);
 
   useEffect(() => { void load().then(check); }, [load, check]);
+
+  /* Whether there is anything to send. Most studios run nowhere near a
+   * soldering iron and have no firmware at all, which is not an error and is
+   * why the update button is absent rather than broken. */
+  useEffect(() => {
+    let live = true;
+    void fetch('/api/firmware')
+      .then((r) => r.json())
+      .then((got: OnHand) => { if (live) setOnHand(got); })
+      .catch(() => { /* No firmware to offer. The page is still useful. */ });
+    return () => { live = false; };
+  }, []);
 
   /* Saving the whole list, which is also how one is deleted. One path for every
    * edit, so a delete cannot rot separately from an add. */
@@ -99,6 +123,56 @@ export function Boards({ onPick, picked }: {
     }
   }, [check]);
 
+  /* Replacing a board's firmware over the network.
+   *
+   * The studio does the whole thing: it picks the application out of the
+   * package, signs it with that board's secret, and works out an address the
+   * board can actually reach. Nothing here holds either the image or the
+   * secret, which is the point of the button being here rather than being a
+   * command somebody types with a hash pasted into it.
+   */
+  const update = async (b: Board) => {
+    const what = onHand?.version ? ' to ' + onHand.version : '';
+    if (!window.confirm(
+      `Update ${b.name}${what}?\n\n` +
+      `It downloads the image, checks the signature, writes it and restarts. ` +
+      `The board stops answering for about a minute and comes back on its own.\n\n` +
+      `The image is written to the slot the board is not running from, so a ` +
+      `download that stops halfway leaves it running what it has. If the new ` +
+      `firmware cannot get on the network, the board goes back to this one by ` +
+      `itself at the next power cycle.`
+    )) return;
+
+    setUpdating(b.name);
+    setError(null);
+    setSent(null);
+    try {
+      const res = await fetch('/api/boards/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ board: b.name }),
+      });
+      const said = await res.text();
+      if (!res.ok) {
+        setError(said.trim() || 'the board did not take the update');
+        return;
+      }
+      const got = JSON.parse(said);
+      setSent(got.note ?? 'the board is updating');
+      /* Its state is now unknown rather than online: it is about to stop
+       * answering, and a green dot through the restart would be a lie. */
+      setStatus((s) => {
+        const next = { ...s };
+        delete next[b.name];
+        return next;
+      });
+    } catch (e) {
+      setError(String((e as Error).message || e));
+    } finally {
+      setUpdating(null);
+    }
+  };
+
   const forget = (name: string) => {
     /* Confirmed, because the secret goes with it and there is no way to read
      * one back off a board: getting it wrong means a USB cable. */
@@ -122,6 +196,15 @@ export function Boards({ onPick, picked }: {
         )}
       </div>
 
+      {onHand?.available && !!onHand.appBytes && (
+        <p className="dim small">
+          Firmware on hand: {onHand.version || onHand.name || 'an unnamed build'}
+          {' '}({Math.round(onHand.appBytes / 1024)}KB). Updating sends it over
+          the network. A change to the partition layout still needs USB, because
+          an update replaces the application and nothing under it.
+        </p>
+      )}
+
       {!editable && (
         <p className="dim small">
           This studio was started without a boards file, so what you attach here
@@ -131,6 +214,7 @@ export function Boards({ onPick, picked }: {
       )}
 
       {error && <p className="adm-warn">{error}</p>}
+      {sent && <p className="dim small">{sent}</p>}
 
       {boards.length === 0 && !adding && (
         <p className="dim small">
@@ -177,6 +261,14 @@ export function Boards({ onPick, picked }: {
                     </td>
                     <td className="dim">{b.note ?? ''}</td>
                     <td>
+                      {onHand?.available && onHand.appBytes ? (
+                        <button
+                          aria-label={'Update ' + b.name}
+                          disabled={updating !== null || !b.hasSecret || !st?.online}
+                          title={updateWhyNot(b, st) ?? 'Replace this board’s firmware over the network'}
+                          onClick={() => void update(b)}
+                        >{updating === b.name ? 'updating…' : 'update'}</button>
+                      ) : null}
                       {editable && (
                         <button className="adm-remove" aria-label={'Forget ' + b.name}
                           onClick={() => forget(b.name)}>forget</button>
@@ -228,6 +320,17 @@ export function Boards({ onPick, picked }: {
       )}
     </section>
   );
+}
+
+/** Why the update button is greyed, in the words that say what to do about it. */
+function updateWhyNot(b: Board, st?: BoardStatus): string | null {
+  if (!b.hasSecret) {
+    return 'No secret is stored for this board, and an update is the one thing ' +
+      'it will not do for a stranger. Attach it again with its secret.';
+  }
+  if (!st) return 'Not checked yet. Press “Check them”.';
+  if (!st.online) return 'This board is not answering, so it cannot be told anything.';
+  return null;
 }
 
 /** A reason short enough for a table cell, without losing which reason it is. */

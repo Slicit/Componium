@@ -33,6 +33,11 @@ func (s *Server) handleFirmwareInfo(w http.ResponseWriter, r *http.Request) {
 		Manifest  string `json:"manifest,omitempty"`
 		Name      string `json:"name,omitempty"`
 		Bytes     int64  `json:"bytes,omitempty"`
+		Version   string `json:"version,omitempty"`
+		// AppBytes is the application alone, which is what an update over the
+		// network replaces. Smaller than Bytes, and a different number worth
+		// showing: flashing over USB writes the whole package.
+		AppBytes int64 `json:"appBytes,omitempty"`
 	}
 	say := func(v reply) {
 		w.Header().Set("Content-Type", "application/json")
@@ -77,6 +82,16 @@ func (s *Server) handleFirmwareInfo(w http.ResponseWriter, r *http.Request) {
 				}
 				out.Bytes += st.Size()
 			}
+		}
+	}
+	out.Version = s.firmwareVersion()
+	// Whether an update over the network is possible at all, and how much of the
+	// package it would move. A package with no application in it can still be
+	// flashed over USB, so this failing is not a reason to say there is nothing
+	// here.
+	if app, _, err := s.appImage(); err == nil {
+		if st, err := os.Stat(app); err == nil {
+			out.AppBytes = st.Size()
 		}
 	}
 	say(out)

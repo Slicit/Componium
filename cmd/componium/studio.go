@@ -48,7 +48,7 @@ func studioCmd(args []string) error {
 	s, err := studio.New(studio.Options{
 		Score: *scorePath, Rig: *rigPath, Media: *mediaPath,
 		Scores: *scoresPath, Composer: comp, Firmware: *firmware, DB: *db,
-		Boards: *boardsPath,
+		Boards: *boardsPath, Addr: *addr,
 	})
 	if err != nil {
 		return err
