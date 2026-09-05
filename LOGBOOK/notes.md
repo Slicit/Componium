@@ -97,3 +97,39 @@ Two details worth carrying elsewhere:
   and `kinds.get(kind, kind + ".main")` are the same mistake in two languages:
   a missing entry produces a plausible answer instead of a complaint, and the
   plausible answer travels a long way before anybody notices.
+
+### 2026-09-05 · One replay counter per board means one client per board
+
+A node keeps a single `s_highest_counter` for the whole board, not one per
+sender, and refuses any authenticated JSON whose `n` is not above it. Every
+client seeds its counter from the wall clock in microseconds and then adds one
+per message. So a client that connects later starts millions of counts ahead,
+and from its first message every message from the earlier client is refused,
+permanently, in silence.
+
+Reproduced deliberately with `hack/poke-together.py`: one POST to
+`/api/boards/check` in the middle of a run silenced the script for the rest of
+it, 94 refusals, two of its four cues never landed. With nothing else talking,
+the same run refuses nothing.
+
+Three things make it hard to see from either end.
+
+- Curve frames carry no counter, so they keep arriving. The outputs still move
+  and only the cues, the stops and the heartbeats vanish, which reads as a
+  scoring problem rather than a transport one.
+- Cues sent before the other client spoke still land, so the failure starts
+  part way through and looks intermittent.
+- The refusal is counted on the board and logged nowhere the operator sees. The
+  status page on port 80 is the only place the number appears.
+
+What it costs in practice: opening the studio's Boards page during a show stops
+the conductor being heard by that board until the conductor reconnects. The
+watchdog then drops the board's outputs to safe after 300ms, which is the
+correct behaviour and the wrong reason.
+
+Not fixed. The shape of a fix is a counter per sender rather than per board,
+keyed by whatever identifies a client, which is a protocol change and wants an
+ADR. A smaller version is for a client to seed from the clock and keep seeding
+from the clock rather than incrementing by one, so two clients interleave
+instead of one overtaking the other for good. That is a one line change in
+`internal/cip/client.go` and it does not fix a client that is not ours.
