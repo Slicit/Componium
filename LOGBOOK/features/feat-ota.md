@@ -1,5 +1,5 @@
 ---
-status: active
+status: shipped
 branch: feat-ota
 ---
 
@@ -110,9 +110,23 @@ the dangerous half.
 
 Nine tests in `internal/studio/otaapi_test.go` cover the studio side.
 
-Not confirmed on hardware. It cannot be until a board has been flashed over USB
-once more, because the OTA capable layout is itself a layout change. That flash
-is the last cable this should ever need.
+Confirmed on hardware, 2026-09-05. A board on the bench went from
+`v0.1.0-alpha.1-90-gbf3290d` to `v0.1.0-alpha.1-95-g17df6c3` in about sixteen
+seconds from pressing the button: fetched, verified, written to the slot it was
+not running from, rebooted, back on the same address, and authenticated, which
+is what cancelled the rollback. Its wifi credentials survived, and so did all
+three configured devices with their wiring, ramps and latencies. No cable, no
+serial console.
+
+One thing had to be fixed first, and it is the reason for checking before
+pressing rather than pressing and seeing. The studio ships in a container, and
+a container asking the routing table for its own address gets a bridge address
+that nothing outside can reach. It is not loopback, so the guard passed it. The
+board would have authenticated the instruction, accepted it, failed to fetch,
+and carried on running what it had, while the studio answered "started",
+because starting is all it can honestly report. Nobody would have been told
+anything. Hence `-advertise`, which is required in the compose deployment and
+nowhere else.
 
 ## Open
 
