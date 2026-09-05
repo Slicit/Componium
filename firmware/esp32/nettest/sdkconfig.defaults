@@ -1,0 +1,5 @@
+# The Ethernet controller QEMU emulates, in place of the radio it does not.
+CONFIG_ETH_USE_OPENETH=y
+CONFIG_ETH_USE_ESP32_EMAC=n
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_ESP_TASK_WDT_INIT=n

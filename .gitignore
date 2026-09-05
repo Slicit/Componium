@@ -61,3 +61,10 @@ firmware/esp32/test/sdkconfig
 firmware/esp32/test/sdkconfig.old
 firmware/esp32/test/dependencies.lock
 firmware/esp32/test/managed_components/
+
+# And for the emulated network node, which is a third IDF project.
+firmware/esp32/nettest/build/
+firmware/esp32/nettest/sdkconfig
+firmware/esp32/nettest/sdkconfig.old
+firmware/esp32/nettest/dependencies.lock
+firmware/esp32/nettest/managed_components/
