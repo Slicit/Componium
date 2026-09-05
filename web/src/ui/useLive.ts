@@ -27,6 +27,9 @@ export interface LiveState {
   rig?: string;
   real: number;
   instruments?: string[];
+  /* The instruments a colour trim can do anything to, so the sliders are
+     offered for those and for nothing else. */
+  lights?: string[];
   silent: boolean;
   media: number;
   precision: number;

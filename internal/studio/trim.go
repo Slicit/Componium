@@ -99,14 +99,21 @@ func clamp01(v float64) float64 {
 	return v
 }
 
-// trimmed wraps an instrument so that what reaches it is adjusted.
+// trimmed wraps one instrument so that what reaches it is adjusted.
 //
 // Outside the safety guard rather than inside it. The supervisor's own idea of
 // safe is exact and must not be brightened by a slider somebody left at plus
 // eighty, so anything it sends goes out untrimmed.
+//
+// One wrapper per instrument, carrying that instrument's id, because the thing
+// being compensated for is a strip rather than a room: an ambient wash behind
+// a screen and an event strip in a cornice are different parts, bought at
+// different times, and the number that makes one of them right makes the other
+// one wrong.
 type trimmed struct {
 	inner instrument.Instrument
-	of    func() Trim
+	id    string
+	of    func(string) Trim
 }
 
 func (t trimmed) Manifest() instrument.Manifest { return t.inner.Manifest() }
@@ -115,34 +122,56 @@ func (t trimmed) Dispatch(d instrument.Dispatch) error {
 	if instrument.IsStop(d.Cue.Action) {
 		return t.inner.Dispatch(d)
 	}
-	d.Cue.Params = t.of().Apply(d.Cue.Params)
+	d.Cue.Params = t.of(t.id).Apply(d.Cue.Params)
 	return t.inner.Dispatch(d)
 }
 
 var _ instrument.Instrument = trimmed{}
 
-// trimHolder is the studio's current trim, read at dispatch time.
+// trimHolder is what each instrument is currently being trimmed by, read at
+// dispatch time.
 //
 // Read per cue rather than captured when the rig is armed, which is the whole
 // point: the sliders are for moving while a film plays and watching the strip.
+//
+// An instrument nobody has touched is absent rather than stored as a pair of
+// zeroes, so what comes back is the set of things somebody has actually
+// adjusted. A zero trim and no trim do the same nothing.
 type trimHolder struct {
 	mu sync.Mutex
-	t  Trim
+	by map[string]Trim
 }
 
-func (h *trimHolder) get() Trim {
+func (h *trimHolder) get(instrument string) Trim {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.t
+	return h.by[instrument]
 }
 
-func (h *trimHolder) set(t Trim) {
+func (h *trimHolder) set(instrument string, t Trim) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.t = t
+	if t.Zero() {
+		delete(h.by, instrument)
+		return
+	}
+	if h.by == nil {
+		h.by = map[string]Trim{}
+	}
+	h.by[instrument] = t
 }
 
-// handleLiveTrim reads and sets the sliders.
+func (h *trimHolder) all() map[string]Trim {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make(map[string]Trim, len(h.by))
+	for k, v := range h.by {
+		out[k] = v
+	}
+	return out
+}
+
+// handleLiveTrim reads and sets the sliders, one instrument at a time.
 //
 // On the studio rather than on the live session, so that disarming to move a
 // board and arming again does not silently throw away a setting somebody spent
@@ -150,10 +179,11 @@ func (h *trimHolder) set(t Trim) {
 func (s *Server) handleLiveTrim(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, wireTrim(s.trim.get()))
+		writeJSON(w, http.StatusOK, map[string]any{"trim": wireTrims(s.trim.all())})
 
 	case http.MethodPost, http.MethodPut:
 		var in struct {
+			Instrument string   `json:"instrument"`
 			Brightness *float64 `json:"brightness"`
 			Saturation *float64 `json:"saturation"`
 		}
@@ -161,18 +191,25 @@ func (s *Server) handleLiveTrim(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "could not read that: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		if in.Instrument == "" {
+			// Refused rather than applied to everything. A missing name is a
+			// page with a bug, and guessing that it meant the whole room is a
+			// way to move an instrument nobody was looking at.
+			http.Error(w, "say which instrument to trim", http.StatusBadRequest)
+			return
+		}
 		// Absent means leave it, rather than means zero. A page moving one
 		// slider should not have to send the other, and a client that sent
 		// only what it changed would otherwise reset the rest.
-		next := s.trim.get()
+		next := s.trim.get(in.Instrument)
 		if in.Brightness != nil {
 			next.Brightness = clampTrim(*in.Brightness)
 		}
 		if in.Saturation != nil {
 			next.Saturation = clampTrim(*in.Saturation)
 		}
-		s.trim.set(next)
-		writeJSON(w, http.StatusOK, wireTrim(next))
+		s.trim.set(in.Instrument, next)
+		writeJSON(w, http.StatusOK, map[string]any{"trim": wireTrims(s.trim.all())})
 
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -182,11 +219,15 @@ func (s *Server) handleLiveTrim(w http.ResponseWriter, r *http.Request) {
 
 // The wire carries whole numbers from -100 to +100, because that is what a
 // slider is, and the inside works in -1 to +1 because that is what a colour is.
-func wireTrim(t Trim) map[string]float64 {
-	return map[string]float64{
-		"brightness": t.Brightness * 100,
-		"saturation": t.Saturation * 100,
+func wireTrims(all map[string]Trim) map[string]map[string]float64 {
+	out := make(map[string]map[string]float64, len(all))
+	for id, t := range all {
+		out[id] = map[string]float64{
+			"brightness": t.Brightness * 100,
+			"saturation": t.Saturation * 100,
+		}
 	}
+	return out
 }
 
 func clampTrim(v float64) float64 {

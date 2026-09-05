@@ -1260,25 +1260,53 @@ button:hover { border-color: #3a4553; }
 /* A card inside a card, for the row being added. */
 .adm-inset { margin: 0.75rem 0 0; }
 
-/* The live colour trim: two knobs beside the armed chip.
+/* The live colour trim: a panel of two knobs per light.
  *
- * Compact on purpose. It belongs in the toolbar because it is used while
- * watching the room rather than the screen, and anything that pushed the
- * timeline down every time somebody went live would be worse than useful. */
-.trim {
-  display: inline-flex;
+ * A panel rather than a row in the toolbar, because two sliders times however
+ * many strips a room has does not fit beside the buttons, and this is read
+ * while looking at the room rather than at the screen. */
+.trim-host { position: relative; display: inline-flex; }
+.trim-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 30rem;
+  padding: 10px 12px 12px;
+  background: var(--ground);
+  border: 1px solid var(--line, #d8d4cd);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+.trim-why {
+  margin: 0 0 8px;
+  font-size: 11px;
+  opacity: 0.6;
+  max-width: 30rem;
+}
+.trim-row {
+  display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 4px;
+  padding: 3px 0;
 }
-.trim label {
+/* The name is fixed width so every slider starts at the same place: a column
+   of handles is readable at a glance and a ragged one is not. */
+.trim-who {
+  flex: 0 0 8.5rem;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trim-row label {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-size: 11px;
 }
-.trim-name { opacity: 0.65; }
-.trim input[type="range"] {
+.trim-name { opacity: 0.6; }
+.trim-row input[type="range"] {
   width: 88px;
   margin: 0;
   accent-color: var(--warn, #c1121f);
@@ -1298,4 +1326,4 @@ button:hover { border-color: #3a4553; }
   font-weight: 600;
   color: var(--warn, #c1121f);
 }
-.trim-reset { font-size: 11px; padding: 2px 8px; }
+.trim-reset { font-size: 11px; padding: 2px 8px; margin-left: auto; }

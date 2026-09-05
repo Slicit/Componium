@@ -1,18 +1,22 @@
-/* Two knobs for a strip that does not look like the numbers say it should.
+/* Two knobs per light, for strips that do not look like the numbers say.
  *
  * A generated ambient curve can hold its saturation around five percent for
  * most of a film. The hue swings the whole way round the circle, the timeline
  * draws it beautifully, and the strip is white. Nothing is wrong with the score
  * and nothing is wrong with the strip: two reels of LEDs with the same part
- * number on the bag reach the same numbers differently, and the difference has
- * to be adjustable somewhere.
+ * number on the bag reach the same numbers differently.
  *
- * Here, rather than in the score, because it is a statement about this room. A
- * score edited to suit one strip plays wrong on every other rig.
+ * Per light rather than per room, because that is where the difference is. An
+ * ambient wash behind a screen and an event strip in a cornice are different
+ * parts, bought at different times, and the number that makes one of them right
+ * makes the other one wrong.
  *
- * Sent as they move, so the answer is on the wall rather than in a form. The
- * server holds them, so disarming to move a board does not lose a setting that
- * took ten minutes to find.
+ * Not in the score, because a score edited to suit one strip plays wrong on
+ * every other rig. This is a statement about a room.
+ *
+ * In a panel rather than in the toolbar: two sliders per light is more than a
+ * row of buttons can hold, and this is read while looking at the room rather
+ * than at the screen.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -22,92 +26,126 @@ export interface Trim {
   saturation: number;
 }
 
+/** Per instrument id. An instrument nobody has touched is simply absent. */
+export type Trims = Record<string, Trim>;
+
 const NONE: Trim = { brightness: 0, saturation: 0 };
 
-/** Slower than the slider moves, so dragging does not become a flood. */
+/** Slower than a slider moves, so dragging does not become a flood. */
 const SEND_MS = 60;
 
-export function LiveTrim() {
-  const [trim, setTrim] = useState<Trim>(NONE);
-  /* What the server has, so a drag is not fighting a reply that arrives late
-   * and snaps the handle back to where it was two frames ago. */
-  const pending = useRef<Trim | null>(null);
+export function LiveTrim({ lights }: { lights: string[] }) {
+  const [open, setOpen] = useState(false);
+  const [trims, setTrims] = useState<Trims>({});
+  /* What has not been sent yet. A drag is dozens of change events and the
+   * server needs the last one, not all of them. */
+  const pending = useRef<Record<string, Trim>>({});
   const timer = useRef<number | null>(null);
 
   useEffect(() => {
     let live = true;
     void fetch('/api/live/trim')
       .then((r) => (r.ok ? r.json() : null))
-      .then((got: Trim | null) => { if (live && got) setTrim(got); })
+      .then((got) => { if (live && got?.trim) setTrims(got.trim); })
       .catch(() => { /* the sliders still work, they just start at zero */ });
     return () => { live = false; };
   }, []);
 
-  const send = useCallback((next: Trim) => {
-    pending.current = next;
+  const send = useCallback((instrument: string, next: Trim) => {
+    pending.current[instrument] = next;
     if (timer.current !== null) return;
     timer.current = window.setTimeout(() => {
       timer.current = null;
-      const body = pending.current;
-      pending.current = null;
-      if (!body) return;
-      void fetch('/api/live/trim', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }).catch(() => { /* the next drag sends it again */ });
+      const batch = pending.current;
+      pending.current = {};
+      for (const [id, body] of Object.entries(batch)) {
+        void fetch('/api/live/trim', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instrument: id, ...body }),
+        }).catch(() => { /* the next drag sends it again */ });
+      }
     }, SEND_MS);
   }, []);
 
-  const move = (what: keyof Trim) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const next = { ...trim, [what]: Number(e.target.value) };
-    setTrim(next);
-    send(next);
+  const move = (id: string, what: keyof Trim) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const next = { ...(trims[id] ?? NONE), [what]: Number(e.target.value) };
+      setTrims((was) => ({ ...was, [id]: next }));
+      send(id, next);
+    };
+
+  const reset = (id: string) => {
+    setTrims((was) => ({ ...was, [id]: NONE }));
+    send(id, NONE);
   };
 
-  const reset = () => { setTrim(NONE); send(NONE); };
-  const touched = trim.brightness !== 0 || trim.saturation !== 0;
+  const touched = (id: string) => {
+    const t = trims[id];
+    return !!t && (t.brightness !== 0 || t.saturation !== 0);
+  };
+  const anyTouched = lights.some(touched);
+
+  if (lights.length === 0) return null;
 
   return (
-    <span className="trim" role="group" aria-label="Live colour trim">
-      <label title={
-        'Added to the intensity of every colour cue, and to nothing else. '
-        + 'Added rather than scaled, because the values that need help are the '
-        + 'small ones. The score is not changed.'}>
-        <span className="trim-name">bright</span>
-        <input
-          type="range" min={-100} max={100} step={1}
-          value={trim.brightness}
-          onChange={move('brightness')}
-          aria-label="Brightness trim, percent"
-        />
-        <output className={trim.brightness ? 'trim-value on' : 'trim-value'}>
-          {trim.brightness > 0 ? '+' : ''}{trim.brightness}
-        </output>
-      </label>
-
-      <label title={
-        'Added to the saturation of every colour cue. A track sitting at five '
-        + 'percent saturation is white on a strip however good the hue is; '
-        + 'this is the knob that makes it a colour. The score is not changed.'}>
-        <span className="trim-name">colour</span>
-        <input
-          type="range" min={-100} max={100} step={1}
-          value={trim.saturation}
-          onChange={move('saturation')}
-          aria-label="Saturation trim, percent"
-        />
-        <output className={trim.saturation ? 'trim-value on' : 'trim-value'}>
-          {trim.saturation > 0 ? '+' : ''}{trim.saturation}
-        </output>
-      </label>
-
+    <span className="trim-host">
       <button
-        className="trim-reset"
-        onClick={reset}
-        disabled={!touched}
-        title="Back to the score as written"
-      >reset</button>
+        className={'toggle' + (anyTouched ? ' on' : '')}
+        onClick={() => setOpen((o) => !o)}
+        title={anyTouched
+          ? 'Some lights are being adjusted away from what the score says'
+          : 'Adjust brightness and saturation per light, without changing the score'}
+        aria-expanded={open}
+      >trim{anyTouched ? ' •' : ''}</button>
+
+      {open && (
+        <div className="trim-panel" role="group" aria-label="Live colour trim">
+          <p className="trim-why">
+            Added to what the score asks for, on the way out. Nothing here
+            changes the score, and it applies to lights only.
+          </p>
+          {lights.map((id) => {
+            const t = trims[id] ?? NONE;
+            return (
+              <div className="trim-row" key={id}>
+                <span className="trim-who" title={id}>{id}</span>
+                <label>
+                  <span className="trim-name">bright</span>
+                  <input
+                    type="range" min={-100} max={100} step={1}
+                    value={t.brightness}
+                    onChange={move(id, 'brightness')}
+                    aria-label={'Brightness trim for ' + id + ', percent'}
+                  />
+                  <output className={t.brightness ? 'trim-value on' : 'trim-value'}>
+                    {t.brightness > 0 ? '+' : ''}{t.brightness}
+                  </output>
+                </label>
+                <label>
+                  <span className="trim-name">colour</span>
+                  <input
+                    type="range" min={-100} max={100} step={1}
+                    value={t.saturation}
+                    onChange={move(id, 'saturation')}
+                    aria-label={'Saturation trim for ' + id + ', percent'}
+                  />
+                  <output className={t.saturation ? 'trim-value on' : 'trim-value'}>
+                    {t.saturation > 0 ? '+' : ''}{t.saturation}
+                  </output>
+                </label>
+                <button
+                  className="trim-reset"
+                  onClick={() => reset(id)}
+                  disabled={!touched(id)}
+                  title={'Back to the score as written for ' + id}
+                  aria-label={'Reset trim for ' + id}
+                >reset</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </span>
   );
 }

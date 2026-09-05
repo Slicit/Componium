@@ -685,7 +685,7 @@ export function App({ active = true }: { active?: boolean } = {}) {
               : live.state.real + ' live'}
           </span>
         )}
-        {live.armed && <LiveTrim />}
+        {live.armed && <LiveTrim lights={live.state.lights ?? []} />}
         <button
           className={'toggle' + (overlays.calm ? ' on' : '')}
           onClick={() => setOverlays((o) => ({ ...o, calm: !o.calm }))}

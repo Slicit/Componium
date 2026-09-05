@@ -104,7 +104,8 @@ func TestATrimCannotBrightenAStop(t *testing.T) {
 	 */
 	var sent instrument.Dispatch
 	spy := &spyInstrument{onDispatch: func(d instrument.Dispatch) { sent = d }}
-	tr := trimmed{inner: spy, of: func() Trim { return Trim{Brightness: 0.8, Saturation: 0.8} }}
+	tr := trimmed{inner: spy, id: "light.ambient",
+		of: func(string) Trim { return Trim{Brightness: 0.8, Saturation: 0.8} }}
 
 	if err := tr.Dispatch(instrument.Dispatch{
 		Cue: instrument.Cue{Instrument: "light.ambient", Action: instrument.ActionStop},
@@ -135,7 +136,7 @@ func TestTheSlidersAreReadAtDispatchNotAtArming(t *testing.T) {
 	live := Trim{}
 	var sent instrument.Dispatch
 	spy := &spyInstrument{onDispatch: func(d instrument.Dispatch) { sent = d }}
-	tr := trimmed{inner: spy, of: func() Trim { return live }}
+	tr := trimmed{inner: spy, id: "light.ambient", of: func(string) Trim { return live }}
 
 	cue := func() instrument.Dispatch {
 		return instrument.Dispatch{Cue: instrument.Cue{
@@ -155,28 +156,89 @@ func TestTheSlidersAreReadAtDispatchNotAtArming(t *testing.T) {
 	}
 }
 
-func TestTheSlidersRememberTheirPositionAndTheirLimits(t *testing.T) {
+func TestEachLightKeepsItsOwnSetting(t *testing.T) {
+	/* The reason this is per instrument. An ambient wash behind a screen and
+	 * an event strip in a cornice are different parts, bought at different
+	 * times, and the number that makes one right makes the other wrong. */
 	s, _ := withBoards(t)
 
-	if w := do(t, s, "GET", "/api/live/trim", ""); w.Body.String() == "" ||
-		!hasNumbers(t, w.Body.Bytes(), 0, 0) {
-		t.Errorf("a fresh studio starts at %s, want both zero", w.Body.String())
+	do(t, s, "POST", "/api/live/trim",
+		`{"instrument":"light.ambient","saturation":40}`)
+	do(t, s, "POST", "/api/live/trim",
+		`{"instrument":"light.event","saturation":-15,"brightness":30}`)
+
+	got := trimsFrom(t, do(t, s, "GET", "/api/live/trim", "").Body.Bytes())
+	if got["light.ambient"]["saturation"] != 40 || got["light.ambient"]["brightness"] != 0 {
+		t.Errorf("light.ambient came back as %v", got["light.ambient"])
+	}
+	if got["light.event"]["saturation"] != -15 || got["light.event"]["brightness"] != 30 {
+		t.Errorf("light.event came back as %v", got["light.event"])
 	}
 
-	// A page moving one slider does not send the other, and must not reset it.
-	do(t, s, "POST", "/api/live/trim", `{"saturation":40}`)
-	do(t, s, "POST", "/api/live/trim", `{"brightness":-25}`)
-	w := do(t, s, "GET", "/api/live/trim", "")
-	if !hasNumbers(t, w.Body.Bytes(), -25, 40) {
-		t.Errorf("came back as %s, want brightness -25 and saturation 40", w.Body.String())
+	// And moving one does not disturb the other, which is the whole point and
+	// the thing a single shared value could not do.
+	do(t, s, "POST", "/api/live/trim",
+		`{"instrument":"light.ambient","saturation":75}`)
+	got = trimsFrom(t, do(t, s, "GET", "/api/live/trim", "").Body.Bytes())
+	if got["light.ambient"]["saturation"] != 75 {
+		t.Errorf("light.ambient did not move: %v", got["light.ambient"])
 	}
+	if got["light.event"]["saturation"] != -15 || got["light.event"]["brightness"] != 30 {
+		t.Errorf("light.event moved when its neighbour did: %v", got["light.event"])
+	}
+}
 
-	// Out of range is held rather than refused: a slider cannot send one, but
-	// a script can, and a saturation of 900 should mean the top of the range.
-	do(t, s, "POST", "/api/live/trim", `{"brightness":900,"saturation":-900}`)
-	w = do(t, s, "GET", "/api/live/trim", "")
-	if !hasNumbers(t, w.Body.Bytes(), 100, -100) {
-		t.Errorf("out of range came back as %s", w.Body.String())
+func TestOneSliderDoesNotResetTheOther(t *testing.T) {
+	// A page moving brightness sends brightness. Absent has to mean leave it,
+	// or every drag would zero the field it did not mention.
+	s, _ := withBoards(t)
+	do(t, s, "POST", "/api/live/trim", `{"instrument":"light.ambient","saturation":40}`)
+	do(t, s, "POST", "/api/live/trim", `{"instrument":"light.ambient","brightness":-25}`)
+
+	got := trimsFrom(t, do(t, s, "GET", "/api/live/trim", "").Body.Bytes())
+	if got["light.ambient"]["brightness"] != -25 || got["light.ambient"]["saturation"] != 40 {
+		t.Errorf("came back as %v", got["light.ambient"])
+	}
+}
+
+func TestATrimBackAtZeroIsForgottenRatherThanStored(t *testing.T) {
+	/* So that what comes back is the set of things somebody has actually
+	 * adjusted, and a room where nothing has been touched says so plainly
+	 * rather than listing every fixture at zero. */
+	s, _ := withBoards(t)
+	do(t, s, "POST", "/api/live/trim", `{"instrument":"light.ambient","saturation":40}`)
+	do(t, s, "POST", "/api/live/trim", `{"instrument":"light.ambient","saturation":0}`)
+
+	got := trimsFrom(t, do(t, s, "GET", "/api/live/trim", "").Body.Bytes())
+	if len(got) != 0 {
+		t.Errorf("a trim back at zero is still being kept: %v", got)
+	}
+}
+
+func TestATrimWithNoInstrumentIsRefused(t *testing.T) {
+	/* Rather than applied to everything. A missing name is a page with a bug,
+	 * and guessing that it meant the whole room is a way to move a fixture
+	 * nobody was looking at. */
+	s, _ := withBoards(t)
+	w := do(t, s, "POST", "/api/live/trim", `{"saturation":40}`)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("said %d: %s", w.Code, w.Body.String())
+	}
+	if len(trimsFrom(t, do(t, s, "GET", "/api/live/trim", "").Body.Bytes())) != 0 {
+		t.Error("it trimmed something anyway")
+	}
+}
+
+func TestTheSlidersHoldTheirLimits(t *testing.T) {
+	// Out of range is held rather than refused: a slider cannot send one, but a
+	// script can, and a saturation of 900 should mean the top of the range.
+	s, _ := withBoards(t)
+	do(t, s, "POST", "/api/live/trim",
+		`{"instrument":"light.ambient","brightness":900,"saturation":-900}`)
+
+	got := trimsFrom(t, do(t, s, "GET", "/api/live/trim", "").Body.Bytes())
+	if got["light.ambient"]["brightness"] != 100 || got["light.ambient"]["saturation"] != -100 {
+		t.Errorf("out of range came back as %v", got["light.ambient"])
 	}
 }
 
@@ -187,17 +249,15 @@ func TestTrimIsNotSomethingAPageChangesByAccident(t *testing.T) {
 	}
 }
 
-func hasNumbers(t *testing.T, body []byte, brightness, saturation float64) bool {
+func trimsFrom(t *testing.T, body []byte) map[string]map[string]float64 {
 	t.Helper()
 	var got struct {
-		Brightness float64 `json:"brightness"`
-		Saturation float64 `json:"saturation"`
+		Trim map[string]map[string]float64 `json:"trim"`
 	}
 	if err := json.Unmarshal(body, &got); err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v in %s", err, body)
 	}
-	return math.Abs(got.Brightness-brightness) < 1e-9 &&
-		math.Abs(got.Saturation-saturation) < 1e-9
+	return got.Trim
 }
 
 type spyInstrument struct {
@@ -212,3 +272,66 @@ func (s *spyInstrument) Dispatch(d instrument.Dispatch) error {
 	s.onDispatch(d)
 	return nil
 }
+
+func TestEachWrapperAsksForItsOwnInstrument(t *testing.T) {
+	/* Two strips on one rig, sharing one set of settings, and each must read
+	 * the row with its own name on it. Without this the wrappers could all be
+	 * asking for the same instrument and every test above would still pass:
+	 * they each look at one light, and one light cannot show a mix up.
+	 *
+	 * Which is the actual hazard. Per instrument that silently applies one
+	 * instrument's numbers to another is worse than the single shared value it
+	 * replaced, because the page would show two rows and mean one. */
+	var holder trimHolder
+	holder.set("light.ambient", Trim{Saturation: 0.5})
+	holder.set("light.event", Trim{Brightness: -0.4})
+
+	seen := map[string]map[string]float64{}
+	wrap := func(id string) trimmed {
+		spy := &spyInstrument{onDispatch: func(d instrument.Dispatch) {
+			seen[id] = d.Cue.Params
+		}}
+		return trimmed{inner: spy, id: id, of: holder.get}
+	}
+
+	cue := func() instrument.Dispatch {
+		return instrument.Dispatch{Cue: instrument.Cue{
+			Action: "set",
+			Params: map[string]float64{"h": 0.3, "s": 0.2, "i": 0.5},
+		}}
+	}
+	_ = wrap("light.ambient").Dispatch(cue())
+	_ = wrap("light.event").Dispatch(cue())
+
+	// The wash got saturation and no brightness.
+	if got := seen["light.ambient"]; !near(got["s"], 0.7) || !near(got["i"], 0.5) {
+		t.Errorf("light.ambient got s %v i %v, want 0.7 and 0.5", got["s"], got["i"])
+	}
+	// The flash got brightness and no saturation.
+	if got := seen["light.event"]; !near(got["s"], 0.2) || !near(got["i"], 0.1) {
+		t.Errorf("light.event got s %v i %v, want 0.2 and 0.1", got["s"], got["i"])
+	}
+}
+
+func TestAnInstrumentNobodyTrimmedIsLeftAlone(t *testing.T) {
+	// Most of a rig, most of the time. Asking for a name that is not in the
+	// map has to give back the identity rather than whatever was set last.
+	var holder trimHolder
+	holder.set("light.ambient", Trim{Saturation: 1})
+
+	var sent instrument.Dispatch
+	spy := &spyInstrument{onDispatch: func(d instrument.Dispatch) { sent = d }}
+	tr := trimmed{inner: spy, id: "light.event", of: holder.get}
+
+	_ = tr.Dispatch(instrument.Dispatch{Cue: instrument.Cue{
+		Action: "set",
+		Params: map[string]float64{"h": 0.3, "s": 0.2, "i": 0.5},
+	}})
+	if sent.Cue.Params["s"] != 0.2 {
+		t.Errorf("an untrimmed light was trimmed anyway: %v", sent.Cue.Params)
+	}
+}
+
+// near, because 0.2 plus 0.5 is not 0.7 and a test that says it is would be
+// failing about arithmetic rather than about routing.
+func near(got, want float64) bool { return math.Abs(got-want) < 1e-9 }

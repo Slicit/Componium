@@ -56,6 +56,9 @@ type LiveState struct {
 	// identical to a broken one from across a room.
 	Real        int      `json:"real"`
 	Instruments []string `json:"instruments,omitempty"`
+	// Lights are the instruments a colour trim can do anything to, so the
+	// page can offer the sliders for those and for nothing else.
+	Lights []string `json:"lights,omitempty"`
 	// Silent is true when the page has not reported recently. Shown, because
 	// "armed and nothing happening" has two very different causes.
 	Silent    bool     `json:"silent"`
@@ -78,6 +81,7 @@ type live struct {
 
 	rigName string
 	names   []string
+	lights  []string
 	real    int
 
 	mu        sync.Mutex
@@ -137,13 +141,19 @@ func (s *Server) armLive(cfg *rig.Config, sc *score.Score, name string) error {
 		/* Trimmed outside the guard, so the supervisor sends its own idea of
 		 * safe exactly as it means it. A slider left at plus eighty must not
 		 * be able to brighten a blackout. */
-		guarded := trimmed{inner: l.sup.Guard(inst), of: s.trim.get}
+		guarded := trimmed{inner: l.sup.Guard(inst), id: id, of: s.trim.get}
 		if err := l.cond.Register(guarded); err != nil {
 			built.Close()
 			return err
 		}
 		l.curve.Register(guarded)
 		l.names = append(l.names, id)
+		/* Which of them the sliders are worth showing for. The trim only
+		 * ever changes a colour, and offering brightness and saturation
+		 * for a fogger would be a control that does nothing. */
+		if inst.Manifest().Kind == "light" {
+			l.lights = append(l.lights, id)
+		}
 	}
 	for _, in := range cfg.Instruments {
 		if in.Driver != "" && in.Driver != "virtual" {
@@ -284,6 +294,7 @@ func (s *Server) liveState() LiveState {
 
 	out := LiveState{
 		Armed: on, Rig: l.rigName, Real: l.real, Instruments: l.names,
+		Lights:    l.lights,
 		Silent:    l.src.Silent(),
 		Media:     media.Seconds(),
 		Precision: precision.Seconds(),
