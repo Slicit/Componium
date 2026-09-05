@@ -134,7 +134,10 @@ func (s *Server) armLive(cfg *rig.Config, sc *score.Score, name string) error {
 		on:      true,
 	}
 	for id, inst := range built.Instruments {
-		guarded := l.sup.Guard(inst)
+		/* Trimmed outside the guard, so the supervisor sends its own idea of
+		 * safe exactly as it means it. A slider left at plus eighty must not
+		 * be able to brighten a blackout. */
+		guarded := trimmed{inner: l.sup.Guard(inst), of: s.trim.get}
 		if err := l.cond.Register(guarded); err != nil {
 			built.Close()
 			return err

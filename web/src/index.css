@@ -1259,3 +1259,43 @@ button:hover { border-color: #3a4553; }
 
 /* A card inside a card, for the row being added. */
 .adm-inset { margin: 0.75rem 0 0; }
+
+/* The live colour trim: two knobs beside the armed chip.
+ *
+ * Compact on purpose. It belongs in the toolbar because it is used while
+ * watching the room rather than the screen, and anything that pushed the
+ * timeline down every time somebody went live would be worse than useful. */
+.trim {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 4px;
+}
+.trim label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+}
+.trim-name { opacity: 0.65; }
+.trim input[type="range"] {
+  width: 88px;
+  margin: 0;
+  accent-color: var(--warn, #c1121f);
+}
+/* Tabular, so the number does not shuffle the sliders sideways as it goes from
+   0 to -100 and back. */
+.trim-value {
+  min-width: 2.6em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.5;
+}
+/* Off zero is worth seeing without reading: what the room is doing is no
+   longer only what the score says. */
+.trim-value.on {
+  opacity: 1;
+  font-weight: 600;
+  color: var(--warn, #c1121f);
+}
+.trim-reset { font-size: 11px; padding: 2px 8px; }

@@ -119,6 +119,12 @@ type Server struct {
 	// reaching the studio through a tunnel at localhost, which is not
 	// somewhere a board on a shelf can go.
 	addr string
+	// trim is the live brightness and saturation adjustment. Held on the
+	// studio rather than on the live session, so that disarming to move a
+	// board and arming again does not throw away a setting somebody spent
+	// ten minutes finding.
+	trim trimHolder
+
 	// advertise overrides that, for a studio that cannot see itself the way a
 	// board sees it.
 	advertise string
@@ -278,6 +284,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/rigs", s.handleRigs)
 	mux.HandleFunc("/api/live", s.handleLive)
 	mux.HandleFunc("/api/live/at", s.handleLiveAt)
+	mux.HandleFunc("/api/live/trim", s.handleLiveTrim)
 	mux.HandleFunc("/api/node", s.handleNode)
 	mux.HandleFunc("/api/boards", s.handleBoards)
 	mux.HandleFunc("/api/boards/check", s.handleBoardsCheck)

@@ -30,6 +30,7 @@ import { followFrames } from './ui/frameClock';
 import { settingOf, writeSetting } from './core/settings';
 import { isTyping } from './core/typing';
 import { useLive } from './ui/useLive';
+import { LiveTrim } from './ui/LiveTrim';
 import type { Preset } from './core/presets';
 import { canCollapse } from './core/layout';
 import { menuFor } from './ui/menuItems';
@@ -684,6 +685,7 @@ export function App({ active = true }: { active?: boolean } = {}) {
               : live.state.real + ' live'}
           </span>
         )}
+        {live.armed && <LiveTrim />}
         <button
           className={'toggle' + (overlays.calm ? ' on' : '')}
           onClick={() => setOverlays((o) => ({ ...o, calm: !o.calm }))}
