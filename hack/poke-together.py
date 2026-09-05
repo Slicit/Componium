@@ -315,6 +315,71 @@ def movement_rollcall(link, levels, lights, seconds=2.0):
         frame_for(levels, lights, 0.0, [DARK] * len(lights))))
 
 
+def movement_names(link, levels, lights, seconds=3.0):
+    """Rollcall again, addressed by id instead of by index.
+
+    The two are different paths and only one of them has ever been checked
+    against a bench. A curve frame carries a position in the announcement, and
+    the board indexes an array with it. A cue carries an id, and the board
+    walks that array comparing strings. A score drives lights with cues, so if
+    those two ever disagree, the movement that looks right is the one nothing
+    plays.
+
+    Same colours as rollcall, deliberately. Run them back to back: any strip
+    that lights in one and not the other is the bug, and the strip it lights
+    instead is the evidence.
+    """
+    print("names, one light at a time, addressed by id")
+    if not lights:
+        print("  no lights attached")
+        return
+    for k, d in enumerate(lights):
+        name, rgb = PALETTE[k % len(PALETTE)]
+        print("  id %-16s should be the ONLY one lit, and %s" % (d["id"], name),
+              flush=True)
+        # Everything else told to go dark first, by id as well, so that what is
+        # lit is what this cue lit rather than what the last one left behind.
+        for other in lights:
+            if other is not d:
+                link.cue(other["id"], {"r": 0.0, "g": 0.0, "b": 0.0},
+                         hold_ms=int(seconds * 1000) + 1000)
+        link.cue(d["id"], {"r": rgb[0], "g": rgb[1], "b": rgb[2]},
+                 hold_ms=int(seconds * 1000) + 1000)
+        hold(link, seconds)
+    for d in lights:
+        link.cue(d["id"], {"r": 0.0, "g": 0.0, "b": 0.0}, hold_ms=1000)
+    print("  all dark")
+
+
+def movement_channels(link, levels, lights, seconds=2.0):
+    """Pure red, then pure green, then pure blue, on each strip in turn.
+
+    Because "the colours are off" and "the wrong strip lit" look identical from
+    across a room and have nothing to do with each other. This says which.
+
+    A strip that shows green when told red is wired in a different channel
+    order, which the board announces and then ignores: device_apply writes r,
+    g, b whatever the configuration says. What is seen here is the permutation
+    somebody has to put into device_apply.
+    """
+    print("channels, primaries one at a time")
+    if not lights:
+        print("  no lights attached")
+        return
+    for d in lights:
+        for name, rgb in (("RED", (1.0, 0.0, 0.0)), ("GREEN", (0.0, 1.0, 0.0)),
+                          ("BLUE", (0.0, 0.0, 1.0))):
+            print("  %-16s should be %s" % (d["id"], name), flush=True)
+            colours = [DARK] * len(lights)
+            colours[lights.index(d)] = rgb
+            hold(link, seconds,
+                 lambda t, c=colours: link.send_frame(frame_for(levels, lights, 0.0, c)))
+    hold(link, 0.4, lambda t: link.send_frame(
+        frame_for(levels, lights, 0.0, [DARK] * len(lights))))
+    print("  all dark. A strip that named the wrong primary is wired in a")
+    print("  different channel order, and the board ignores the order field.")
+
+
 def movement_contrast(link, levels, lights, seconds=4.0):
     """Every light at once, each a different colour, held still.
 
@@ -409,12 +474,14 @@ def movement_watchdog(link, levels, lights):
 
 MOVEMENTS = {
     "rollcall": movement_rollcall,
+    "names": movement_names,
+    "channels": movement_channels,
     "contrast": movement_contrast,
     "swap": movement_swap,
     "bundle": movement_bundle,
     "watchdog": movement_watchdog,
 }
-ORDER = ["rollcall", "contrast", "swap", "bundle", "watchdog"]
+ORDER = ["rollcall", "names", "channels", "contrast", "swap", "bundle", "watchdog"]
 
 
 def run(host, secret, only=None):
