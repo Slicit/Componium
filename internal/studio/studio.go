@@ -617,10 +617,17 @@ type wireRegion struct {
 }
 
 type wireTrack struct {
-	Instrument string      `json:"instrument"`
-	Type       string      `json:"type"`
-	Cues       []wireCue   `json:"cues,omitempty"`
-	Points     []wirePoint `json:"points,omitempty"`
+	Instrument string `json:"instrument"`
+	Type       string `json:"type"`
+	// Space travels even though the editor does not offer it, because the
+	// alternative is losing it. A field the page never shows is still a field
+	// the page round trips, and what comes back with nothing in it is written
+	// out as the default: a track authored in hue, saturation and intensity
+	// came back declaring rgb, and then every colour on it reached the fixture
+	// as three parameters no driver reads.
+	Space  string      `json:"space,omitempty"`
+	Cues   []wireCue   `json:"cues,omitempty"`
+	Points []wirePoint `json:"points,omitempty"`
 }
 
 type wireCue struct {
@@ -738,7 +745,8 @@ func toWire(sc *score.Score, path string) wireScore {
 		})
 	}
 	for _, t := range sc.Tracks {
-		wt := wireTrack{Instrument: t.Instrument, Type: string(t.Type)}
+		wt := wireTrack{Instrument: t.Instrument, Type: string(t.Type),
+			Space: string(t.Space)}
 		for _, c := range t.Cues {
 			wt.Cues = append(wt.Cues, wireCue{
 				T: c.T.Duration().Seconds(), Action: c.Action, Params: c.Params,
@@ -762,7 +770,8 @@ func fromWire(in *wireScore, prev *score.Score) *score.Score {
 	out := &score.Score{Meta: prev.Meta}
 	out.Meta.Title = in.Title
 	for _, t := range in.Tracks {
-		tr := score.Track{Instrument: t.Instrument, Type: score.TrackType(t.Type)}
+		tr := score.Track{Instrument: t.Instrument, Type: score.TrackType(t.Type),
+			Space: score.Space(t.Space)}
 		for _, c := range t.Cues {
 			tr.Cues = append(tr.Cues, score.CueSpec{
 				T:      score.Timecode(seconds(c.T)),
@@ -778,10 +787,20 @@ func fromWire(in *wireScore, prev *score.Score) *score.Score {
 				T: score.Timecode(seconds(p.T)), Value: p.Value,
 			})
 		}
-		// Preserve interpolation, which the editor does not expose.
+		// Preserve what the editor does not expose, for a page that did not
+		// send it back. Interpolation has always been carried this way; space
+		// is carried on the wire now as well, and this remains the floor under
+		// it, because a page from before that change would otherwise still
+		// silently relabel an hsi track as rgb on the next save.
 		for _, old := range prev.Tracks {
-			if old.Instrument == t.Instrument && old.Interpolation != "" {
+			if old.Instrument != t.Instrument {
+				continue
+			}
+			if old.Interpolation != "" {
 				tr.Interpolation = old.Interpolation
+			}
+			if tr.Space == "" && old.Space != "" {
+				tr.Space = old.Space
 			}
 		}
 		out.Tracks = append(out.Tracks, tr)
