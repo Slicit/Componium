@@ -225,9 +225,20 @@ void device_apply(device_t *d)
             if (v > 1) v = 1;
             rgb[i] = (uint8_t)(v * 255 + 0.5f);
         }
+        /* The configured channel order, or straight through when there is
+         * none. A bad one is ignored and said once, because a strip showing
+         * the wrong colour is already why somebody is reading this log. */
+        int map[3];
+        if (!device_channel_map(d->order, map) && !d->order_complained) {
+            d->order_complained = true;
+            ESP_LOGW(TAG, "%s: colour order \"%s\" is not a permutation of "
+                          "r, g and b; sending them in order instead",
+                     d->id, d->order);
+        }
         int n = d->pixels > 0 ? d->pixels : 30;
         for (int i = 0; i < n; i++) {
-            led_strip_set_pixel(d->strip, i, rgb[0], rgb[1], rgb[2]);
+            led_strip_set_pixel(d->strip, i,
+                                rgb[map[0]], rgb[map[1]], rgb[map[2]]);
         }
         led_strip_refresh(d->strip);
         break;
@@ -332,6 +343,62 @@ cJSON *device_announcement(const device_t *d, int index)
     cJSON_AddItemToObject(in, "safe_state", safe);
     cJSON_AddItemToObject(in, "channels", channels);
     return in;
+}
+
+/* Which of this device's three values feeds each of the strip's channels.
+ *
+ * The driver takes red, green and blue by name and lays them on the wire in
+ * whatever sequence the LED model it was built for expects. That is right for
+ * a plain WS2812 and wrong for the several parts that answer to the same three
+ * wires with the channels shuffled, which is most of what arrives in a bag from
+ * a marketplace. A strip cannot be asked what it is, so this is configuration.
+ *
+ * The string names which of our channels goes into the driver's red, green and
+ * blue argument, in that sequence. So a strip that lights green when it is told
+ * red wants \"grb\": our green into the driver's red, our red into its green.
+ * That is also the name people already use for such a strip, which is the only
+ * reason to prefer it over some more principled scheme nobody would guess.
+ *
+ * Empty, or rgb, is no permutation at all: exactly what every board did before
+ * this was honoured, so nothing already working changes.
+ *
+ * Anything that is not a permutation of the three is ignored rather than
+ * half applied. A colour order is guessed at a bench by watching a strip, and a
+ * typo that silently dropped a channel would look like a broken strip.
+ */
+bool device_channel_map(const char *order, int map[3])
+{
+    map[0] = 0;
+    map[1] = 1;
+    map[2] = 2;
+    if (!order || order[0] == 0) {
+        return true;
+    }
+
+    int wanted[3];
+    bool seen[3] = {false, false, false};
+    for (int i = 0; i < 3; i++) {
+        int c = order[i];
+        int channel;
+        switch (c) {
+        case 'r': case 'R': channel = 0; break;
+        case 'g': case 'G': channel = 1; break;
+        case 'b': case 'B': channel = 2; break;
+        default: return false;
+        }
+        if (seen[channel]) {
+            return false;   /* the same channel twice leaves one unfed */
+        }
+        seen[channel] = true;
+        wanted[i] = channel;
+    }
+    if (order[3] != 0) {
+        return false;       /* longer than three, so it means something else */
+    }
+    for (int i = 0; i < 3; i++) {
+        map[i] = wanted[i];
+    }
+    return true;
 }
 
 const char *device_type_name(device_type_t t)

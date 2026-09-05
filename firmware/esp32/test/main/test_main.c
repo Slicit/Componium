@@ -275,6 +275,99 @@ static void device_types_are_the_three_this_build_has(void)
 
 void register_roundtrip_tests(void);
 
+
+/* ------------------------------------------------------- strip channel order
+ *
+ * A strip cannot be asked which order its channels are in, so it is
+ * configuration, and configuration that was announced and then ignored for as
+ * long as it existed. The board said `order` in every hello and drove every
+ * strip straight through regardless, which means a person could set it, read it
+ * back, believe it, and still be looking at the wrong colour.
+ *
+ * The mapping says which of our channels feeds the driver's red, green and blue
+ * argument, in that sequence.
+ */
+
+static void no_order_is_straight_through(void)
+{
+    int map[3];
+    TEST_ASSERT_TRUE(device_channel_map(NULL, map));
+    TEST_ASSERT_EQUAL_INT(0, map[0]);
+    TEST_ASSERT_EQUAL_INT(1, map[1]);
+    TEST_ASSERT_EQUAL_INT(2, map[2]);
+
+    TEST_ASSERT_TRUE(device_channel_map("", map));
+    TEST_ASSERT_EQUAL_INT(0, map[0]);
+    TEST_ASSERT_EQUAL_INT(1, map[1]);
+    TEST_ASSERT_EQUAL_INT(2, map[2]);
+
+    /* Named explicitly, and the same thing. Every board that works today has
+     * no order set, so identity has to stay identity or this change breaks
+     * every strip it was meant to leave alone. */
+    TEST_ASSERT_TRUE(device_channel_map("rgb", map));
+    TEST_ASSERT_EQUAL_INT(0, map[0]);
+    TEST_ASSERT_EQUAL_INT(1, map[1]);
+    TEST_ASSERT_EQUAL_INT(2, map[2]);
+}
+
+static void grb_swaps_red_and_green(void)
+{
+    /* The case this exists for: a strip that lights green when told red. Our
+     * green goes into the driver's red argument and our red into its green. */
+    int map[3];
+    TEST_ASSERT_TRUE(device_channel_map("grb", map));
+    TEST_ASSERT_EQUAL_INT(1, map[0]);
+    TEST_ASSERT_EQUAL_INT(0, map[1]);
+    TEST_ASSERT_EQUAL_INT(2, map[2]);
+
+    /* However somebody happens to type it. An order is written down at a
+     * bench, by hand, usually in capitals. */
+    int upper[3];
+    TEST_ASSERT_TRUE(device_channel_map("GRB", upper));
+    TEST_ASSERT_EQUAL_INT_ARRAY(map, upper, 3);
+}
+
+static void every_permutation_is_accepted(void)
+{
+    static const char *all[] = {"rgb", "rbg", "grb", "gbr", "brg", "bgr"};
+    for (int i = 0; i < 6; i++) {
+        int map[3];
+        TEST_ASSERT_TRUE_MESSAGE(device_channel_map(all[i], map), all[i]);
+        /* Each of the three channels used exactly once, which is the whole
+         * property: a map that dropped one would leave a channel dark and a
+         * map that repeated one would light two from the same value. */
+        bool seen[3] = {false, false, false};
+        for (int c = 0; c < 3; c++) {
+            TEST_ASSERT_TRUE(map[c] >= 0 && map[c] < 3);
+            TEST_ASSERT_FALSE(seen[map[c]]);
+            seen[map[c]] = true;
+        }
+    }
+}
+
+static void a_bad_order_is_refused_rather_than_half_applied(void)
+{
+    /* Guessed at a bench by watching a strip, so typed wrong sometimes. A
+     * partial application would drop a channel and look like a broken strip,
+     * which is the thing somebody is already trying to diagnose. */
+    static const char *bad[] = {
+        "rg",      /* short */
+        "rgbw",    /* a four channel part, which this is not */
+        "rrg",     /* red twice, blue never */
+        "xyz",     /* not channels at all */
+        "rg1",
+    };
+    for (int i = 0; i < 5; i++) {
+        int map[3];
+        TEST_ASSERT_FALSE_MESSAGE(device_channel_map(bad[i], map), bad[i]);
+        /* And still straight through, so a typo costs the permutation rather
+         * than the strip. */
+        TEST_ASSERT_EQUAL_INT(0, map[0]);
+        TEST_ASSERT_EQUAL_INT(1, map[1]);
+        TEST_ASSERT_EQUAL_INT(2, map[2]);
+    }
+}
+
 void app_main(void)
 {
     UNITY_BEGIN();
@@ -308,6 +401,11 @@ void app_main(void)
     RUN_TEST(the_pins_that_would_stop_the_board_are_refused);
     RUN_TEST(the_pins_the_bench_actually_uses_are_allowed);
     RUN_TEST(device_types_are_the_three_this_build_has);
+
+    RUN_TEST(no_order_is_straight_through);
+    RUN_TEST(grb_swaps_red_and_green);
+    RUN_TEST(every_permutation_is_accepted);
+    RUN_TEST(a_bad_order_is_refused_rather_than_half_applied);
 
     /* What the board is told, stores, and says back. */
     register_roundtrip_tests();

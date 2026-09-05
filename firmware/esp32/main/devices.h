@@ -45,6 +45,10 @@ typedef struct {
     /* ws28xx */
     int  pixels;
     char order[8];
+    /* Said once per device rather than per frame: a strip is refreshed
+     * fifty times a second and a complaint at that rate is a denial of
+     * service on the log. */
+    bool order_complained;
     /* relay */
     bool active_high;
 
@@ -86,6 +90,8 @@ typedef struct {
 bool device_action_stops(const char *action);
 
 /** The name a configuration uses for a type, and that a node announces. */
+bool device_channel_map(const char *order, int map[3]);
+
 const char *device_type_name(device_type_t t);
 
 /**
