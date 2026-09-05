@@ -110,22 +110,34 @@ func lerpHSI(a, b map[string]float64, f float64) map[string]float64 {
 // resolve adds the red, green and blue a fixture needs, for a track authored
 // as hue and saturation. An RGB track is returned untouched.
 //
-// A track that says nothing about its space is examined rather than assumed.
-// The composer wrote flash cues in hue, saturation and intensity and declared
-// no space for years, so every flash reached its fixture carrying three
-// parameters no driver reads and none of the three it does: the light stayed
-// dark and everything reported success.
+// The values are examined rather than the declaration believed, and that is a
+// deliberate reversal of what this used to do.
 //
-// Safe because colour.Resolve leaves parameters that are not HSI exactly as
-// they are, so the only tracks this touches are the ones that were already
-// unreadable. A track that declares rgb is still taken at its word: an explicit
-// declaration is a statement about intent, and this repairs its absence rather
-// than overriding it.
+// It used to repair only a track that declared no space, on the reasoning that
+// an explicit declaration is a statement of intent and should be taken at its
+// word. Two things were wrong with that.
+//
+// The narrow one: the guard could never fire. normalise() takes a pointer to
+// each track and rewrites an empty space to rgb before anything reads one, so
+// by the time this runs no track has an empty space and the repair was dead
+// code from the day it was written.
+//
+// The wider one: a declaration that contradicts its own contents is not a
+// statement of intent, it is a mistake, and believing it costs a light. A
+// track declaring rgb whose points carry h, s and i reaches the fixture with
+// three parameters no driver reads and none of the three it does. The strip
+// stays dark, the node acknowledges every cue, the counters all agree, and
+// nothing anywhere says why. That is exactly what a real score did: the
+// ambient curve in a generated film said rgb over hsi points, and the only
+// symptom was one light that had worked the week before.
+//
+// So the keys win. h, s and i mean hue, saturation and intensity whatever the
+// header claims, and a track that declares hsi is still converted even if its
+// points are already resolved. Safe in both directions because colour.Resolve
+// leaves parameters that are not HSI exactly as they are and keeps the
+// authored values alongside what it derives.
 func resolve(t Track, v map[string]float64) map[string]float64 {
-	if t.Space == HSI {
-		return colour.Resolve(v)
-	}
-	if t.Space == "" && colour.IsHSI(v) {
+	if t.Space == HSI || colour.IsHSI(v) {
 		return colour.Resolve(v)
 	}
 	return v
