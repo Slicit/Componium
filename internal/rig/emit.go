@@ -79,6 +79,15 @@ func encode(c *Config) string {
 			l.str("secret", in.Secret)
 		}
 
+		// How it is corrected. Written only when set, so a rig nobody has
+		// trimmed reads exactly as it did before these existed.
+		if in.Brightness != 0 {
+			l.float("brightness", in.Brightness)
+		}
+		if in.Saturation != 0 {
+			l.float("saturation", in.Saturation)
+		}
+
 		// Tables last, because everything after one belongs to it.
 		if p := in.Position; p != nil {
 			l.raw("\n[instrument.position]\n")

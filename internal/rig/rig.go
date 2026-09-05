@@ -19,6 +19,7 @@ import (
 	"github.com/Slicit/componium/instruments/sacn"
 	"github.com/Slicit/componium/instruments/virtual"
 	"github.com/Slicit/componium/internal/cip"
+	"github.com/Slicit/componium/internal/colour"
 	"github.com/Slicit/componium/internal/instrument"
 )
 
@@ -49,6 +50,19 @@ type InstConfig struct {
 	RemoteTimeout Duration `toml:"remote_timeout,omitempty"`
 	// Secret authenticates CIP traffic. Both ends must agree.
 	Secret string `toml:"secret,omitempty"`
+
+	// Brightness and Saturation correct this fixture on the way out, in
+	// -1 to +1, added to what the score asks for. Zero, and absent, change
+	// nothing.
+	//
+	// Here rather than in the score because it describes a strip rather
+	// than a film: two reels of LEDs with the same part number reach the
+	// same numbers differently, and a score edited to suit one of them
+	// plays wrong on every other rig. Here rather than in the studio
+	// because a show needs it too, and a correction that existed only in
+	// preview would make a room look right until it played.
+	Brightness float64 `toml:"brightness,omitempty"`
+	Saturation float64 `toml:"saturation,omitempty"`
 
 	// Position places the instrument in the room, for the studio's preview.
 	// Metres, origin at the centre of the screen wall, x right, y up,
@@ -163,6 +177,9 @@ type Built struct {
 	// channels in every packet, so a fixture that owned one would blank every
 	// other fixture on it with each frame it sent.
 	universes []*sacn.Universe
+	// trims adjust what reaches each fixture. Seeded from the file and
+	// movable while a film plays, which is what makes them knobs.
+	trims trims
 }
 
 // Close releases every instrument that holds a resource.
@@ -306,6 +323,20 @@ func (c *Config) Build() (*Built, error) {
 			out.Close()
 			return nil, fmt.Errorf("rig: instrument %q has unknown driver %q", in.ID, in.Driver)
 		}
+	}
+
+	/* Trims last, over whatever each driver produced, so that every
+	 * instrument is corrected the same way whether it is a strip on a
+	 * board, a fixture on a universe, or a virtual one being logged.
+	 * Wrapping at each driver instead would be four places to forget. */
+	for _, in := range c.Instruments {
+		out.trims.set(in.ID, colour.Trim{
+			Brightness: colour.Clamp(in.Brightness),
+			Saturation: colour.Clamp(in.Saturation),
+		})
+	}
+	for id, inst := range out.Instruments {
+		out.Instruments[id] = trimmed{inner: inst, id: id, of: out.trims.get}
 	}
 	return out, nil
 }

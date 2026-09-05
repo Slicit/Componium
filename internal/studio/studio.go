@@ -119,12 +119,6 @@ type Server struct {
 	// reaching the studio through a tunnel at localhost, which is not
 	// somewhere a board on a shelf can go.
 	addr string
-	// trim is the live brightness and saturation adjustment. Held on the
-	// studio rather than on the live session, so that disarming to move a
-	// board and arming again does not throw away a setting somebody spent
-	// ten minutes finding.
-	trim trimHolder
-
 	// advertise overrides that, for a studio that cannot see itself the way a
 	// board sees it.
 	advertise string

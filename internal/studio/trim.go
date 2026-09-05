@@ -2,184 +2,30 @@ package studio
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
-	"sync"
 
 	"github.com/Slicit/componium/internal/colour"
-	"github.com/Slicit/componium/internal/instrument"
+	"github.com/Slicit/componium/internal/rig"
 )
 
-// A live adjustment to what colour instruments are sent.
+// The colour trim, from the studio's side.
 //
-// Applied on the way out and never written to the score, because it is not a
-// statement about the film. It is a statement about a strip: two reels of LEDs
-// with the same part number on the bag reach the same numbers differently, and
-// the fix belongs where the difference is rather than in a score that has to
-// play on somebody else's rig.
+// The numbers themselves live in the rig, which is where a statement about a
+// strip belongs and is what makes a show honour them too. This end is the
+// knob: it moves them while a film plays, and writes them down so that finding
+// a setting is something somebody does once.
 //
-// The case that asked for it: a generated ambient curve whose saturation runs
-// between 0.03 and 0.31. The hue swings the whole way round the circle and the
-// timeline draws it beautifully, and at five percent saturation the strip is
-// white. Nothing is wrong with the score and nothing is wrong with the strip.
-// What is missing is a knob.
-//
-// Added rather than multiplied, deliberately. Multiplying a saturation of 0.05
-// by two gives 0.1, which is still white; adding 0.3 gives 0.35, which is a
-// colour. The values that need help are the small ones, and multiplication is
-// exactly the operation that will not help them.
-type Trim struct {
-	// Brightness and Saturation are added to a colour's intensity and
-	// saturation, in -1 to +1. Zero changes nothing, which is the default and
-	// the state everything was in before this existed.
-	Brightness float64
-	Saturation float64
-}
-
-// Zero reports whether this trim would change anything.
-func (t Trim) Zero() bool { return t.Brightness == 0 && t.Saturation == 0 }
-
-// Apply adjusts one set of cue parameters.
-//
-// Anything that is not a colour comes back untouched. A fan takes an
-// intensity, a fogger takes an output, and neither has any business being made
-// more saturated: this is asked of every instrument and answers for lights.
-//
-// A stop carries no parameters at all, so it passes through as itself. That
-// matters more than it looks: a blackout must stay a blackout however the
-// sliders are set, and a trim that could brighten a stop would be a light that
-// cannot be turned off.
-func (t Trim) Apply(p map[string]float64) map[string]float64 {
-	if t.Zero() || len(p) == 0 {
-		return p
-	}
-
-	var c colour.HSI
-	switch {
-	case colour.IsHSI(p):
-		c = colour.HSI{H: p["h"], S: p["s"], I: p["i"]}
-	case hasRGB(p):
-		c = colour.FromRGB(colour.RGB{R: p["r"], G: p["g"], B: p["b"]})
-	default:
-		return p
-	}
-
-	c.S = clamp01(c.S + t.Saturation)
-	c.I = clamp01(c.I + t.Brightness)
-	rgb := colour.ToRGB(c)
-
-	// A copy, because the score's own values are shared with the timeline and
-	// with whatever else is reading this cue. Trimming in place would edit the
-	// film.
-	out := make(map[string]float64, len(p)+4)
-	for k, v := range p {
-		out[k] = v
-	}
-	out["h"], out["s"], out["i"] = c.H, c.S, c.I
-	out["r"], out["g"], out["b"] = rgb.R, rgb.G, rgb.B
-	if _, ok := p["intensity"]; ok {
-		out["intensity"] = c.I
-	}
-	return out
-}
-
-func hasRGB(p map[string]float64) bool {
-	_, r := p["r"]
-	_, g := p["g"]
-	_, b := p["b"]
-	return r || g || b
-}
-
-func clamp01(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	if v > 1 {
-		return 1
-	}
-	return v
-}
-
-// trimmed wraps one instrument so that what reaches it is adjusted.
-//
-// Outside the safety guard rather than inside it. The supervisor's own idea of
-// safe is exact and must not be brightened by a slider somebody left at plus
-// eighty, so anything it sends goes out untrimmed.
-//
-// One wrapper per instrument, carrying that instrument's id, because the thing
-// being compensated for is a strip rather than a room: an ambient wash behind
-// a screen and an event strip in a cornice are different parts, bought at
-// different times, and the number that makes one of them right makes the other
-// one wrong.
-type trimmed struct {
-	inner instrument.Instrument
-	id    string
-	of    func(string) Trim
-}
-
-func (t trimmed) Manifest() instrument.Manifest { return t.inner.Manifest() }
-
-func (t trimmed) Dispatch(d instrument.Dispatch) error {
-	if instrument.IsStop(d.Cue.Action) {
-		return t.inner.Dispatch(d)
-	}
-	d.Cue.Params = t.of(t.id).Apply(d.Cue.Params)
-	return t.inner.Dispatch(d)
-}
-
-var _ instrument.Instrument = trimmed{}
-
-// trimHolder is what each instrument is currently being trimmed by, read at
-// dispatch time.
-//
-// Read per cue rather than captured when the rig is armed, which is the whole
-// point: the sliders are for moving while a film plays and watching the strip.
-//
-// An instrument nobody has touched is absent rather than stored as a pair of
-// zeroes, so what comes back is the set of things somebody has actually
-// adjusted. A zero trim and no trim do the same nothing.
-type trimHolder struct {
-	mu sync.Mutex
-	by map[string]Trim
-}
-
-func (h *trimHolder) get(instrument string) Trim {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return h.by[instrument]
-}
-
-func (h *trimHolder) set(instrument string, t Trim) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if t.Zero() {
-		delete(h.by, instrument)
-		return
-	}
-	if h.by == nil {
-		h.by = map[string]Trim{}
-	}
-	h.by[instrument] = t
-}
-
-func (h *trimHolder) all() map[string]Trim {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	out := make(map[string]Trim, len(h.by))
-	for k, v := range h.by {
-		out[k] = v
-	}
-	return out
-}
+// Two places have to agree, and they are deliberately not the same place. The
+// rig file is the record, read at startup by anything that opens a rig. The
+// armed session holds the live copy, because a cue in flight has to be trimmed
+// without re-reading a file.
 
 // handleLiveTrim reads and sets the sliders, one instrument at a time.
-//
-// On the studio rather than on the live session, so that disarming to move a
-// board and arming again does not silently throw away a setting somebody spent
-// ten minutes finding.
 func (s *Server) handleLiveTrim(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"trim": wireTrims(s.trim.all())})
+		writeJSON(w, http.StatusOK, map[string]any{"trim": wireTrims(s.trims())})
 
 	case http.MethodPost, http.MethodPut:
 		var in struct {
@@ -194,22 +40,46 @@ func (s *Server) handleLiveTrim(w http.ResponseWriter, r *http.Request) {
 		if in.Instrument == "" {
 			// Refused rather than applied to everything. A missing name is a
 			// page with a bug, and guessing that it meant the whole room is a
-			// way to move an instrument nobody was looking at.
+			// way to move a fixture nobody was looking at.
 			http.Error(w, "say which instrument to trim", http.StatusBadRequest)
 			return
 		}
+
 		// Absent means leave it, rather than means zero. A page moving one
 		// slider should not have to send the other, and a client that sent
 		// only what it changed would otherwise reset the rest.
-		next := s.trim.get(in.Instrument)
+		next := s.trims()[in.Instrument]
 		if in.Brightness != nil {
-			next.Brightness = clampTrim(*in.Brightness)
+			next.Brightness = colour.Clamp(*in.Brightness / 100)
 		}
 		if in.Saturation != nil {
-			next.Saturation = clampTrim(*in.Saturation)
+			next.Saturation = colour.Clamp(*in.Saturation / 100)
 		}
-		s.trim.set(in.Instrument, next)
-		writeJSON(w, http.StatusOK, map[string]any{"trim": wireTrims(s.trim.all())})
+
+		// The room first, then the file. A slider that moved the strip and
+		// failed to save is a smaller surprise than one that saved and did
+		// nothing, and this way the reason for a failed save is reported while
+		// the operator is still looking at the light it just changed.
+		s.liveMu.Lock()
+		if s.live != nil && s.live.built != nil {
+			s.live.built.SetTrim(in.Instrument, next)
+		}
+		s.liveMu.Unlock()
+
+		s.mu.Lock()
+		err := s.rememberTrim(in.Instrument, next)
+		s.mu.Unlock()
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"trim": wireTrims(s.trims()),
+				// Said rather than returned as a failure: the light did change,
+				// and the operator needs to know the difference between that
+				// and it having been written down.
+				"unsaved": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"trim": wireTrims(s.trims())})
 
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -217,9 +87,65 @@ func (s *Server) handleLiveTrim(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// trims is what is currently in force, from the armed rig if there is one and
+// from the file if there is not.
+//
+// Both, because the sliders have to be readable before anything is armed: a
+// page that opened onto zeroes and then jumped when the rig came up would look
+// like it had lost the setting.
+func (s *Server) trims() map[string]colour.Trim {
+	s.liveMu.Lock()
+	l := s.live
+	s.liveMu.Unlock()
+	if l != nil && l.built != nil {
+		return l.built.Trims()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]colour.Trim{}
+	if s.rig == nil {
+		return out
+	}
+	for _, in := range s.rig.Instruments {
+		t := colour.Trim{Brightness: in.Brightness, Saturation: in.Saturation}
+		if !t.Zero() {
+			out[in.ID] = t
+		}
+	}
+	return out
+}
+
+// rememberTrim writes one instrument's correction into the rig file.
+//
+// Held under the studio's lock by the caller, because this is a read, a change
+// and a write of a file the admin page also edits.
+func (s *Server) rememberTrim(id string, t colour.Trim) error {
+	if s.rigPath == "" || s.rig == nil {
+		// A studio started without -rig. The knob still works on the room in
+		// front of it; there is simply nowhere to write the answer down, and
+		// saying so is better than pretending it was saved.
+		return errNoRigFile
+	}
+	cfg := s.rig
+	found := false
+	for i := range cfg.Instruments {
+		if cfg.Instruments[i].ID != id {
+			continue
+		}
+		cfg.Instruments[i].Brightness = t.Brightness
+		cfg.Instruments[i].Saturation = t.Saturation
+		found = true
+	}
+	if !found {
+		return nil // a live-only instrument, so nothing to write it against
+	}
+	return rig.Save(s.rigPath, cfg)
+}
+
 // The wire carries whole numbers from -100 to +100, because that is what a
 // slider is, and the inside works in -1 to +1 because that is what a colour is.
-func wireTrims(all map[string]Trim) map[string]map[string]float64 {
+func wireTrims(all map[string]colour.Trim) map[string]map[string]float64 {
 	out := make(map[string]map[string]float64, len(all))
 	for id, t := range all {
 		out[id] = map[string]float64{
@@ -230,13 +156,7 @@ func wireTrims(all map[string]Trim) map[string]map[string]float64 {
 	return out
 }
 
-func clampTrim(v float64) float64 {
-	v = v / 100
-	if v < -1 {
-		return -1
-	}
-	if v > 1 {
-		return 1
-	}
-	return v
-}
+// errNoRigFile is a studio started without -rig: the knob works, and there is
+// nowhere to keep the answer.
+var errNoRigFile = errors.New(
+	"this studio was started without -rig, so a trim lasts until it restarts")

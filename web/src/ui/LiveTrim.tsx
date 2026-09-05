@@ -37,6 +37,11 @@ const SEND_MS = 60;
 export function LiveTrim({ lights }: { lights: string[] }) {
   const [open, setOpen] = useState(false);
   const [trims, setTrims] = useState<Trims>({});
+  /* Set when the server took the change but had nowhere to write it down,
+     which is a studio started without -rig. The knob still works on the room
+     in front of it; it will not survive a restart, and the difference between
+     those two is worth a line of text. */
+  const [unsaved, setUnsaved] = useState<string | null>(null);
   /* What has not been sent yet. A drag is dozens of change events and the
    * server needs the last one, not all of them. */
   const pending = useRef<Record<string, Trim>>({});
@@ -63,7 +68,10 @@ export function LiveTrim({ lights }: { lights: string[] }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ instrument: id, ...body }),
-        }).catch(() => { /* the next drag sends it again */ });
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((said) => setUnsaved(said?.unsaved ?? null))
+          .catch(() => { /* the next drag sends it again */ });
       }
     }, SEND_MS);
   }, []);
@@ -101,9 +109,11 @@ export function LiveTrim({ lights }: { lights: string[] }) {
 
       {open && (
         <div className="trim-panel" role="group" aria-label="Live colour trim">
+          {unsaved && <p className="trim-unsaved">{unsaved}</p>}
           <p className="trim-why">
             Added to what the score asks for, on the way out. Nothing here
-            changes the score, and it applies to lights only.
+            changes the score. Kept in the rig, so a show gets it too and it
+            survives a restart.
           </p>
           {lights.map((id) => {
             const t = trims[id] ?? NONE;

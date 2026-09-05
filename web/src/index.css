@@ -1327,3 +1327,13 @@ button:hover { border-color: #3a4553; }
   color: var(--warn, #c1121f);
 }
 .trim-reset { font-size: 11px; padding: 2px 8px; margin-left: auto; }
+
+/* A studio with no rig file: the knob works, and there is nowhere to keep the
+   answer. Worth a line, because a setting that quietly will not survive the
+   night is the kind of thing somebody finds out the hard way. */
+.trim-unsaved {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--warn, #c1121f);
+  max-width: 30rem;
+}
