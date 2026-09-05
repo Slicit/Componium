@@ -133,3 +133,21 @@ ADR. A smaller version is for a client to seed from the clock and keep seeding
 from the clock rather than incrementing by one, so two clients interleave
 instead of one overtaking the other for good. That is a one line change in
 `internal/cip/client.go` and it does not fix a client that is not ours.
+
+### 2026-09-05 · A strip's colour order is announced and then ignored
+
+`device_announcement` reports an `order` field for a ws28xx device, and
+`device_apply` never reads it: it writes `d->value[0]`, `[1]`, `[2]` as red,
+green, blue into `led_strip_set_pixel` whatever the configuration says. So
+setting `order = "GRB"` in the studio changes nothing, and a strip that is not
+a plain WS2812 shows swapped colours with no way to correct it short of
+swapping the numbers in the score.
+
+Found while writing `hack/poke-together.py`, which names the colour it is about
+to send so that a person can check it against a bench. A validation script that
+says "this should be red" is only worth having if red means red, and this is
+the field that was supposed to guarantee that.
+
+Either honour it in `device_apply` or stop announcing it. Announcing a setting
+that does nothing is worse than not having it, because the studio offers it and
+the operator believes it.

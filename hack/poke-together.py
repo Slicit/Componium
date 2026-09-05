@@ -3,35 +3,46 @@
 The companion to poke.py, which speaks 0.2 unauthenticated and drives one
 output at a time. That was the right tool when a node was an instrument. A node
 now carries several, so the interesting question moved: not "does the fan
-spin", which poke.py already answers, but "do the fan and the light move
-together", which nothing answered.
+spin", which poke.py already answers, but "do the fan and both strips move
+together, and does each strip get the colour meant for it".
 
-    python3 poke-together.py 192.168.1.75 <secret>          # the whole thing
-    python3 poke-together.py 192.168.1.75 <secret> hello    # just look
+    python3 poke-together.py 192.168.1.75 <secret>            # everything
+    python3 poke-together.py 192.168.1.75 <secret> hello      # just look
+    python3 poke-together.py 192.168.1.75 <secret> rollcall   # one movement
 
-Three movements, and each one fails differently on purpose:
+Colour is the reason this is worth doing by eye rather than by counter. Two
+strips both lit is not evidence: two strips lit in *different* colours, then
+swapping colours in step, is. Almost every way of getting the addressing wrong
+ends with both strips showing the same thing, and the counters cannot see that
+because from the board's side the frame was applied perfectly.
 
-  cues       Both outputs told separately, one after the other. This is the
-             control: if this does not work, nothing about simultaneity is
-             worth measuring yet.
-  bundle     Both outputs in one datagram, fifty times a second. The node
-             applies every output in a frame before it returns, so this is
-             the only way simultaneous is actually simultaneous over a
-             transport that drops and reorders.
-  watchdog   The heartbeats stop. Both outputs should go safe together and
+Five movements, each failing differently on purpose:
+
+  rollcall   Each light alone in its own colour, everything else dark. This is
+             the one that maps an announced index onto a strip you can point
+             at. Run it first on a board you have just wired.
+  contrast   Every light at once, each a different colour, held still. Side by
+             side, which is where a colour that is nearly right looks wrong.
+  swap       The colours rotate between the strips, all in one datagram. Two
+             strips changing at visibly different moments means the bundle is
+             not doing its job.
+  bundle     Fifty frames a second: the fan ramps while every strip sweeps the
+             hue circle, each one a different distance around it, so no two are
+             ever the same colour.
+  watchdog   The heartbeats stop. Everything should go dark and go still
              within 300ms, without being told to.
 
 The counters come off the board's own status page afterwards, so the report is
-what the board did rather than what this sent. A curve frame is disposable by
-design and some will be lost; the number says how many.
+what the board did rather than what this sent.
 
-One warning worth reading. The node keeps a single replay counter for the whole
-board rather than one per sender, so two clients cannot talk to it at once: the
-one that connected earlier has every datagram refused from the moment the later
-one speaks. Running this against a board that a conductor is currently playing
-will silence that conductor until it reconnects. That is a property of the
-node, not of this script, and this script is a convenient way to watch it
-happen.
+Two things to know before trusting your eyes. The board announces an `order`
+field for a strip and then ignores it: `device_apply` writes r, g, b in that
+sequence whatever the configuration says. If rollcall shows green where it says
+red, the strip is not a plain WS2812 and the fix is in the firmware, not here.
+And a node keeps a single replay counter for the whole board rather than one
+per sender, so anything else talking to it during a run, the studio's Boards
+page included, silences this script for the rest of the run. See
+LOGBOOK/notes.md.
 """
 
 import hashlib
@@ -48,6 +59,21 @@ CIP_PORT = 5570
 CIP_VERSION = "0.3"
 TAG_LEN = 16
 WATCHDOG_MS = 300
+
+# Named because the operator is going to read one of these off the terminal and
+# compare it against something glowing on a bench. Ordered most distinguishable
+# first, so a board with two strips gets red against green rather than amber
+# against magenta.
+PALETTE = [
+    ("red", (1.0, 0.0, 0.0)),
+    ("green", (0.0, 1.0, 0.0)),
+    ("blue", (0.0, 0.0, 1.0)),
+    ("amber", (1.0, 0.45, 0.0)),
+    ("magenta", (1.0, 0.0, 1.0)),
+    ("cyan", (0.0, 1.0, 1.0)),
+    ("white", (1.0, 1.0, 1.0)),
+]
+DARK = (0.0, 0.0, 0.0)
 
 
 class Link:
@@ -111,10 +137,15 @@ class Link:
             body.append(index)
             body.append(len(values))
             for v in values:
-                body += struct.pack(">f", v)
+                body += struct.pack(">f", max(0.0, min(1.0, v)))
         self.sock.sendto(self.wrap(bytes(body)), (self.host, CIP_PORT))
         self.sent_frames += 1
         self.sent_outputs += len(outputs)
+
+    def cue(self, instrument, params, hold_ms=8000):
+        self.sent_cues += 1
+        self.send({"t": "cue", "seq": self.sent_cues, "instrument": instrument,
+                   "params": params, "hold_ms": hold_ms})
 
     def ask(self, message, wait=2.0):
         self.send(message)
@@ -131,7 +162,7 @@ class Link:
             try:
                 return json.loads(body.decode())
             except (UnicodeDecodeError, ValueError):
-                continue        # somebody else's datagram, or a curve frame
+                continue        # a curve frame, or somebody else's datagram
         return None
 
     def beat(self):
@@ -141,18 +172,25 @@ class Link:
         self.sock.close()
 
 
-def hold(link, seconds, then=None):
+def hold(link, seconds, paint=None):
     """Keep the outputs alive for a while, beating as the conductor would.
 
     The heartbeats are the point of this helper. Without them the node drops
     everything to safe after 300ms, which looks exactly like a cue that never
-    landed.
+    landed. `paint` is called with elapsed seconds when a movement wants to
+    keep sending frames while it waits.
     """
-    until = time.time() + seconds
-    while time.time() < until:
-        link.beat()
-        if then:
-            then(1.0 - (until - time.time()) / seconds)
+    start = time.time()
+    last_beat = -1.0
+    while True:
+        t = time.time() - start
+        if t >= seconds:
+            return
+        if t - last_beat > 0.1:
+            link.beat()
+            last_beat = t
+        if paint:
+            paint(t)
         time.sleep(0.02)
 
 
@@ -169,42 +207,44 @@ def channels_of(inst):
     return len(inst.get("channels") or [])
 
 
-def pick(instruments):
-    """Choose one single valued output and one colour output.
+def sort_out(instruments):
+    """Split what is attached into things with a colour and things without.
 
-    By what the board announced rather than by name. A board is configured by
-    whoever set it up and the ids are theirs, so matching on "wind.main" would
-    work on this bench and nowhere else. Kind first, because that is the field
-    that means something; channel count as the fallback, because three channels
-    is a colour whatever it is called.
+    By channel count rather than by id, because the ids belong to whoever set
+    the board up. Three channels is a colour whatever it is called, and one
+    channel is a level. Kind is used only to order the lights, so that adding a
+    strip does not renumber the colours of the ones already on the bench.
     """
-    lights = [i for i in instruments if i.get("kind") == "light"]
-    others = [i for i in instruments if i.get("kind") != "light"]
-    light = next((i for i in lights if channels_of(i) == 3), None)
-    if light is None:
-        light = next((i for i in instruments if channels_of(i) == 3), None)
-    wind = next((i for i in others if channels_of(i) == 1), None)
-    if wind is None:
-        wind = next((i for i in instruments
-                     if channels_of(i) == 1 and i is not light), None)
-    return wind, light
+    lights = [i for i in instruments if channels_of(i) == 3]
+    levels = [i for i in instruments if channels_of(i) == 1]
+    lights.sort(key=lambda i: i.get("index", 0))
+    levels.sort(key=lambda i: i.get("index", 0))
+    return levels, lights
 
 
 def describe(instruments):
+    levels, lights = sort_out(instruments)
     for i in instruments:
-        print("  %d  %-16s %-7s %-7s gpio %-3s %d channel(s)" % (
+        colour = ""
+        if i in lights:
+            colour = "  will show %s" % PALETTE[lights.index(i) % len(PALETTE)][0]
+        print("  %d  %-16s %-7s %-7s gpio %-3s %d channel(s)%s" % (
             i.get("index", -1), i.get("id", "?"), i.get("kind", "?"),
-            i.get("type", "?"), i.get("gpio", "?"), channels_of(i)))
+            i.get("type", "?"), i.get("gpio", "?"), channels_of(i), colour))
+    if len(lights) < 2:
+        print()
+        print("  only %d light attached, so nothing here can tell whether two" % len(lights))
+        print("  strips are addressed separately. Attach the second and rerun.")
 
 
 # --- the board's own account of it -----------------------------------------
 
 def counters(host, secret):
-    """Cues applied, curve frames received and datagrams refused, per the board.
+    """Cues applied, curve outputs driven and datagrams refused, per the board.
 
     Read off the status page on port 80, which is the only place the node
-    reports them. Scraped, because the page is for a person and this is the
-    one machine reading it; if that ever matters, hello should carry them.
+    reports them. Scraped, because the page is for a person and this is the one
+    machine reading it; if that ever matters, hello should carry them.
     """
     url = "http://%s/" % host
     manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
@@ -223,91 +263,20 @@ def counters(host, secret):
         page, re.S)
     if not found:
         return None
-    return {"cues": int(found.group(1)), "frames": int(found.group(2)),
+    return {"cues": int(found.group(1)), "outputs": int(found.group(2)),
             "refused": int(found.group(3))}
 
 
-# --- the three movements ---------------------------------------------------
+# --- painting --------------------------------------------------------------
 
-def movement_cues(link, wind, light):
-    """Both outputs told separately, then held together.
-
-    Two cues rather than one, because a cue names one instrument. Each carries
-    a hold long enough to outlive the movement, so that what ends this is the
-    next movement rather than the node's own expiry.
-    """
-    print("cues, one instrument each")
-    if wind:
-        print("  %s to 0.6" % wind["id"])
-        link.send({"t": "cue", "seq": 1, "instrument": wind["id"],
-                   "params": {"intensity": 0.6}, "hold_ms": 4000})
-        link.sent_cues += 1
-    if light:
-        print("  %s to amber" % light["id"])
-        link.send({"t": "cue", "seq": 2, "instrument": light["id"],
-                   "params": {"r": 1.0, "g": 0.45, "b": 0.0}, "hold_ms": 4000})
-        link.sent_cues += 1
-    hold(link, 2.5)
-
-
-def movement_bundle(link, wind, light, seconds=6.0):
-    """Both outputs in one datagram, fifty times a second.
-
-    The fan ramps up and back down while the light walks around the hue circle.
-    Two motions that are easy to tell apart by eye, so that one output lagging
-    the other is visible rather than merely measurable.
-    """
-    print("one bundle, both outputs, 50Hz for %.0fs" % seconds)
-    start = time.time()
-    last_beat = 0.0
-    while True:
-        t = time.time() - start
-        if t >= seconds:
-            break
-
-        outputs = []
-        if wind:
-            # Up over the first half and back down over the second, so the
-            # ramp is unmistakably a ramp and ends where it started.
-            phase = t / seconds
-            level = 2 * phase if phase < 0.5 else 2 * (1 - phase)
-            outputs.append((wind["index"], [max(0.0, min(1.0, level))]))
-        if light:
-            outputs.append((light["index"], hue(t / 2.0)))
-        if outputs:
-            link.send_frame(outputs)
-
-        # Heartbeats are separate from frames on purpose: a board driven only
-        # by curve frames still has to be told the conductor is alive, and a
-        # rig that conflated the two would keep running on a stream that was
-        # nothing but stale repeats.
-        if t - last_beat > 0.1:
-            link.beat()
-            last_beat = t
-        time.sleep(0.02)
-    print("  sent %d frames" % link.sent_frames)
-
-
-def movement_watchdog(link, wind, light):
-    """Stop talking, and watch both outputs go safe on their own.
-
-    The single most important behaviour on the board, and the only one that
-    matters when this script is what crashes. Nothing is sent here: that is the
-    test.
-    """
-    print("watchdog, no heartbeats for %dms" % (WATCHDOG_MS * 4))
-    if wind:
-        link.send({"t": "cue", "seq": 3, "instrument": wind["id"],
-                   "params": {"intensity": 0.8}, "hold_ms": 60000})
-        link.sent_cues += 1
-    if light:
-        link.send({"t": "cue", "seq": 4, "instrument": light["id"],
-                   "params": {"r": 0.0, "g": 0.0, "b": 1.0}, "hold_ms": 60000})
-        link.sent_cues += 1
-    hold(link, 1.0)
-    print("  silence now; both should fall to safe within %dms" % WATCHDOG_MS)
-    time.sleep(WATCHDOG_MS * 4 / 1000.0)
-    print("  if either is still running, the watchdog is not doing its job")
+def frame_for(levels, lights, level_value, colours):
+    """One bundle: every output on the board, in the order it was announced."""
+    outputs = []
+    for d in levels:
+        outputs.append((d["index"], [level_value]))
+    for d, rgb in zip(lights, colours):
+        outputs.append((d["index"], list(rgb)))
+    return outputs
 
 
 def hue(turns):
@@ -319,7 +288,136 @@ def hue(turns):
     return list(table[int(h) % 6])
 
 
-def run(host, secret):
+# --- the movements ---------------------------------------------------------
+
+def movement_rollcall(link, levels, lights, seconds=2.0):
+    """Each light alone, in its own colour, everything else dark.
+
+    The movement that turns an index into a strip you can point at. Everything
+    else in this file assumes that mapping is right; this is the only part that
+    establishes it, which is why it runs first and why it says out loud what
+    should be lit before it lights it.
+    """
+    print("rollcall, one light at a time")
+    if not lights:
+        print("  no lights attached")
+        return
+    for k, d in enumerate(lights):
+        name, rgb = PALETTE[k % len(PALETTE)]
+        print("  index %d  %-16s should be the ONLY one lit, and %s"
+              % (d["index"], d["id"], name), flush=True)
+        colours = [DARK] * len(lights)
+        colours[k] = rgb
+        hold(link, seconds,
+             lambda t, c=colours: link.send_frame(frame_for(levels, lights, 0.0, c)))
+    print("  all dark")
+    hold(link, 0.4, lambda t: link.send_frame(
+        frame_for(levels, lights, 0.0, [DARK] * len(lights))))
+
+
+def movement_contrast(link, levels, lights, seconds=4.0):
+    """Every light at once, each a different colour, held still.
+
+    Sent as cues rather than frames, because a cue is the path a score takes
+    and it should reach the same place. Held still because a colour that is
+    nearly right is obvious beside another one and invisible on its own.
+    """
+    print("contrast, every light at once, held")
+    if not lights:
+        print("  no lights attached")
+        return
+    for k, d in enumerate(lights):
+        name, rgb = PALETTE[k % len(PALETTE)]
+        print("  %-16s %s" % (d["id"], name), flush=True)
+        link.cue(d["id"], {"r": rgb[0], "g": rgb[1], "b": rgb[2]},
+                 hold_ms=int(seconds * 1000) + 1000)
+    for d in levels:
+        link.cue(d["id"], {"intensity": 0.5}, hold_ms=int(seconds * 1000) + 1000)
+    print("  no two should look alike, and none should be dark")
+    hold(link, seconds)
+
+
+def movement_swap(link, levels, lights, rounds=4, dwell=0.8):
+    """The colours rotate between the strips, all in one datagram.
+
+    Two things at once. Every strip takes every colour in turn, so a strip that
+    is not really being addressed separately shows it immediately by never
+    changing or by changing in lockstep with its neighbour. And each change
+    lands in a single frame, so the strips should switch together: one visibly
+    trailing the other means the bundle is not being applied as a unit.
+    """
+    print("swap, colours rotating between the strips")
+    if len(lights) < 2:
+        print("  needs two lights to mean anything; skipping")
+        return
+    names = [PALETTE[k % len(PALETTE)][0] for k in range(len(lights))]
+    for turn in range(rounds):
+        order = [(k + turn) % len(lights) for k in range(len(lights))]
+        colours = [PALETTE[o % len(PALETTE)][1] for o in order]
+        print("  " + ",  ".join(
+            "%s %s" % (d["id"], names[o]) for d, o in zip(lights, order)), flush=True)
+        hold(link, dwell,
+             lambda t, c=colours: link.send_frame(frame_for(levels, lights, 0.3, c)))
+    print("  every strip should have shown every colour, and changed in step")
+
+
+def movement_bundle(link, levels, lights, seconds=8.0):
+    """Fifty frames a second, everything moving, nothing sharing a colour.
+
+    Each light sweeps the hue circle from a different starting point, spaced
+    evenly around it, so at every instant they are as far apart in colour as
+    they can be. The fan ramps up and back down underneath, so the run also
+    shows a level and a colour moving in one datagram.
+    """
+    print("bundle, 50Hz for %.0fs, hue sweep and a ramp" % seconds)
+    spread = 1.0 / max(1, len(lights))
+    start = time.time()
+    last_beat = -1.0
+    while True:
+        t = time.time() - start
+        if t >= seconds:
+            break
+        phase = t / seconds
+        level = 2 * phase if phase < 0.5 else 2 * (1 - phase)
+        colours = [hue(t / 3.0 + k * spread) for k in range(len(lights))]
+        link.send_frame(frame_for(levels, lights, level, colours))
+        if t - last_beat > 0.1:
+            link.beat()
+            last_beat = t
+        time.sleep(0.02)
+    print("  sent %d frames carrying %d outputs" % (link.sent_frames, link.sent_outputs))
+
+
+def movement_watchdog(link, levels, lights):
+    """Stop talking, and watch everything go safe on its own.
+
+    The single most important behaviour on the board, and the only one that
+    matters when this script is what crashes. Nothing is sent after the setup:
+    that is the test.
+    """
+    print("watchdog, everything lit, then silence")
+    for k, d in enumerate(lights):
+        rgb = PALETTE[k % len(PALETTE)][1]
+        link.cue(d["id"], {"r": rgb[0], "g": rgb[1], "b": rgb[2]}, hold_ms=60000)
+    for d in levels:
+        link.cue(d["id"], {"intensity": 0.8}, hold_ms=60000)
+    hold(link, 1.0)
+    print("  silence now; everything should go dark and still within %dms" % WATCHDOG_MS)
+    time.sleep(WATCHDOG_MS * 4 / 1000.0)
+    print("  anything still lit or still spinning is a watchdog not doing its job")
+
+
+MOVEMENTS = {
+    "rollcall": movement_rollcall,
+    "contrast": movement_contrast,
+    "swap": movement_swap,
+    "bundle": movement_bundle,
+    "watchdog": movement_watchdog,
+}
+ORDER = ["rollcall", "contrast", "swap", "bundle", "watchdog"]
+
+
+def run(host, secret, only=None):
     link = Link(host, secret)
 
     instruments = announced(link)
@@ -338,28 +436,23 @@ def run(host, secret):
 
     print("attached:")
     describe(instruments)
-    wind, light = pick(instruments)
-    if not wind and not light:
+    levels, lights = sort_out(instruments)
+    if not levels and not lights:
         print("nothing here takes one or three channels, so this script has")
         print("nothing to say about it.")
         link.close()
         return 1
-    if not wind or not light:
-        print("only one of the two kinds is attached, so this runs but proves")
-        print("nothing about simultaneity.")
     print()
 
     before = counters(host, secret)
-
-    movement_cues(link, wind, light)
-    movement_bundle(link, wind, light)
-    movement_watchdog(link, wind, light)
+    for name in ([only] if only else ORDER):
+        MOVEMENTS[name](link, levels, lights)
+        print()
 
     link.send({"t": "safe"})
     print("safe")
 
-    after = counters(host, secret)
-    report(link, before, after)
+    report(link, before, counters(host, secret))
     link.close()
     return 0
 
@@ -372,10 +465,10 @@ def report(link, before, after):
         return
     got_cues = after["cues"] - before["cues"]
     # The board's counter increments once per output, not once per frame,
-    # despite the page calling them frames: a bundle carrying two outputs
-    # counts two. Compared against outputs here so the number means something.
-    # Worth fixing on the board, and it is a label rather than a fault.
-    got_outputs = after["frames"] - before["frames"]
+    # despite the page calling them frames: a bundle carrying three outputs
+    # counts three. Compared against outputs here so the number means
+    # something. Worth fixing on the board; it is a label rather than a fault.
+    got_outputs = after["outputs"] - before["outputs"]
     refused = after["refused"] - before["refused"]
 
     print()
@@ -422,5 +515,7 @@ if __name__ == "__main__":
         conn.close()
     elif what == "all":
         raise SystemExit(run(where, key))
+    elif what in MOVEMENTS:
+        raise SystemExit(run(where, key, only=what))
     else:
         raise SystemExit(__doc__)
