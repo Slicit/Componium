@@ -169,6 +169,22 @@ services:
       - -boards=/state/boards.toml
       - -firmware=/firmware
       - -addr=0.0.0.0:8722
+      # Where a board should fetch firmware from when it is told to update
+      # itself over the network.
+      #
+      # Required here, and only here. A studio running on the host works this
+      # out by opening a socket towards the board and reading which of its own
+      # addresses the kernel chose. In a container that returns a bridge
+      # address on 172.16/12: reachable from the other containers, reachable
+      # from nothing else, and not loopback, so nothing about it looks wrong
+      # from inside. The address that works is the host's, on the published
+      # port, and the container cannot see it.
+      #
+      # Set COMPONIUM_ADVERTISE to the host's address on the network the boards
+      # are on. Add a port if you publish this on something other than 8722.
+      # Empty is fine until you press update, and then it is the difference
+      # between a board that fetches and a board that quietly does not.
+      - -advertise=${COMPONIUM_ADVERTISE:-}
     # The vision seam, off unless a command is named. Analysis works without
     # it; naming one turns keyframe labelling on for every film analysed here.
     environment:

@@ -22,6 +22,8 @@ func studioCmd(args []string) error {
 		"file remembering which boards exist; it holds their secrets, so keep it out of version control")
 	db := fs.String("db", os.Getenv("COMPONIUM_DB"), "Postgres URL for derived data; without it observations stay files")
 	addr := fs.String("addr", "127.0.0.1:8722", "address to serve on")
+	advertise := fs.String("advertise", os.Getenv("COMPONIUM_ADVERTISE"),
+		"host a board should fetch firmware from, when this studio cannot see itself the way a board does; needed in a container")
 	fs.Parse(args)
 
 	if *scorePath == "" && *mediaPath == "" {
@@ -48,7 +50,7 @@ func studioCmd(args []string) error {
 	s, err := studio.New(studio.Options{
 		Score: *scorePath, Rig: *rigPath, Media: *mediaPath,
 		Scores: *scoresPath, Composer: comp, Firmware: *firmware, DB: *db,
-		Boards: *boardsPath, Addr: *addr,
+		Boards: *boardsPath, Addr: *addr, Advertise: *advertise,
 	})
 	if err != nil {
 		return err

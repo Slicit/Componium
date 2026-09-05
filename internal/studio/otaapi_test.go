@@ -263,3 +263,65 @@ func TestThePageIsToldWhatCouldBeSentOverTheNetwork(t *testing.T) {
 			"of the two numbers is counting the wrong thing", got.AppBytes, got.Bytes)
 	}
 }
+
+func TestAStudioThatWasToldItsAddressUsesIt(t *testing.T) {
+	/* The container case, and the reason this exists at all. Inside one, the
+	 * routing table offers a bridge address that only the other containers can
+	 * reach, and it is not loopback, so nothing about it looks wrong from in
+	 * there. Being told beats looking, always: whoever set the flag could see
+	 * both ends. */
+	got, err := fetchFrom("192.168.1.67", "127.0.0.1:5570", "0.0.0.0:8722", "app.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "http://192.168.1.67:8722/firmware/app.bin"; got != want {
+		t.Errorf("would have sent the board to %s, want %s", got, want)
+	}
+}
+
+func TestBeingToldBeatsTheLoopbackRefusal(t *testing.T) {
+	/* The board here is on loopback, which is refused when the studio has to
+	 * work the address out. It must not be refused when the studio was told,
+	 * because a board reached over a forwarded port is a real arrangement and
+	 * the address that works is not the one the socket reveals. */
+	if _, err := fetchFrom("", "127.0.0.1:5570", "0.0.0.0:8722", "app.bin"); err == nil {
+		t.Fatal("worked out a loopback address and offered it to a board")
+	}
+	if _, err := fetchFrom("192.168.1.67", "127.0.0.1:5570", "0.0.0.0:8722", "app.bin"); err != nil {
+		t.Errorf("refused an address it was given: %v", err)
+	}
+}
+
+func TestAPublishedPortCanDifferFromTheListeningOne(t *testing.T) {
+	// docker -p 9000:8722, which is somebody else's decision to make.
+	got, err := fetchFrom("192.168.1.67:9000", "127.0.0.1:5570", "0.0.0.0:8722", "app.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "http://192.168.1.67:9000/firmware/app.bin"; got != want {
+		t.Errorf("came out as %s, want %s", got, want)
+	}
+}
+
+func TestAnAdvertisedAddressThatIsNotAnAddressIsRefused(t *testing.T) {
+	/* Refused here rather than discovered as a board that took the instruction
+	 * and then fetched nothing, which is the failure this whole flag exists to
+	 * prevent and is invisible from the studio. */
+	for _, bad := range []string{"http://192.168.1.67:8722", "192.168.1.67/firmware", " "} {
+		if url, err := fetchFrom(bad, "127.0.0.1:5570", "0.0.0.0:8722", "app.bin"); err == nil {
+			t.Errorf("accepted %q and built %s", bad, url)
+		}
+	}
+}
+
+func TestAnIPv6StudioCanBeAdvertised(t *testing.T) {
+	// Bracketed, which is how it has to be written anyway, and how it has to
+	// come back out or the port is ambiguous.
+	got, err := fetchFrom("[fd00::1]", "127.0.0.1:5570", "0.0.0.0:8722", "app.bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "http://[fd00::1]:8722/firmware/app.bin"; got != want {
+		t.Errorf("came out as %s, want %s", got, want)
+	}
+}

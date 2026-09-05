@@ -59,6 +59,19 @@ type Options struct {
 	// Addr is where the studio listens, used to tell a board where to fetch
 	// firmware from.
 	Addr string
+	// Advertise is where a board should fetch firmware from, when the studio
+	// cannot work that out for itself.
+	//
+	// It usually can: it opens a socket towards the board and reads whichever
+	// of this machine's addresses the kernel chose. That is right for a studio
+	// running on the network its boards are on, and wrong in a container,
+	// where the address it finds is a bridge address that nothing outside the
+	// container can reach, and the studio has no way to discover the host's
+	// address from in there. Somebody has to say.
+	//
+	// A host, or a host and a port when the published port differs from the
+	// one being listened on. Empty means work it out.
+	Advertise string
 	// Boards is the file remembering which ESP32s exist, with the secrets
 	// needed to reach them. Empty means they are not remembered, and the admin
 	// page says so rather than losing an edit.
@@ -106,6 +119,9 @@ type Server struct {
 	// reaching the studio through a tunnel at localhost, which is not
 	// somewhere a board on a shelf can go.
 	addr string
+	// advertise overrides that, for a studio that cannot see itself the way a
+	// board sees it.
+	advertise string
 
 	// Live output is separate from the editing lock on purpose: the show loop
 	// reports a reading every five milliseconds and must never wait behind
@@ -119,7 +135,8 @@ type Server struct {
 // New opens a studio.
 func New(o Options) (*Server, error) {
 	s := &Server{path: o.Score, media: o.Media, scores: o.Scores,
-		firmware: o.Firmware, rigPath: o.Rig, addr: o.Addr}
+		firmware: o.Firmware, rigPath: o.Rig, addr: o.Addr,
+		advertise: strings.TrimSpace(o.Advertise)}
 
 	// Always a shelf, even with no file behind it. A studio started without one
 	// still answers the page, saying the list cannot be remembered, rather than

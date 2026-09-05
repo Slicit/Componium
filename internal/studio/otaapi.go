@@ -113,6 +113,43 @@ func firmwareURL(host, listen, name string) (string, error) {
 	return "http://" + net.JoinHostPort(host, port) + "/firmware/" + name, nil
 }
 
+// fetchFrom is the URL to hand a board, however this studio has to arrive at it.
+//
+// Told, or worked out. Told wins, because a studio that has been given an
+// address has been given it by somebody who can see both ends, and no amount
+// of looking at its own interfaces beats that.
+//
+// The case that forces this to exist is the container. Inside one, the address
+// the routing table offers is a bridge address that only the other containers
+// can reach, and it is not loopback, so nothing about it looks wrong from in
+// there. The published port on the host is the address that works and the
+// studio cannot see it. So `advertise` carries a host, or a host and a port
+// when the published port differs from the one being listened on.
+func fetchFrom(advertise, boardAddr, listen, name string) (string, error) {
+	if advertise == "" {
+		host, err := reachableFrom(boardAddr)
+		if err != nil {
+			return "", err
+		}
+		return firmwareURL(host, listen, name)
+	}
+
+	// A bare host is the common case and a host:port is the port mapped one.
+	// SplitHostPort is what tells them apart, and it is also what stops a bare
+	// IPv6 address being read as a host and a port.
+	if host, port, err := net.SplitHostPort(advertise); err == nil && port != "" {
+		return firmwareURL(host, net.JoinHostPort("", port), name)
+	}
+	// Otherwise a bare host: a name, an IPv4 address, or an IPv6 address in
+	// the brackets it has to be written in anyway.
+	host := strings.TrimSuffix(strings.TrimPrefix(advertise, "["), "]")
+	if host == "" || strings.ContainsAny(host, "/ \t") {
+		return "", fmt.Errorf("-advertise should be a host, or a host and a port, "+
+			"not %q", advertise)
+	}
+	return firmwareURL(host, listen, name)
+}
+
 // handleBoardUpdate tells one board to replace its firmware.
 func (s *Server) handleBoardUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -129,7 +166,7 @@ func (s *Server) handleBoardUpdate(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	board, known := s.boards.Find(want.Board)
-	listen := s.addr
+	listen, advertise := s.addr, s.advertise
 	s.mu.Unlock()
 
 	if !known {
@@ -153,14 +190,9 @@ func (s *Server) handleBoardUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	host, err := reachableFrom(board.Addr)
+	url, err := fetchFrom(advertise, board.Addr, listen, name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-	url, err := firmwareURL(host, listen, name)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
