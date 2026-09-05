@@ -128,14 +128,14 @@ describe('the side menu', () => {
 
   it('opens the first page when the hash names none', () => {
     show('#/admin');
-    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Devices');
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Rigs');
   });
 
   it('opens the first page rather than failing on a hash nobody recognises', () => {
     /* A hash is a thing people edit and paste half of. Landing somewhere
      * useful beats an empty panel. */
     show('#/admin/nonsense');
-    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Devices');
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Rigs');
   });
 
   it('shows one page at a time', () => {

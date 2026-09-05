@@ -319,6 +319,18 @@ export function Library(props: { onOpen: (film: string) => void; fps: Fps }) {
             <span className="slot slot-open">
               {e.hasScore && <button onClick={() => props.onOpen(e.film)}>Open</button>}
             </span>
+            {/* Downloaded as the file it is, because a score is what an hour
+                of analysis produced and the machine that runs the room is
+                not always the machine that made it. */}
+            <span className="slot slot-get">
+              {e.hasScore && (
+                <a
+                  className="adm-link" download
+                  href={'/api/score/export?film=' + encodeURIComponent(e.film)}
+                  title="Download this score, to keep or to carry to another machine"
+                >Get</a>
+              )}
+            </span>
             <span className="slot slot-build">
               {data.canBuild && (
                 <button

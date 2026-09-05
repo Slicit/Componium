@@ -147,6 +147,16 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	return Parse(b)
+}
+
+// Parse reads a rig from bytes, with the same checks Load applies.
+//
+// Separate from Load so that a rig arriving from somewhere other than a
+// path can be held to the same standard before it is written anywhere. An
+// imported file that parses only after it is on the shelf is a show that
+// does not start, discovered by whoever is standing in the room.
+func Parse(b []byte) (*Config, error) {
 	var c Config
 	if _, err := toml.Decode(string(b), &c); err != nil {
 		return nil, fmt.Errorf("rig: %w", err)

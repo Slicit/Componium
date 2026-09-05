@@ -25,6 +25,12 @@ interface Device {
   start?: number;
   mode?: string;
   position: [number, number, number];
+  /* The colour trim, in -100 to +100, kept in the rig and also movable
+     from the live panel. Shown here because this is where it lives, and
+     a correction that can only be found by arming a rig and opening a
+     popover is a correction nobody remembers setting. */
+  brightness?: number;
+  saturation?: number;
 }
 
 interface Rig {
@@ -323,7 +329,11 @@ export function Devices() {
                 <thead>
                   <tr>
                     <th>Instrument</th><th>Kind</th><th>Driver</th>
-                    <th>Where</th><th className="num">Latency</th><th />
+                    <th>Where</th><th className="num">Latency</th>
+                    <th className="num" title={
+                      'Added to what the score asks for, on the way out, for this fixture only. ' +
+                      'Two strips with the same part number reach the same numbers differently. ' +
+                      'Blank for anything that is not a light.'}>Trim</th><th />
                   </tr>
                 </thead>
                 <tbody>
@@ -410,6 +420,34 @@ export function Devices() {
                           aria-label={'Instrument ' + (i + 1) + ' latency'}
                           onChange={(e) => change(i, { latency: Number(e.target.value) })}
                         />
+                      </td>
+                      <td className="num">
+                        {d.kind === 'light' ? (
+                          <span className="dev-trim">
+                            <input
+                              type="number" min={-100} max={100} step={1}
+                              value={d.brightness ?? 0} disabled={!editable}
+                              aria-label={d.id + ' brightness trim, percent'}
+                              title="Brightness"
+                              onChange={(e) => change(i, { brightness: Number(e.target.value) })}
+                            />
+                            <input
+                              type="number" min={-100} max={100} step={1}
+                              value={d.saturation ?? 0} disabled={!editable}
+                              aria-label={d.id + ' saturation trim, percent'}
+                              title="Saturation"
+                              onChange={(e) => change(i, { saturation: Number(e.target.value) })}
+                            />
+                            {((d.brightness ?? 0) !== 0 || (d.saturation ?? 0) !== 0) && (
+                              <button
+                                className="adm-remove" disabled={!editable}
+                                title={'Put ' + d.id + ' back to what the score says'}
+                                aria-label={'Reset trim for ' + d.id}
+                                onClick={() => change(i, { brightness: 0, saturation: 0 })}
+                              >reset</button>
+                            )}
+                          </span>
+                        ) : <span className="dim small">not a light</span>}
                       </td>
                       <td>
                         <button

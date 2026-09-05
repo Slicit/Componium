@@ -770,6 +770,7 @@ button:hover { border-color: #3a4553; }
   width: 60px;
 }
 .lib-actions .slot-open { width: 52px; }
+.lib-actions .slot-get { width: 34px; }
 .lib-actions .slot-build { width: 72px; }
 .lib-actions .slot-reset { width: 52px; }
 .lib-actions .slot-prepare { width: 68px; }
@@ -1337,3 +1338,10 @@ button:hover { border-color: #3a4553; }
   color: var(--warn, #c1121f);
   max-width: 30rem;
 }
+
+/* Two small numbers and a reset, in one cell of the devices table. */
+.dev-trim { display: inline-flex; align-items: center; gap: 4px; }
+.dev-trim input { width: 3.6rem; }
+
+/* A row of small actions at the end of an admin table row. */
+.adm-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }

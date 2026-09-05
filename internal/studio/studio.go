@@ -276,6 +276,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/rig", s.handleRig)
 	mux.HandleFunc("/api/rig/options", s.handleRigOptions)
 	mux.HandleFunc("/api/rigs", s.handleRigs)
+	mux.HandleFunc("/api/rigs/new", s.handleRigNew)
+	mux.HandleFunc("/api/rigs/delete", s.handleRigDelete)
+	mux.HandleFunc("/api/rigs/export", s.handleRigExport)
+	mux.HandleFunc("/api/rigs/import", s.handleRigImport)
+	mux.HandleFunc("/api/score/export", s.handleScoreExport)
 	mux.HandleFunc("/api/live", s.handleLive)
 	mux.HandleFunc("/api/live/at", s.handleLiveAt)
 	mux.HandleFunc("/api/live/trim", s.handleLiveTrim)
@@ -497,6 +502,15 @@ type wireInstrument struct {
 	Start    int        `json:"start,omitempty"`
 	Mode     string     `json:"mode,omitempty"`
 	Position [3]float64 `json:"position"`
+
+	// How it is corrected, in -100 to +100, as the sliders read them.
+	//
+	// Shown here as well as on the live panel because this is where they
+	// are kept, and a number that can only be found by arming a rig and
+	// opening a popover is a number nobody remembers setting. Editable
+	// here too, which is the honest way to offer a reset.
+	Brightness float64 `json:"brightness"`
+	Saturation float64 `json:"saturation"`
 }
 
 type wireRig struct {
@@ -578,6 +592,10 @@ func (s *Server) handleRig(w http.ResponseWriter, r *http.Request) {
 			Start:    in.Start,
 			Mode:     in.Mode,
 			Position: pos,
+			// Whole numbers, because that is what a slider is. The rig keeps
+			// them as fractions, because that is what a colour is.
+			Brightness: in.Brightness * 100,
+			Saturation: in.Saturation * 100,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

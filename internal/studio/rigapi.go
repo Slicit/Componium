@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Slicit/componium/internal/colour"
 	"github.com/Slicit/componium/internal/rig"
 )
 
@@ -66,6 +67,13 @@ func (s *Server) handleRigSave(w http.ResponseWriter, r *http.Request) {
 		out.Position = &rig.Position{
 			X: in.Position[0], Y: in.Position[1], Z: in.Position[2],
 		}
+
+		// The colour trim, which the live panel also writes. Carried both
+		// ways so that this page can show it and put it back to zero: a
+		// correction somebody found once and cannot see afterwards is a
+		// correction they will spend an evening looking for.
+		out.Brightness = colour.Clamp(in.Brightness / 100)
+		out.Saturation = colour.Clamp(in.Saturation / 100)
 		// Fields that belong to a driver the instrument no longer uses are
 		// dropped rather than carried: a fogger that used to be a light should
 		// not keep a DMX address nobody can see.
