@@ -35,10 +35,11 @@ Five movements, each failing differently on purpose:
 The counters come off the board's own status page afterwards, so the report is
 what the board did rather than what this sent.
 
-Two things to know before trusting your eyes. The board announces an `order`
-field for a strip and then ignores it: `device_apply` writes r, g, b in that
-sequence whatever the configuration says. If rollcall shows green where it says
-red, the strip is not a plain WS2812 and the fix is in the firmware, not here.
+Two things to know before trusting your eyes. A strip that names the wrong
+primary is not a plain WS2812, and the answer is that strip's `order` in the
+studio rather than anything in this file: the board honours it as of
+firmware v0.1.0-alpha.1-98, and ignored it in every build before that, so an
+older board will keep showing the wrong colour however it is configured.
 And a node keeps a single replay counter for the whole board rather than one
 per sender, so anything else talking to it during a run, the studio's Boards
 page included, silences this script for the rest of the run. See
@@ -377,7 +378,14 @@ def movement_channels(link, levels, lights, seconds=2.0):
     hold(link, 0.4, lambda t: link.send_frame(
         frame_for(levels, lights, 0.0, [DARK] * len(lights))))
     print("  all dark. A strip that named the wrong primary is wired in a")
-    print("  different channel order, and the board ignores the order field.")
+    print("  different channel order. Set that strip's order in the studio:")
+    print("  the string says which of r, g and b feeds the driver's red,")
+    print("  green and blue, so a strip that showed GREEN when told RED")
+    print("  wants grb. Then run this again; it should name them correctly.")
+    for d in lights:
+        if not d.get("order"):
+            print("  (%s has no order set, so it was driven straight through)"
+                  % d["id"])
 
 
 def movement_contrast(link, levels, lights, seconds=4.0):
