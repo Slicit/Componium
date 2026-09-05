@@ -66,6 +66,14 @@ const (
 	// can write this can move a relay onto a pin nobody intended, or declare a
 	// latency of zero and corrupt every cue after it.
 	TypeConfigure Type = "configure"
+
+	// TypeUpdate tells a node to fetch a firmware image and boot it.
+	//
+	// Carries the HMAC of the image as well as its address. The message being
+	// signed says the instruction is genuine; the image's own HMAC says the
+	// bytes that arrive are the ones that instruction meant. Without the second,
+	// a board would run whatever answered the URL.
+	TypeUpdate Type = "update"
 )
 
 // Message is one control datagram.
@@ -87,6 +95,13 @@ type Message struct {
 
 	// Configure
 	Devices []Device `json:"devices,omitempty"`
+
+	// Update. URL is where to fetch the image; MAC is the HMAC-SHA256 of it,
+	// hex encoded, over the shared secret. A node refuses an image whose MAC
+	// does not match, and refuses one with no MAC at all: an update is the
+	// one message that replaces the code checking every other message.
+	URL string `json:"url,omitempty"`
+	MAC string `json:"mac,omitempty"`
 
 	// Cue
 	Instrument string             `json:"instrument,omitempty"`

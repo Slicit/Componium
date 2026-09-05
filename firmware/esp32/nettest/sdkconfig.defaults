@@ -3,3 +3,16 @@ CONFIG_ETH_USE_OPENETH=y
 CONFIG_ETH_USE_ESP32_EMAC=n
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_ESP_TASK_WDT_INIT=n
+
+# The same flash and the same layout as a real board, because an update needs
+# somewhere to write that is not where it is running from. Testing OTA against a
+# single slot board tests nothing: it fails at the first question.
+#
+# The table is the firmware's own file, one directory up, so the emulated board
+# and the real one cannot drift apart in the one place where drifting means the
+# update lands somewhere different from where it was tested.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../partitions.csv"
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

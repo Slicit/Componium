@@ -11,9 +11,10 @@ idf_component_register(
          "../../main/led.c"
          "../../main/sacn.c"
          "../../main/web.c"
+         "../../main/ota.c"
     INCLUDE_DIRS "." "../../main"
     REQUIRES driver esp_timer json lwip mbedtls esp_netif nvs_flash esp_event
-             esp_eth app_update esp_http_server)
+             esp_eth app_update esp_http_server esp_http_client)
 
 # The shared secret comes from the environment, so that building a real board
 # does not mean editing a tracked file:

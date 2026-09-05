@@ -36,6 +36,7 @@
 #include "freertos/semphr.h"
 #include "config.h"
 #include "guard.h"
+#include "ota.h"
 #include "status.h"
 #include "devices.h"
 
@@ -140,6 +141,10 @@ static SemaphoreHandle_t s_lock;
 /* Kept so that each can be asked how close it came to its limit. */
 static TaskHandle_t s_serve_task;
 static TaskHandle_t s_watchdog_task;
+
+/* Declared here because the update handler needs it and it is defined beside
+ * auth_unwrap, which is the other thing that turns wire bytes into bytes. */
+static bool hex_to_bytes(const char *hex, uint8_t *out, size_t n);
 
 static void lock(void)   { xSemaphoreTake(s_lock, portMAX_DELAY); }
 static void unlock(void) { xSemaphoreGive(s_lock); }
@@ -538,6 +543,47 @@ static void handle_json(int sock, struct sockaddr_in *from, const char *text, in
         if (cJSON_IsNumber(seq)) {
             send_ack(sock, from, seq->valuedouble);
         }
+    } else if (strcmp(type->valuestring, "update") == 0) {
+        const cJSON *seq = cJSON_GetObjectItem(root, "seq");
+        double n = cJSON_IsNumber(seq) ? seq->valuedouble : 0;
+
+        /* Same secret as everything else, and the same reason: this decides
+         * whether somebody may change what this board does, and an update is
+         * the largest possible version of that. It is also the only message
+         * that replaces the code checking every other message, so it gets no
+         * lenient path: no secret, no update, and no MAC, no update. */
+        if (sizeof(CIP_SECRET) <= 1) {
+            send_refusal(sock, from, n, "this node takes no updates without a secret");
+            cJSON_Delete(root);
+            return;
+        }
+        const cJSON *url = cJSON_GetObjectItem(root, "url");
+        const cJSON *mac = cJSON_GetObjectItem(root, "mac");
+        if (!cJSON_IsString(url) || !cJSON_IsString(mac)) {
+            send_refusal(sock, from, n, "an update needs a url and the image's signature");
+            cJSON_Delete(root);
+            return;
+        }
+
+        uint8_t want[32];
+        if (!hex_to_bytes(mac->valuestring, want, sizeof(want))) {
+            send_refusal(sock, from, n, "the signature is not 32 bytes of hex");
+            cJSON_Delete(root);
+            return;
+        }
+
+        const char *why = ota_start(url->valuestring, want);
+        if (why) {
+            send_refusal(sock, from, n, why);
+            cJSON_Delete(root);
+            return;
+        }
+        /* Acknowledged as started, not as finished. The download outlasts any
+         * socket this arrived on: the answer to whether it worked is that the
+         * board either comes back running something new or comes back running
+         * this. */
+        send_ack(sock, from, n);
+        ESP_LOGW(TAG, "updating from %s", url->valuestring);
     } else if (strcmp(type->valuestring, "configure") == 0) {
         const cJSON *seq = cJSON_GetObjectItem(root, "seq");
         double n = cJSON_IsNumber(seq) ? seq->valuedouble : 0;
@@ -666,6 +712,41 @@ static void watchdog_task(void *arg)
  * precisely so that this function can be a hash and a comparison rather than
  * a parser. Re-serialising a document to check a signature on a
  * microcontroller would be slow and easy to get subtly wrong. */
+/* Hex to bytes, for a signature that travels as text.
+ *
+ * Exact length or nothing: a signature that is half read is a signature that
+ * compares against whatever was in the buffer.
+ */
+static bool hex_to_bytes(const char *hex, uint8_t *out, size_t n)
+{
+    if (!hex || strlen(hex) != n * 2) {
+        return false;
+    }
+    for (size_t i = 0; i < n; i++) {
+        int hi = -1, lo = -1;
+        for (int half = 0; half < 2; half++) {
+            char c = hex[i * 2 + half];
+            int v;
+            if (c >= '0' && c <= '9') {
+                v = c - '0';
+            } else if (c >= 'a' && c <= 'f') {
+                v = c - 'a' + 10;
+            } else if (c >= 'A' && c <= 'F') {
+                v = c - 'A' + 10;
+            } else {
+                return false;
+            }
+            if (half == 0) {
+                hi = v;
+            } else {
+                lo = v;
+            }
+        }
+        out[i] = (uint8_t)((hi << 4) | lo);
+    }
+    return true;
+}
+
 static int auth_unwrap(uint8_t *buf, int len)
 {
     if (sizeof(CIP_SECRET) <= 1) {
@@ -817,6 +898,14 @@ static void serve_forever(void)
             continue;
         }
         len = auth_unwrap(buf, len);
+        if (len >= 0) {
+            /* Somebody reached this image and was allowed in, which is the last
+             * thing a new one could have failed at: it booted, it joined a
+             * network, and it was built with the right secret. Nothing else the
+             * board can check about itself says more, so this is where an
+             * update stops being on probation. */
+            ota_this_image_works();
+        }
         if (len < 0) {
             note_refusal("wrong signature, or no signature");
             /* Dropped in silence. Logging every rejected datagram would let

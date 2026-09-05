@@ -62,11 +62,12 @@ cd build
 # on an RMT peripheral QEMU does not emulate, and app_main never returns from
 # it. Starting clean makes a run a run.
 rm -f qemu_flash.bin
-esptool.py --chip=esp32 merge_bin --output=qemu_flash.bin --fill-flash-size=2MB \
-    --flash_mode dio --flash_freq 40m --flash_size 2MB \
+esptool.py --chip=esp32 merge_bin --output=qemu_flash.bin --fill-flash-size=4MB \
+    --flash_mode dio --flash_freq 40m --flash_size 4MB \
     0x1000 bootloader/bootloader.bin \
     0x8000 partition_table/partition-table.bin \
-    0x10000 componium_nettest.bin > /dev/null 2>&1
+    0xf000 ota_data_initial.bin \
+    0x20000 componium_nettest.bin > /dev/null 2>&1
 [ -f qemu_efuse.bin ] || dd if=/dev/zero of=qemu_efuse.bin bs=124 count=1 > /dev/null 2>&1
 
 log=${TMPDIR:-/tmp}/componium-nettest.log

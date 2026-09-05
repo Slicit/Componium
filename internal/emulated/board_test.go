@@ -201,11 +201,14 @@ func mergeFlash(dir string) (string, error) {
 	_ = os.Remove(flash)
 
 	cmd := exec.Command("esptool.py", "--chip=esp32", "merge_bin",
-		"--output="+flash, "--fill-flash-size=2MB",
-		"--flash_mode", "dio", "--flash_freq", "40m", "--flash_size", "2MB",
+		"--output="+flash, "--fill-flash-size=4MB",
+		"--flash_mode", "dio", "--flash_freq", "40m", "--flash_size", "4MB",
 		"0x1000", filepath.Join(dir, "bootloader", "bootloader.bin"),
 		"0x8000", filepath.Join(dir, "partition_table", "partition-table.bin"),
-		"0x10000", filepath.Join(dir, "componium_nettest.bin"))
+		"0xf000", filepath.Join(dir, "ota_data_initial.bin"),
+		// The first app slot. Two slots moved it from 0x10000, because otadata
+		// and phy_init sit between the table and the application now.
+		"0x20000", filepath.Join(dir, "componium_nettest.bin"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("%v: %s", err, out)
 	}
@@ -254,6 +257,27 @@ func (b *emulated) waitFor(what string, within time.Duration) bool {
 			return true
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+	return false
+}
+
+// seen counts how many times the board has said something.
+func (b *emulated) seen(what string) int {
+	return strings.Count(b.logs(), what)
+}
+
+// waitAgain blocks until the board says something it has already said.
+//
+// Which is what waiting for a restart means. Asking whether the log contains
+// a boot line is answered by the boot that already happened, so the wait
+// returns at once and the test reads a board that has not restarted yet.
+func (b *emulated) waitAgain(what string, than int, within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if b.seen(what) > than {
+			return true
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 	return false
 }
