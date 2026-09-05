@@ -178,7 +178,16 @@ static esp_err_t page(httpd_req_t *req)
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     /* A diagnostics page that has to be reloaded by hand is a diagnostics page
      * nobody watches while they drive a fan from the studio. */
-    say(req, "<!doctype html><html><head><meta charset=\"utf-8\">"
+    /* Literal, and it has to stay literal. This is the longest fragment on
+     * the page by a wide margin, and it went through the formatter until
+     * recently, where its 512 byte buffer cut it in half: the <style> tag
+     * never closed and the browser read the whole document as CSS.
+     *
+     * It survived one attempt to fix exactly that, because the move to put()
+     * was done by looking for fragments with no percent sign in them and a
+     * stylesheet has width:100% in it. Escaping that was what marked this as
+     * a format string, and being a format string is what truncated it. */
+    put(req, "<!doctype html><html><head><meta charset=\"utf-8\">"
              "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
              "<meta http-equiv=\"refresh\" content=\"3\">"
              "<title>Componium node</title><style>"
@@ -194,7 +203,7 @@ static esp_err_t page(httpd_req_t *req)
              "padding:1rem;margin:1rem 0;max-width:60rem}"
              "dl{display:grid;grid-template-columns:max-content 1fr;gap:.15rem .9rem;margin:0}"
              "dt{opacity:.6}dd{margin:0}"
-             "table{border-collapse:collapse;width:100%%;font-size:13px}"
+             "table{border-collapse:collapse;width:100%;font-size:13px}"
              "th,td{text-align:left;padding:.35rem .6rem;border-bottom:1px solid #e5e2dd}"
              "th{opacity:.6;font-weight:normal}"
              ".num{text-align:right;font-variant-numeric:tabular-nums}"

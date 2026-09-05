@@ -20,6 +20,7 @@
  * reconnect backoff, and anything that depends on RF. Those need the board.
  */
 
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_eth.h"
@@ -31,7 +32,28 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 
+#include "web.h"
+
 static const char *TAG = "nettest";
+
+/* Where this node is, for anything that asks.
+ *
+ * web.c puts the address on the page and says whether the node is on a network.
+ * On a board those answers come from the radio; here they come from the
+ * emulated Ethernet, and the question is the same one. Supplying them here is
+ * what lets the page itself be tested rather than only described.
+ */
+static char s_address[16];
+
+void wifi_address(char *out, size_t n)
+{
+    strlcpy(out, s_address, n);
+}
+
+bool wifi_connected(void)
+{
+    return s_address[0] != 0;
+}
 
 void componium_node_init(void);
 void componium_node_serve(void);
@@ -44,7 +66,10 @@ static void on_ip(void *arg, esp_event_base_t base, int32_t id, void *data)
     ip_event_got_ip_t *got = (ip_event_got_ip_t *)data;
     /* The line the test harness waits for. Printed rather than returned
      * because the harness is on the other side of a serial port. */
-    ESP_LOGI(TAG, "node up on " IPSTR, IP2STR(&got->ip_info.ip));
+    snprintf(s_address, sizeof(s_address), IPSTR, IP2STR(&got->ip_info.ip));
+    /* The page, once there is an address to serve it on. */
+    web_start();
+    ESP_LOGI(TAG, "node up on %s", s_address);
 }
 
 static void storage(void)
